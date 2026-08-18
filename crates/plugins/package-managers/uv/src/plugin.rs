@@ -1,7 +1,16 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use uptrakit_plugin_infrastructure_core::PluginConfigValidationError;
+use async_trait::async_trait;
+use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
+use uptrakit_plugin_infrastructure_core::{
+    ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
+    HostRequirements, HostRuntime, PluginConfig, PluginConfigValidationError, PluginFamily,
+    PluginRole, Result, declare_plugin, execute_and_capture, plugin_ids,
+};
 use uptrakit_shared_types::PackageIdentifierRules;
+
+use crate::config::UvConfig;
 
 /// PEP 503/508 project-name charset: ASCII alphanumeric plus `.`, `_`, `-`;
 /// must start (and per PEP 508 end, enforced loosely here) alphanumeric.
@@ -67,9 +76,267 @@ pub fn parse_uv_tool_list(output: &str) -> HashMap<String, String> {
     result
 }
 
+/// Plugin for tracking Python CLI tools installed via `uv tool install`.
+///
+/// - **Discovery**: `uv tool list` — one featured software item per tool.
+/// - **Version detection**: `uv tool list` — single call, looked up in the map.
+/// - Release fetching (Plan 2) and update execution (Plan 3) follow.
+///
+/// **Scope:** the agent user's tools only (`uv tool list` sees one user's
+/// tools dir). Tools installed by other users are invisible — consistent with
+/// the unprivileged-agent invariant. The agent user's `PATH` must include
+/// uv's bin dir (typically `~/.local/bin`).
+pub struct UvPlugin {
+    pub(crate) executor: Arc<dyn CommandExecutor>,
+}
+
+impl UvPlugin {
+    /// Create a new uv plugin with the given configuration and host runtime.
+    pub fn new(
+        config: UvConfig,
+        runtime: Arc<dyn HostRuntime>,
+    ) -> std::result::Result<Self, String> {
+        config.validate().map_err(|e| e.to_string())?;
+        Ok(Self {
+            executor: runtime.executor(),
+        })
+    }
+
+    pub(crate) fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
+        uptrakit_plugin_infrastructure_core::require_package_identifier(
+            package_identifier,
+            validate_identifier,
+        )
+    }
+}
+
+// ── Plugin descriptor ─────────────────────────────────────────────────────
+// Plan 2 adds: ReleaseFetcher role + extra_capabilities
+// [PluginCapability::ControllerSideFetchReleases].
+// Plan 3 adds: UpdateExecutor role + ConfigTestKind::UpdateCommandValidation.
+
+declare_plugin!(UvPlugin, UvConfig, "package_manager_uv", {
+    display_name: "uv Tools",
+    family: PluginFamily::Software,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::POSIX,
+    config_test: [ConfigTestKind::VersionDetection],
+    type_settings: true,
+    roles: [Discoverer, VersionDetector],
+});
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::Discoverer for UvPlugin {
+    /// Discover tools installed via `uv tool install` for the agent user.
+    #[tracing::instrument(skip_all)]
+    async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
+        tracing::info!("discovering uv-installed tools");
+
+        let output = execute_and_capture(
+            self.executor.as_ref(),
+            CommandSpec::exec("uv", ["tool".to_string(), "list".to_string()]),
+            "uv tool list",
+        )
+        .await?;
+
+        let installed = parse_uv_tool_list(&output);
+
+        if installed.is_empty()
+            && !output.trim().is_empty()
+            && !output.contains("No tools installed")
+        {
+            // Format-drift guard: non-empty output that parses to zero tools
+            // means the hard-anchored parser no longer matches the
+            // `uv tool list` format (e.g. a future uv release). Without this
+            // signal every uv item would go `missing_since` → deactivated
+            // fleet-wide with nothing distinguishing it from real removal.
+            tracing::warn!(
+                output_len = output.len(),
+                "uv tool list output parsed to zero tools; possible uv output format change"
+            );
+        }
+
+        let tools: Vec<DiscoveredSoftware> = installed
+            .into_iter()
+            .map(|(name, version)| {
+                let targets = vec![DiscoveryTarget {
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_UV.clone(),
+                    plugin_config: serde_json::json!({}),
+                    plugin_config_name: "uv".to_string(),
+                    // Plan 2 adds FetchReleases; Plan 3 adds ExecuteUpdate —
+                    // emit only roles the descriptor currently declares.
+                    roles: vec![PluginRole::DetectVersion],
+                    package_identifier: None,
+                    config_override: None,
+                    execution_site: None,
+                }];
+                DiscoveredSoftware {
+                    package_identifier: name.clone(),
+                    name,
+                    installed_version: version,
+                    targets,
+                    extra: None,
+                    qualifier: None,
+                    plugin_package_identifier: None,
+                    featured: true,
+                    installed_display_version: None,
+                }
+            })
+            .collect();
+
+        tracing::debug!(count = tools.len(), "uv tool discovery complete");
+        Ok(tools)
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn detect_host_compatibility(&self) -> Result<HostCompatibility> {
+        // Non-zero `which` exit has a meaningful non-error interpretation
+        // (uv absent), so call execute_quiet directly — the documented
+        // carve-out from the execute_and_capture mandate.
+        match self
+            .executor
+            .execute_quiet(&CommandSpec::exec("which", ["uv".to_string()]))
+            .await
+        {
+            Ok(out) if out.exit_code == 0 => Ok(HostCompatibility::Compatible),
+            _ => Ok(HostCompatibility::Incompatible(
+                "uv not found in PATH".to_string(),
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_plugin_infrastructure_core::testing::{
+        FixedOutputExecutor, test_runtime_with_executor,
+    };
+    use uptrakit_plugin_infrastructure_core::{
+        Discoverer, HostCompatibility, PluginCapability, PluginError, PluginRole, plugin_ids,
+    };
+
+    use crate::config::UvConfig;
+
+    fn make_plugin(stdout: &str) -> UvPlugin {
+        UvPlugin::new(
+            UvConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::success(stdout)),
+        )
+        .expect("construct plugin")
+    }
+
+    fn make_failing_plugin(exit_code: i32) -> UvPlugin {
+        UvPlugin::new(
+            UvConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::failure(exit_code)),
+        )
+        .expect("construct plugin")
+    }
+
+    // ── descriptor ────────────────────────────────────────────────────────
+
+    #[test]
+    fn uv_plugin_no_sudo() {
+        // All `uv tool` operations are per-user; the descriptor declares no
+        // sudo commands (mirrors cargo's descriptor test).
+        assert!(DESCRIPTOR.sudo.is_none());
+    }
+
+    #[test]
+    fn uv_plugin_capabilities() {
+        for cap in [
+            PluginCapability::DiscoverLocalSoftware,
+            PluginCapability::DetectHostCompatibility,
+            PluginCapability::VersionDetection,
+            PluginCapability::ConfigTest,
+        ] {
+            assert!(DESCRIPTOR.capabilities.contains(&cap), "missing {cap:?}");
+        }
+        // Plan 2 adds ReleaseFetching + ControllerSideFetchReleases (=> 6);
+        // Plan 3 adds UpdateExecution (=> 7).
+        assert_eq!(DESCRIPTOR.capabilities.len(), 4);
+    }
+
+    // ── discover_software ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn discover_software_emits_featured_targets() {
+        let output = "ruff v0.6.8\n- ruff\nblack v24.4.2\n- black\n";
+        let discovered = make_plugin(output).discover_software().await.unwrap();
+        assert_eq!(discovered.len(), 2);
+        for item in &discovered {
+            assert!(item.featured, "uv tools are individual featured items");
+            assert_eq!(item.targets.len(), 1);
+            let target = item.targets.first().expect("one target");
+            assert_eq!(target.plugin_type, plugin_ids::PACKAGE_MANAGER_UV.clone());
+            assert_eq!(target.plugin_config, serde_json::json!({}));
+            assert_eq!(target.plugin_config_name, "uv");
+            // Plan 2 adds FetchReleases; Plan 3 adds ExecuteUpdate.
+            assert_eq!(target.roles, vec![PluginRole::DetectVersion]);
+        }
+        let ruff = discovered
+            .iter()
+            .find(|i| i.package_identifier == "ruff")
+            .unwrap();
+        assert_eq!(ruff.installed_version, "0.6.8");
+    }
+
+    #[tokio::test]
+    async fn discover_software_empty_list_is_ok() {
+        // Exit 0 + `No tools installed` on stderr (merged stream).
+        let discovered = make_plugin("No tools installed\n")
+            .discover_software()
+            .await
+            .unwrap();
+        assert!(discovered.is_empty());
+    }
+
+    /// Non-empty output that is neither `No tools installed` nor parseable
+    /// (future uv format drift) still returns `Ok(empty)` — the format-drift
+    /// `warn!` in `discover_software` is the only signal.
+    #[tokio::test]
+    async fn discover_software_unparseable_output_is_ok_empty() {
+        let discovered = make_plugin("something entirely different\n")
+            .discover_software()
+            .await
+            .unwrap();
+        assert!(discovered.is_empty());
+    }
+
+    /// `uv tool list` failure surfaces `PluginError::PluginInternal`:
+    /// real executors return `Err(CommandError::CommandFailed)` on non-zero
+    /// exit and `execute_and_capture` folds any executor `Err` into
+    /// `PluginInternal`. `FixedOutputExecutor::failure` matches that contract
+    /// on `execute_quiet`. Never assert `PluginError::CommandFailed` here —
+    /// that arm is production-unreachable.
+    #[tokio::test]
+    async fn discover_software_command_failure_is_plugin_internal() {
+        let Err(err) = make_failing_plugin(1).discover_software().await else {
+            panic!("expected discovery to fail");
+        };
+        assert!(matches!(
+            err.current_context(),
+            PluginError::PluginInternal(_)
+        ));
+    }
+
+    // ── detect_host_compatibility ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn detect_host_compatibility_compatible_when_uv_found() {
+        let result = make_plugin("").detect_host_compatibility().await.unwrap();
+        assert_eq!(result, HostCompatibility::Compatible);
+    }
+
+    #[tokio::test]
+    async fn detect_host_compatibility_incompatible_when_uv_missing() {
+        let result = make_failing_plugin(1)
+            .detect_host_compatibility()
+            .await
+            .unwrap();
+        assert!(matches!(result, HostCompatibility::Incompatible(_)));
+    }
 
     #[test]
     fn validate_identifier_valid_names() {

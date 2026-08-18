@@ -120,6 +120,10 @@ pub mod plugin_ids {
         PluginTypeId::from_static("package-manager.routeros");
     pub const PACKAGE_MANAGER_SKILLS: PluginTypeId =
         PluginTypeId::from_static("package-manager.skills");
+    // TODO(uv-plan-3): not yet in the registry's all_descriptors() — the uv
+    // series' final plan activates it (no CI gate asserts ALL ⊆ descriptors,
+    // so this breadcrumb is the only in-code signal until then).
+    pub const PACKAGE_MANAGER_UV: PluginTypeId = PluginTypeId::from_static("package_manager_uv");
     pub const GENERIC_SHELL: PluginTypeId = PluginTypeId::from_static("generic.shell");
     pub const HOOK_SHELL: PluginTypeId = PluginTypeId::from_static("hook.shell");
     pub const HOOK_SYSTEMD: PluginTypeId = PluginTypeId::from_static("hook.systemd");
@@ -164,6 +168,7 @@ pub mod plugin_ids {
         PACKAGE_MANAGER_CARGO,
         PACKAGE_MANAGER_ROUTEROS,
         PACKAGE_MANAGER_SKILLS,
+        PACKAGE_MANAGER_UV,
         GENERIC_SHELL,
         HOOK_SHELL,
         HOOK_SYSTEMD,
@@ -258,7 +263,7 @@ mod tests {
     #[test]
     fn all_constants_count() {
         // Update this if you add a new well-known constant.
-        assert_eq!(plugin_ids::ALL.len(), 26);
+        assert_eq!(plugin_ids::ALL.len(), 27);
     }
 
     #[test]

@@ -6,7 +6,8 @@
 //! receipt; indistinguishable from pip-installed).
 
 pub mod config;
+pub mod detection;
 pub mod plugin;
 
 pub use config::UvConfig;
-pub use plugin::{parse_uv_tool_list, validate_identifier};
+pub use plugin::{DESCRIPTOR, UvPlugin, parse_uv_tool_list, validate_identifier};
