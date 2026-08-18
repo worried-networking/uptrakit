@@ -9,6 +9,7 @@ pub mod config;
 pub mod detection;
 pub mod error;
 pub mod plugin;
+pub mod releases;
 
 pub use config::UvConfig;
 pub use error::{Result, UvError};
