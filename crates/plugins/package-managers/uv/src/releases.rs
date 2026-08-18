@@ -1,8 +1,13 @@
+use async_trait::async_trait;
+use futures_util::StreamExt as _;
 use rootcause::prelude::*;
 use serde::Deserialize;
-use uptrakit_plugin_infrastructure_core::{UpstreamRelease, Version};
+use uptrakit_plugin_infrastructure_core::{
+    BatchFetchItem, BatchFetchResult, PluginError, Result, UpstreamRelease, Version,
+};
 
 use crate::error::UvError;
+use crate::plugin::UvPlugin;
 
 /// PEP 503 name normalization: lowercase; collapse runs of `.`, `_`, `-` to `-`.
 pub fn normalize_pep503(name: &str) -> String {
@@ -144,6 +149,119 @@ pub fn build_releases(
         .filter(|(v, _)| include_prereleases || !v.any_prerelease())
         .map(|(v, s)| UpstreamRelease::new(Version::new(&s), s, v.any_prerelease(), project_url))
         .collect()
+}
+
+/// Fetch upstream releases for one project from the PyPI Simple API.
+///
+/// `GET {index_base}/{normalized_name}/` with
+/// `Accept: application/vnd.pypi.simple.v1+json` (PEP 691). `index_base` must
+/// already be trailing-slash-trimmed (`UvConfig::effective_index_url`);
+/// `package_identifier` must already be validated (`require_package_identifier`)
+/// — it is interpolated into the request path.
+/// HTTP errors — including 404: tools installed from non-index sources
+/// (git/path/URL) are absent from the index and error each cycle, a
+/// documented limitation — and non-JSON or zero-version bodies all `bail!`.
+/// The body read is unbounded in size (bounded in time by the plugin client's
+/// request timeout) — accepted parity with the cargo/npm fetchers.
+pub(crate) async fn fetch_uv_releases(
+    client: &reqwest::Client,
+    index_base: &str,
+    include_prereleases: bool,
+    package_identifier: &str,
+) -> crate::error::Result<Vec<UpstreamRelease>> {
+    let normalized = normalize_pep503(package_identifier);
+    let url = format!("{index_base}/{normalized}/");
+    tracing::debug!(package = %package_identifier, %url, "fetching uv releases from simple index");
+
+    let response = client
+        .get(&url)
+        .header(
+            reqwest::header::ACCEPT,
+            "application/vnd.pypi.simple.v1+json",
+        )
+        .send()
+        .await
+        .map_err(|e| report!(UvError::Request(e.to_string())))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let message = response.text().await.unwrap_or_default();
+        bail!(UvError::ApiError { status, message });
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|e| report!(UvError::Request(e.to_string())))?;
+
+    let raw_versions = extract_versions(&body, &normalized)?;
+    Ok(build_releases(raw_versions, include_prereleases, &url))
+}
+
+#[async_trait]
+impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for UvPlugin {
+    /// Fetch available releases for a single uv tool (controller-side).
+    #[tracing::instrument(skip_all)]
+    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        self.require_package_identifier(package_identifier)?;
+
+        fetch_uv_releases(
+            &self.client,
+            self.config.effective_index_url(),
+            self.config.include_prereleases,
+            package_identifier,
+        )
+        .await
+        .map_err(|e| report!(PluginError::PluginInternal(e.to_string())))
+    }
+
+    /// Fetch releases for multiple tools in parallel, bounded to 10 concurrent
+    /// requests (mirrors cargo's `buffer_unordered(10)`).
+    #[tracing::instrument(skip_all)]
+    async fn batch_fetch(&self, items: &[BatchFetchItem]) -> Result<Vec<BatchFetchResult>> {
+        if items.is_empty() {
+            return Ok(vec![]);
+        }
+
+        tracing::debug!(count = items.len(), "batch fetching uv releases");
+
+        let client = self.client.clone();
+        let index_base = self.config.effective_index_url().to_string();
+        let include_prereleases = self.config.include_prereleases;
+
+        // Per-item identifier validation before any request (mirrors
+        // batch_detect): an unvalidated identifier would be interpolated into
+        // the request path, and custom indexes run under SsrfMode::Permissive.
+        let mut invalid: Vec<BatchFetchResult> = Vec::new();
+        let mut ids: Vec<String> = Vec::with_capacity(items.len());
+        for item in items {
+            match self.require_package_identifier(&item.package_identifier) {
+                Ok(()) => ids.push(item.package_identifier.clone()),
+                Err(e) => invalid.push(BatchFetchResult::error(
+                    item.package_identifier.clone(),
+                    e.to_string(),
+                )),
+            }
+        }
+
+        let mut results = futures_util::stream::iter(ids)
+            .map(|id| {
+                let client = client.clone();
+                let index_base = index_base.clone();
+                async move {
+                    match fetch_uv_releases(&client, &index_base, include_prereleases, &id).await {
+                        Ok(releases) => BatchFetchResult::found(id, releases),
+                        Err(e) => BatchFetchResult::error(id, e.to_string()),
+                    }
+                }
+            })
+            .buffer_unordered(10)
+            .collect::<Vec<_>>()
+            .await;
+        results.extend(invalid);
+
+        Ok(results)
+    }
 }
 
 #[cfg(test)]
@@ -318,5 +436,29 @@ mod tests {
         let releases = build_releases(raw(&["not-a-version", "1.2.3"]), false, "u");
         let tags: Vec<&str> = releases.iter().map(|r| r.tag.as_str()).collect();
         assert_eq!(tags, vec!["1.2.3"]);
+    }
+
+    // ── batch_fetch ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn batch_fetch_rejects_invalid_identifiers_item_level() {
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcher as _;
+        use uptrakit_plugin_infrastructure_core::testing::{
+            FixedOutputExecutor, test_runtime_with_executor,
+        };
+
+        let plugin = crate::plugin::UvPlugin::new(
+            crate::config::UvConfig::default(),
+            test_runtime_with_executor(FixedOutputExecutor::success("")),
+        )
+        .expect("construct plugin");
+
+        let items = vec![
+            BatchFetchItem::new("owner/pkg"),
+            BatchFetchItem::new("pkg name"),
+        ];
+        let results = plugin.batch_fetch(&items).await.expect("batch fetch");
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r.error.is_some()));
     }
 }

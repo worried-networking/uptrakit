@@ -8447,6 +8447,7 @@ name = "uptrakit-plugin-package-manager-uv"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "futures-util",
  "pep440_rs",
  "reqwest",
  "rootcause",

@@ -6,8 +6,9 @@ use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
-    HostRequirements, HostRuntime, PluginConfig, PluginConfigValidationError, PluginError,
-    PluginFamily, PluginRole, Result, declare_plugin, execute_and_capture, plugin_ids,
+    HostRequirements, HostRuntime, PluginCapability, PluginConfig, PluginConfigValidationError,
+    PluginError, PluginFamily, PluginHttpClientConfig, PluginRole, Result, SsrfMode,
+    build_plugin_http_client, declare_plugin, execute_and_capture, plugin_ids,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
 
@@ -124,18 +125,19 @@ fn output_has_no_drift_evidence(output: &str) -> bool {
 ///
 /// - **Discovery**: `uv tool list` — one featured software item per tool.
 /// - **Version detection**: `uv tool list` — single call, looked up in the map.
-/// - Release fetching (Plan 2) and update execution (Plan 3) follow.
+/// - **Release fetching**: PyPI Simple API (`https://pypi.org/simple` by
+///   default, overridable via `index_url`) — controller-side, bounded
+///   parallel HTTP lookups via `buffer_unordered(10)`.
+/// - Update execution (Plan 3) follows.
 ///
 /// **Scope:** the agent user's tools only (`uv tool list` sees one user's
 /// tools dir). Tools installed by other users are invisible — consistent with
 /// the unprivileged-agent invariant. The agent user's `PATH` must include
 /// uv's bin dir (typically `~/.local/bin`).
 pub struct UvPlugin {
-    // `UvConfig` is validated in `new()` and then dropped rather than stored:
-    // every field it carries (`include_prereleases`, `index_url`) is reserved
-    // for the Plan 2 release-fetch role, so retaining it here would be a field
-    // no code reads. Plan 2 adds `config: UvConfig` back when it has a reader.
+    pub(crate) config: UvConfig,
     pub(crate) executor: Arc<dyn CommandExecutor>,
+    pub(crate) client: reqwest::Client,
 }
 
 impl UvPlugin {
@@ -144,9 +146,31 @@ impl UvPlugin {
         config: UvConfig,
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
+        let executor = runtime.executor();
         config.validate().map_err(|e| e.to_string())?;
+
+        // Permissive SSRF resolver for custom (potentially private/LAN)
+        // indexes; strict resolver for the pypi.org default.
+        let ssrf_mode = if config.index_url.is_some() {
+            SsrfMode::Permissive
+        } else {
+            SsrfMode::Strict
+        };
+
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: concat!(
+                "uptrakit-plugin-package-manager-uv/",
+                env!("CARGO_PKG_VERSION")
+            ),
+            ssrf_mode,
+            redirect_policy: reqwest::redirect::Policy::limited(10),
+            ..Default::default()
+        })?;
+
         Ok(Self {
-            executor: runtime.executor(),
+            config,
+            executor,
+            client,
         })
     }
 
@@ -159,8 +183,6 @@ impl UvPlugin {
 }
 
 // ── Plugin descriptor ─────────────────────────────────────────────────────
-// Plan 2 adds: ReleaseFetcher role + extra_capabilities
-// [PluginCapability::ControllerSideFetchReleases].
 // Plan 3 adds: UpdateExecutor role + ConfigTestKind::UpdateCommandValidation.
 
 declare_plugin!(UvPlugin, UvConfig, "package-manager.uv", {
@@ -170,7 +192,8 @@ declare_plugin!(UvPlugin, UvConfig, "package-manager.uv", {
     host_requirements: HostRequirements::POSIX,
     config_test: [ConfigTestKind::VersionDetection],
     type_settings: true,
-    roles: [Discoverer, VersionDetector],
+    roles: [Discoverer, VersionDetector, ReleaseFetcher],
+    extra_capabilities: [PluginCapability::ControllerSideFetchReleases],
 });
 
 #[async_trait]
@@ -227,9 +250,8 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for UvPlugin {
                     plugin_type: plugin_ids::PACKAGE_MANAGER_UV.clone(),
                     plugin_config: serde_json::json!({}),
                     plugin_config_name: "uv".to_string(),
-                    // Plan 2 adds FetchReleases; Plan 3 adds ExecuteUpdate —
-                    // emit only roles the descriptor currently declares.
-                    roles: vec![PluginRole::DetectVersion],
+                    // Plan 3 adds ExecuteUpdate.
+                    roles: vec![PluginRole::DetectVersion, PluginRole::FetchReleases],
                     package_identifier: None,
                     config_override: None,
                     execution_site: None,
@@ -277,7 +299,7 @@ mod tests {
         FixedOutputExecutor, test_runtime_with_executor,
     };
     use uptrakit_plugin_infrastructure_core::{
-        Discoverer, HostCompatibility, PluginCapability, PluginError, PluginRole, plugin_ids,
+        Discoverer, HostCompatibility, PluginError, PluginRole, plugin_ids,
     };
 
     use crate::config::UvConfig;
@@ -326,12 +348,13 @@ mod tests {
             PluginCapability::DetectHostCompatibility,
             PluginCapability::VersionDetection,
             PluginCapability::ConfigTest,
+            PluginCapability::ReleaseFetching,
+            PluginCapability::ControllerSideFetchReleases,
         ] {
             assert!(DESCRIPTOR.capabilities.contains(&cap), "missing {cap:?}");
         }
-        // Plan 2 adds ReleaseFetching + ControllerSideFetchReleases (=> 6);
         // Plan 3 adds UpdateExecution (=> 7).
-        assert_eq!(DESCRIPTOR.capabilities.len(), 4);
+        assert_eq!(DESCRIPTOR.capabilities.len(), 6);
     }
 
     // ── discover_software ─────────────────────────────────────────────────
@@ -348,8 +371,11 @@ mod tests {
             assert_eq!(target.plugin_type, plugin_ids::PACKAGE_MANAGER_UV.clone());
             assert_eq!(target.plugin_config, serde_json::json!({}));
             assert_eq!(target.plugin_config_name, "uv");
-            // Plan 2 adds FetchReleases; Plan 3 adds ExecuteUpdate.
-            assert_eq!(target.roles, vec![PluginRole::DetectVersion]);
+            // Plan 3 adds ExecuteUpdate.
+            assert_eq!(
+                target.roles,
+                vec![PluginRole::DetectVersion, PluginRole::FetchReleases]
+            );
         }
         let ruff = discovered
             .iter()

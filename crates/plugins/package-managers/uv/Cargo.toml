@@ -8,12 +8,13 @@ repository.workspace = true
 version = "0.0.1"
 
 [dependencies]
-uptrakit-plugin-infrastructure-core = { workspace = true }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["http-client"] }
 uptrakit-shared-types = { workspace = true }
 rootcause = { workspace = true }
 thiserror = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 async-trait = { workspace = true }
+futures-util = { workspace = true, features = ["alloc"] }
 pep440_rs = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

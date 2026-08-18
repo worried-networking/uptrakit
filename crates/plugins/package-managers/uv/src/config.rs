@@ -8,31 +8,24 @@ use uptrakit_plugin_infrastructure_core::{
 /// Tracks Python CLI tools installed via `uv tool install` on agent hosts.
 /// No secrets — the `package_identifier` is the PyPI project name.
 ///
-/// `include_prereleases` and `index_url` are **reserved for the
-/// release-fetching role** (Plan 2) and have no effect yet: this plan
-/// (discovery + version detection only) has no HTTP client and never fetches
-/// upstream releases. Both fields validate and round-trip today so the
-/// eventual rollout is additive. When the release-fetching role lands, the
-/// default config (`{}`) will fetch releases from the PyPI Simple API
-/// (`https://pypi.org/simple`); `index_url` will override that for
+/// `include_prereleases` and `index_url` control controller-side release
+/// fetching from the PyPI Simple API. The default config (`{}`) fetches
+/// releases from `https://pypi.org/simple`; `index_url` overrides that for
 /// self-hosted mirrors.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UvConfig {
-    /// Reserved for the release-fetching role (Plan 2); has no effect yet.
-    /// Will include pre-release versions (PEP 440 pre/dev segments, e.g.
-    /// `1.0rc1`, `2.0.0.dev1`) when fetching upstream releases. Defaults to
-    /// `false`.
+    /// Include pre-release versions (PEP 440 pre/dev segments, e.g. `1.0rc1`,
+    /// `2.0.0.dev1`) in available updates. Defaults to `false`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub include_prereleases: bool,
 
-    /// Reserved for the release-fetching role (Plan 2); has no effect yet.
+    /// Custom PyPI Simple index base URL.
     ///
-    /// Custom PyPI Simple index base URL. When that role lands: `None` (the
-    /// default) will use `https://pypi.org/simple`; set this to the
+    /// `None` (the default) uses `https://pypi.org/simple`; set this to the
     /// Simple-API root of a self-hosted mirror (devpi, Artifactory, Nexus,
-    /// GitLab) to override it. `http` will be allowed and private/LAN
-    /// addresses admitted (SSRF protection will be relaxed to permissive for
-    /// custom indexes).
+    /// GitLab) to override it. `http` is allowed and private/LAN addresses
+    /// are admitted — SSRF protection is relaxed to permissive for custom
+    /// indexes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_url: Option<String>,
 }
@@ -74,6 +67,20 @@ impl PluginConfig for UvConfig {
     }
 }
 
+impl UvConfig {
+    /// Effective PyPI Simple index base URL, trailing slashes trimmed.
+    ///
+    /// Operators commonly configure mirrors pip-style with a trailing slash;
+    /// trimming here keeps URL joins (`{base}/{name}/`) free of `//` and makes
+    /// the update-preflight index comparison (Plan 3) canonical.
+    pub(crate) fn effective_index_url(&self) -> &str {
+        self.index_url
+            .as_deref()
+            .unwrap_or("https://pypi.org/simple")
+            .trim_end_matches('/')
+    }
+}
+
 impl TypeSettings for UvConfig {
     fn type_settings_form_schema()
     -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
@@ -84,16 +91,15 @@ impl TypeSettings for UvConfig {
             FormFieldDescriptor::new("include_prereleases", "Include pre-releases")
                 .with_type(FormFieldType::Toggle)
                 .with_help_text(
-                    "Reserved for a future release-fetching capability; has no effect yet. \
-                     Will include PEP 440 pre-release and dev versions (e.g. 1.0rc1, \
+                    "Include PEP 440 pre-release and dev versions (e.g. 1.0rc1, \
                      2.0.0.dev1) in available updates. Defaults to false.",
                 ),
             FormFieldDescriptor::new("index_url", "Custom index URL")
                 .with_type(FormFieldType::Text)
                 .with_help_text(
-                    "Reserved for a future release-fetching capability; has no effect yet. \
-                     Will default to https://pypi.org/simple. Set for self-hosted mirrors \
-                     (devpi, Artifactory, Nexus, GitLab).",
+                    "Defaults to https://pypi.org/simple. Set for self-hosted mirrors \
+                     (devpi, Artifactory, Nexus, GitLab); relaxes SSRF protection to \
+                     permissive for the configured host.",
                 ),
         ]
     }
@@ -180,5 +186,18 @@ mod tests {
     fn serialization_default_elides_both_fields() {
         let json = serde_json::to_value(UvConfig::default()).expect("serialize");
         assert_eq!(json, serde_json::json!({}));
+    }
+
+    #[test]
+    fn effective_index_url_default_and_trim() {
+        assert_eq!(
+            UvConfig::default().effective_index_url(),
+            "https://pypi.org/simple"
+        );
+        let config = UvConfig {
+            include_prereleases: false,
+            index_url: Some("https://mirror.lan/simple/".to_string()),
+        };
+        assert_eq!(config.effective_index_url(), "https://mirror.lan/simple");
     }
 }
