@@ -14,7 +14,7 @@
 //! 1. Start controller container.
 //! 2. Register a test user and obtain an upk_ API token via /api/v1/auth/register.
 //! 3. Enable the MCP OAuth server via PUT /api/v1/global-settings/oauth
-//!    (sets canonical_host → auto-enables mcp_enabled; sets dcr_enabled = true).
+//!    (sets mcp_enabled = true, canonical_host, and dcr_enabled = true).
 //! 4. Force reexec so OAuth boots live; wait for new generation via GET /healthz.
 //! 5. Register an OAuth client via POST /oauth/register (RFC 7591 DCR).
 //! 6. Drive GET /oauth/authorize with PKCE code_challenge.
@@ -87,7 +87,7 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
         .expect("build reqwest client");
 
     // -----------------------------------------------------------------------
-    // Step 3 — Enable the MCP OAuth server via canonical_host auto-enable.
+    // Step 3 — Enable the MCP OAuth server via an explicit mcp_enabled opt-in.
     // -----------------------------------------------------------------------
     api_client
         .update_oauth_settings(&format!("127.0.0.1:{port}"))

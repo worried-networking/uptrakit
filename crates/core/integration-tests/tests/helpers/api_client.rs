@@ -385,8 +385,9 @@ impl ApiClient {
 
     /// PUT /api/v1/global-settings/oauth — enable OAuth for E2E tests.
     ///
-    /// Sets `canonical_host` (triggers auto-enable of `mcp_enabled`) and sets `dcr_enabled = true`
-    /// so Dynamic Client Registration works. First GETs current settings to capture the ETag,
+    /// Sets `mcp_enabled = true` (an explicit opt-in is required — there is no canonical-host
+    /// auto-enable), `canonical_host`, and `dcr_enabled = true` so Dynamic Client Registration
+    /// works. First GETs current settings to capture the ETag,
     /// then PUTs with `If-Match: <etag>`. The `IfMatch` extractor does strict string comparison.
     ///
     /// Requires a valid API token (call `register_and_login_with_token` first).
@@ -426,6 +427,7 @@ impl ApiClient {
             .header("Authorization", format!("Bearer {token}"))
             .header("If-Match", &etag)
             .json(&serde_json::json!({
+                "mcp_enabled": true,
                 "canonical_host": canonical_host,
                 "dcr_enabled": true
             }))
