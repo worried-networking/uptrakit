@@ -85,7 +85,10 @@ impl AgentSshRuntimeSupport {
     async fn reset_data_impl(&self) -> bool {
         if cfg!(feature = "reset-data") {
             tracing::info!("received ResetData: truncating local data stores");
-            use sea_orm::{ConnectionTrait, EntityTrait};
+            use sea_orm::{
+                ConnectionTrait, EntityTrait,
+                sea_query::{Alias, Query},
+            };
             use uptrakit_db_tx::begin_immediate;
             match begin_immediate(&self.db).await {
                 Ok(txn) => {
@@ -95,8 +98,15 @@ impl AgentSshRuntimeSupport {
                     {
                         tracing::error!(error = %error, "failed to truncate pending_proxmox_matches");
                     }
+                    // The proxmox_host_state entity is unnameable from this crate (no
+                    // dependency on the proxmox plugin), so the table is addressed via
+                    // `Alias` rather than `Entity::delete_many`.
                     if let Err(error) = txn
-                        .execute_unprepared("DELETE FROM proxmox_host_state")
+                        .execute(
+                            &Query::delete()
+                                .from_table(Alias::new("proxmox_host_state"))
+                                .to_owned(),
+                        )
                         .await
                     {
                         tracing::error!(error = %error, "failed to truncate proxmox_host_state");
@@ -457,7 +467,7 @@ mod tests {
 
     use crate::{RuntimeSessionState, SshAgentRuntimeSupport};
     use async_trait::async_trait;
-    use sea_orm::{ConnectionTrait, Database, Statement};
+    use sea_orm::{ConnectionTrait, Database, EntityTrait, PaginatorTrait, Statement};
     use uptrakit_wire::{
         ControllerMessage, ReportPluginConfigResponsePayload, ServiceMessage, ServiceTransport,
         TransportClosePolicy, TransportError,
@@ -701,6 +711,116 @@ mod tests {
             new_config_id, None,
             "a mismatched plugin_type ack must never write proxmox host state"
         );
+    }
+
+    #[tokio::test]
+    async fn reset_data_truncates_proxmox_host_state_and_ssh_hosts() {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite should connect");
+        crate::db::migration::run_migrations(&db)
+            .await
+            .expect("migrations should run against the in-memory db");
+
+        let host_id = uuid::Uuid::now_v7();
+        let now = "2026-01-01T00:00:00Z";
+        // Same crate-boundary limitation as
+        // `mismatched_plugin_type_ack_does_not_write_proxmox_state`:
+        // `proxmox_host_state` is unreachable from this crate, so the seed
+        // row is written via raw SQL. execute_raw with a Statement is the
+        // approved exception for raw SQL.
+        db.execute_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            "INSERT INTO proxmox_host_state (host_id, created_at, updated_at) VALUES ($1, $2, $2)",
+            [host_id.to_string().into(), now.into()],
+        ))
+        .await
+        .expect("seed proxmox_host_state row");
+
+        // `ssh_hosts` is nameable from this crate, so seed it via the
+        // ordinary `host_ops::add_host` insert path instead of raw SQL.
+        // Both are no-ops once an earlier test in this process has run them.
+        let _ignored = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x24u8; 32]));
+        let _ignored = uptrakit_crypto::register_column_aad(&[uptrakit_crypto::ColumnAadEntry {
+            table: "ssh_hosts",
+            column: "private_key",
+            aad: "uptrakit:ssh_hosts:private_key",
+        }]);
+        let encrypted_key = uptrakit_crypto::EncryptedString::new(
+            "test-key-content".to_string(),
+            "uptrakit:ssh_hosts:private_key",
+        )
+        .expect("master key initialized above");
+        crate::host_ops::add_host(
+            &db,
+            crate::host_ops::AddHostParams {
+                host_id: uuid::Uuid::now_v7(),
+                name: "reset-data-target".to_string(),
+                hostname: "reset-data-target.example.test".to_string(),
+                port: 22,
+                username: "root".to_string(),
+                encrypted_key,
+                key_type: crate::db::entity::ssh_host::SshKeyType::Ed25519,
+                host_key_fingerprint: None,
+            },
+        )
+        .await
+        .expect("seed ssh_hosts row");
+
+        let support = AgentSshRuntimeSupport::new(
+            db.clone(),
+            tempfile::tempdir().expect("tempdir").path().to_path_buf(),
+            crate::ssh_pool::SshConnectionPool::new(),
+            Arc::new(crate::ServiceSurfaceProxy::new()),
+            Arc::new(Vec::new()),
+            "0.0.0-test".to_string(),
+        );
+
+        let result = support.handle_reset_data().await;
+
+        // `reset_data_impl` (see above) is compiled out behind the
+        // `reset-data` feature, so this assertion only exercises the delete
+        // path under `--all-features`; without the feature the handler is a
+        // no-op and both seeded rows must still be present.
+        if cfg!(feature = "reset-data") {
+            assert!(
+                result,
+                "ResetData should report success when the feature is enabled"
+            );
+
+            let proxmox_row = db
+                .query_one_raw(Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "SELECT host_id FROM proxmox_host_state WHERE host_id = $1",
+                    [host_id.to_string().into()],
+                ))
+                .await
+                .expect("query proxmox_host_state");
+            assert!(
+                proxmox_row.is_none(),
+                "ResetData must truncate proxmox_host_state"
+            );
+
+            let ssh_hosts_count = crate::db::entity::ssh_host::Entity::find()
+                .count(&db)
+                .await
+                .expect("count ssh_hosts");
+            assert_eq!(ssh_hosts_count, 0, "ResetData must truncate ssh_hosts");
+        } else {
+            assert!(
+                !result,
+                "ResetData should report failure when the feature is disabled"
+            );
+
+            let ssh_hosts_count = crate::db::entity::ssh_host::Entity::find()
+                .count(&db)
+                .await
+                .expect("count ssh_hosts");
+            assert_eq!(
+                ssh_hosts_count, 1,
+                "ResetData must not touch ssh_hosts when the feature is disabled"
+            );
+        }
     }
 
     #[tokio::test]
