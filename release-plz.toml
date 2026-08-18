@@ -410,6 +410,12 @@ git_release_enable = false
 publish = false
 
 [[package]]
+name = "uptrakit-plugin-package-manager-uv"
+git_only = true
+git_release_enable = false
+publish = false
+
+[[package]]
 name = "uptrakit-plugin-releases-docker"
 git_only = true
 git_release_enable = false
@@ -520,6 +526,7 @@ changelog_include = [
   "uptrakit-package-manager-routeros",
   "uptrakit-plugin-package-manager-snap",
   "uptrakit-plugin-package-manager-skills",
+  "uptrakit-plugin-package-manager-uv",
   "uptrakit-plugin-releases-docker",
   "uptrakit-plugin-releases-forgejo",
   "uptrakit-plugin-releases-github",
@@ -577,6 +584,7 @@ changelog_include = [
   "uptrakit-package-manager-routeros",
   "uptrakit-plugin-package-manager-snap",
   "uptrakit-plugin-package-manager-skills",
+  "uptrakit-plugin-package-manager-uv",
   "uptrakit-plugin-releases-docker",
   "uptrakit-plugin-releases-forgejo",
   "uptrakit-plugin-releases-github",
