@@ -683,7 +683,7 @@ only exist when the `catalog` feature is active (controller builds).
 | `package-manager.apk`              | `uptrakit-plugin-package-manager-apk`              | Software       |    Yes    |          No           |     Yes     |       No        |
 | `package-manager.snap`             | `uptrakit-plugin-package-manager-snap`             | Software       |    Yes    |          No           |     Yes     |       No        |
 | `package-manager.cargo`            | `uptrakit-plugin-package-manager-cargo`            | Software       |    Yes    |          Yes          |     Yes     |       No        |
-| `package-manager.uv`               | `uptrakit-plugin-package-manager-uv`               | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.uv`               | `uptrakit-plugin-package-manager-uv`               | Software       |    Yes    |          Yes          |     Yes     |       No        |
 | `package-manager.routeros`         | `uptrakit-package-manager-routeros`                | Software       |    Yes    |          No           |     Yes     |       No        |
 | `package-manager.skills`           | `uptrakit-plugin-package-manager-skills`           | Software       |    Yes    |          Yes          |     Yes     |       No        |
 | `generic.shell`                    | `uptrakit-plugin-generic-shell`                    | Software       |    No     |          No           |     No      |       No        |
