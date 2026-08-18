@@ -670,9 +670,9 @@ only exist when the `catalog` feature is active (controller builds).
 | `releases.github`                  | `uptrakit-plugin-releases-github`                  | Software       |    No     |          Yes          |     No      |       No        |
 | `releases.gitlab`                  | `uptrakit-plugin-releases-gitlab`                  | Software       |    No     |          Yes          |     No      |       No        |
 | `releases.forgejo`                 | `uptrakit-plugin-releases-forgejo`                 | Software       |    No     |          Yes          |     No      |       No        |
-| `releases.docker`                  | `uptrakit-plugin-releases-docker`                  | Software       |    Yes    |          Yes          |     No      |       No        |
-| `discovery.proxmox-helper-scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Software       |    Yes    |          No           |     No      |       No        |
-| `discovery.uptrakit-self-update`   | `uptrakit-plugin-discovery-uptrakit-self-update`   | Software       |    Yes    |          No           |     No      |       No        |
+| `releases.docker`                  | `uptrakit-plugin-releases-docker`                  | Software       |    Yes    |          Yes          |     Yes     |       No        |
+| `discovery.proxmox-helper-scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Software       |    Yes    |          No           |     Yes     |       No        |
+| `discovery.uptrakit-self-update`   | `uptrakit-plugin-discovery-uptrakit-self-update`   | Software       |    Yes    |          No           |     Yes     |       No        |
 | `package-manager.apt`              | `uptrakit-plugin-package-manager-apt`              | Software       |    Yes    |          No           |     Yes     |       No        |
 | `package-manager.homebrew`         | `uptrakit-plugin-package-manager-homebrew`         | Software       |    Yes    |          No           |     Yes     |       No        |
 | `package-manager.dnf`              | `uptrakit-plugin-package-manager-dnf`              | Software       |    Yes    |          No           |     Yes     |       No        |
@@ -694,6 +694,15 @@ only exist when the `catalog` feature is active (controller builds).
 | `telegram`                         | `uptrakit-notification-plugin-telegram`            | Notification   |    No     |          No           |     No      |       No        |
 | `email`                            | `uptrakit-notification-plugin-email`               | Notification   |    No     |          No           |     No      |       No        |
 | `enhancement.dashboard-icons`      | `uptrakit-plugin-enhancement-dashboard-icons`      | Enhancement    |    No     |          No           |     No      |       No        |
+
+Column meanings:
+
+- **Discovery** -- the plugin declares the `Discoverer` role (`roles: [Discoverer, ...]` in `declare_plugin!`).
+- **Controller-side fetch** -- the plugin declares `PluginCapability::ControllerSideFetchReleases`.
+- **Host compat** -- the plugin overrides `Discoverer::detect_host_compatibility` instead of inheriting the
+  default `Ok(HostCompatibility::Compatible)`. `releases.docker`'s override is `#[cfg(feature = "daemon")]`-gated.
+- **Lifecycle hooks** -- the plugin's family is `PluginFamily::Hook`.
+- **Family** -- the `PluginFamily` variant declared in `declare_plugin!`.
 
 **Shell plugin** (`uptrakit-plugin-generic-shell`): agent-side plugin with two independently-optional
 shell commands. `version_command` detects the installed version (first non-empty trimmed stdout

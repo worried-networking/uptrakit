@@ -112,7 +112,9 @@ uptrakit/
 │   │   ├── hooks/                      # systemd, shell update-lifecycle hook plugins
 │   │   ├── notifications/              # core, webhook, telegram, email notification plugins
 │   │   ├── enhancements/dashboard-icons/ # uptrakit-plugin-enhancement-dashboard-icons (lib) — icon-URL assignment
-│   │   └── discovery/proxmox-helper-scripts/ # PVE helper-scripts discovery plugin
+│   │   └── discovery/
+│   │       ├── proxmox-helper-scripts/ # uptrakit-plugin-discovery-proxmox-helper-scripts (lib) — PVE helper-scripts discovery plugin
+│   │       └── uptrakit-self-update/   # uptrakit-plugin-discovery-uptrakit-self-update   (lib) — embedded self-update discovery plugin
 │   ├── shared/
 │   │   ├── agent-core/                 # uptrakit-agent-core       (lib) — shared agent logic: version check, update, batch
 │   │   ├── command/                    # uptrakit-command          (lib) — CommandExecutor, sudo-aware execution, StdioTunnel, RemoteExecutor

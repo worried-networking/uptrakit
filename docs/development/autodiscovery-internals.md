@@ -174,9 +174,10 @@ config `{}`, name `"cargo"`, and all three roles.
 
 ### uv
 
-Always emits one `DiscoveryTarget` per discovered tool with `plugin_type: PackageManagerUv`, config `{}`, name `"uv"`, and the `detect_version` role
-(release fetching and update execution roles are added as those plugin roles land). Each uv tool is a **featured** item — an individual software item
-row, not a per-host aggregate.
+Always emits one `DiscoveryTarget` per discovered tool with `plugin_type: PackageManagerUv`,
+config `{}`, name `"uv"`, and the `detect_version` role (release fetching and update execution
+roles are added as those plugin roles land). Each uv tool is a **featured** item — an individual
+software item row, not a per-host aggregate.
 
 ### npm
 
