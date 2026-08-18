@@ -144,6 +144,17 @@ publish = false
 name = "uptrakit-tenant-db"
 release = false
 
+# db-tx previously relied on `publish = false` in its own Cargo.toml for
+# exclusion — release-plz skips cargo-unpublishable crates outright. That
+# manifest value had to become `publish = ["uptrakit-private"]` (91981877e:
+# publish = false crates are dropped from cargo's package-workspace overlay,
+# breaking git_only packaging), which made db-tx visible to release-plz and
+# produced a spurious uptrakit-db-tx-v0.0.1 tag. Exclude it explicitly, the
+# same way its five sibling internal crates already are.
+[[package]]
+name = "uptrakit-db-tx"
+release = false
+
 # ===== Public-API library crates (ship to crates.io) =====
 # Transitive deps of uptrakit-service-sdk and uptrakit-openapi-client
 # (post wire dev-dep cut; see
