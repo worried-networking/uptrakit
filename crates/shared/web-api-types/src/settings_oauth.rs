@@ -53,13 +53,12 @@ pub struct UpdateOAuthSettingsRequest {
 
 impl Validate for UpdateOAuthSettingsRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if let Some(ref host) = self.canonical_host {
+        if let Some(host) = &self.canonical_host {
             let trimmed = host.trim();
-            if !trimmed.is_empty() && (trimmed.contains("://") || trimmed.contains(' ')) {
+            if !trimmed.is_empty() && !crate::oauth::canonical_url::is_bare_host(trimmed) {
                 return Err(ValidationError {
                     field: "canonical_host",
-                    message: "must be a plain hostname or host:port (no scheme, no spaces)"
-                        .to_string(),
+                    message: "must be a bare host, optionally with a port".to_string(),
                 });
             }
         }
@@ -164,5 +163,149 @@ mod tests {
         };
         let err = req.validate().expect_err("should reject spaces");
         assert_eq!(err.field, "canonical_host");
+    }
+
+    // -- Canonical-host shape gate (is_bare_host, via validate) --
+
+    #[test]
+    fn validate_rejects_host_with_path() {
+        // Isolates the `/` clause of is_bare_host.
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("example.com/app".to_string()),
+        };
+        let err = req.validate().expect_err("should reject path segment");
+        assert_eq!(err.field, "canonical_host");
+    }
+
+    #[test]
+    fn validate_rejects_host_with_userinfo() {
+        // Isolates the `@` clause of is_bare_host.
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("user@example.com".to_string()),
+        };
+        let err = req.validate().expect_err("should reject userinfo");
+        assert_eq!(err.field, "canonical_host");
+    }
+
+    #[test]
+    fn validate_rejects_host_with_query() {
+        // Isolates the `?` clause of is_bare_host.
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("example.com?x=1".to_string()),
+        };
+        let err = req.validate().expect_err("should reject query string");
+        assert_eq!(err.field, "canonical_host");
+    }
+
+    #[test]
+    fn validate_rejects_host_with_fragment() {
+        // Isolates the `#` clause of is_bare_host.
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("example.com#f".to_string()),
+        };
+        let err = req.validate().expect_err("should reject fragment");
+        assert_eq!(err.field, "canonical_host");
+    }
+
+    #[test]
+    fn validate_rejects_host_with_embedded_space() {
+        // Isolates the whitespace clause of is_bare_host (distinct from the
+        // legacy `contains(' ')` check this replaces).
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("a b.example.com".to_string()),
+        };
+        let err = req.validate().expect_err("should reject embedded space");
+        assert_eq!(err.field, "canonical_host");
+    }
+
+    #[test]
+    fn validate_rejects_scheme() {
+        // Contains `/` (from `//`), so this also exercises the `/` clause —
+        // kept as its own fixture since it documents the "no scheme" intent.
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("http://example.com".to_string()),
+        };
+        let err = req.validate().expect_err("should reject scheme prefix");
+        assert_eq!(err.field, "canonical_host");
+    }
+
+    #[test]
+    fn validate_rejects_unparseable_host() {
+        // Isolates the `url::Url::parse(...).is_ok_and(...)` clause: no
+        // forbidden char, no whitespace, but an invalid (non-numeric) port
+        // makes the resulting URL fail to parse.
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("example.com:notaport".to_string()),
+        };
+        let err = req.validate().expect_err("should reject unparseable host");
+        assert_eq!(err.field, "canonical_host");
+    }
+
+    #[test]
+    fn validate_accepts_bare_host() {
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("example.com".to_string()),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_bare_host_with_port() {
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("example.com:8443".to_string()),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_bracketed_ipv6_host_with_port() {
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("[::1]:8443".to_string()),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_trailing_colon() {
+        // Pinned deliberately: `url::Url::parse("https://example.com:")`
+        // succeeds and re-parses to the same host everywhere downstream, so
+        // the shape gate tolerates a trailing colon with no port digits.
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("example.com:".to_string()),
+        };
+        assert!(req.validate().is_ok());
     }
 }

@@ -102,6 +102,25 @@ impl CanonicalResourceUrl {
     }
 }
 
+/// Write-time shape gate for the `oauth.canonical_host` setting: a bare host,
+/// optionally with a port — no scheme, userinfo, path, query, fragment, or
+/// whitespace.
+///
+/// Intentionally stricter than [`CanonicalResourceUrl::parse`], which stays
+/// lenient so boot never fails on a legacy stored value; this shape is
+/// enforced at write time only, in `UpdateOAuthSettingsRequest::validate`.
+///
+/// Case and IDN forms deliberately pass through un-normalized
+/// (`Auth.Example.COM`, `exämple.com` are stored as typed) — this gate
+/// checks shape only; any host/origin comparison logic must normalize or
+/// compare case-insensitively on its side.
+#[must_use]
+pub fn is_bare_host(host: &str) -> bool {
+    !host.contains(['/', '@', '?', '#'])
+        && !host.contains(char::is_whitespace)
+        && url::Url::parse(&format!("https://{host}")).is_ok_and(|u| u.host_str().is_some())
+}
+
 /// Maximum number of operator-supplied audience aliases.
 ///
 /// Caps the accepted-audience set so a misconfigured deployment cannot turn
