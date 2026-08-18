@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.5...uptrakit-cli-v0.0.6) - 2026-08-18
+
+### Fixed
+
+- *(web-api)* make plugin-config If-Match satisfiable via ETag layer
+
 ## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.4...uptrakit-cli-v0.0.5) - 2026-08-13
 
 ### Added

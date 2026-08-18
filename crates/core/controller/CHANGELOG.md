@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-v0.0.6...uptrakit-controller-v0.0.7) - 2026-08-18
+
+### Added
+
+- *(controller)* proxy agent bootstrap-host under the agent namespace
+- *(proxmox)* typed credential outcomes surface as bootstrap summary lines
+- *(agent-core)* add sudoers provisioning module with validated activation
+- *(pvehs)* join line continuations before release-call collectors
+- *(pvehs)* add PhsSource table and multi-source parse_phs_scripts
+- *(agent-ssh)* wipe proxmox agent-local state on tenant rebind
+- *(agent-ssh)* correlate ReportPluginConfig acks to their originating host
+- *(agent-ssh)* read-only probe_host connect phase; provisioning runs once in execute
+- *(proxmox)* cluster-scoped credential flow with prove-then-delete legacy migration
+- *(proxmox)* [**breaking**] shared uptrakit@pve user with per-tenant privsep=1 tokens and two-level ACL grants
+- *(proxmox)* agent-local migration bookkeeping columns for the PVE identity migration
+
+### Fixed
+
+- *(controller)* degrade instead of abort when journald is unreachable
+- *(web-api)* make plugin-config If-Match satisfiable via ETag layer
+- *(mqtt)* evict surfaces of yielded services on external connect
+- *(mqtt)* register settings surface globally for untenanted system service
+- *(pvehs)* redact full userinfo and type fetch failures
+- *(pvehs)* redact userinfo credentials before logging unmatched URLs
+- *(agent-ssh)* pve_setup and configure_sudoers skips are real and independent; single merged sudoers write
+- *(release)* unblock release-plz git_only packaging deadlock
+- *(agent-ssh)* keep bearer credentials out of traced remote commands
+- *(proxmox)* make the tenant-rebind wipe atomic and its test unfiltered
+- *(proxmox)* persist reused config ids and close credential-flow test gaps
+- *(proxmox)* surface delete_pve_user diagnostics and tighten PVE setup tests
+- *(proxmox)* derive reported config keys from ProxmoxConfig, killing the verify_ssl drift
+
+### Other
+
+- update Cargo.lock dependencies
+- *(service-ws)* share config delivery between embedded and external sessions
+- *(mqtt)* own the MQTT service definition in mqtt-runtime
+- *(deps)* migrate the MCP server to rmcp 3.1
+- *(deps)* bump sha2 to 0.11 and hmac to 0.13
+- *(service-ws)* assert the eviction no-op emits no SurfacesChanged
+- *(service-ws)* build service settings through a testable pure helper
+- *(service-ws)* drop the MQTT default-tenant special cases
+- *(service-ws)* pin embedded config-delivery wiring, not just the sender
+- *(deps)* bump totp-rs to 6
+- update Cargo.toml dependencies
+- *(pvehs)* assert fetch_text passes through the actual response body
+- *(pvehs)* replace fetch_text Option sentinel with typed FetchOutcome
+- *(pvehs)* cover same-line SOURCES-order dedup and reposition stale banner
+- *(proxmox)* keep the cluster-lock test on real time per the SQLx exception
+- *(proxmox)* assert the legacy-marker and attempt-counter writes before promotion
+- *(proxmox)* restore create_or_reuse_pve_credentials doc comment placement
+- *(proxmox)* delete dead verify_pve_privileges and its doc claims
+
 ## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-v0.0.5...uptrakit-controller-v0.0.6) - 2026-08-13
 
 ### Added
