@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
-use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
+use uptrakit_plugin_infrastructure_core::helpers::{
+    execute_batch_detect_read_command, validation_error_message,
+};
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, PluginError, Result, Version, execute_and_capture,
 };
@@ -41,23 +43,16 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for UvPlugin {
                 .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
-        let output = match execute_and_capture(
+        let output = match execute_batch_detect_read_command(
             self.executor.as_ref(),
             CommandSpec::exec("uv", ["tool".to_string(), "list".to_string()]),
+            items,
             "uv tool list",
         )
         .await
         {
             Ok(output) => output,
-            Err(e) => {
-                let error_str = format!("uv tool list failed: {e}");
-                return Ok(items
-                    .iter()
-                    .map(|item| {
-                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
-                    })
-                    .collect());
-            }
+            Err(results) => return Ok(results),
         };
 
         let installed = parse_uv_tool_list(&output);
@@ -182,6 +177,24 @@ mod tests {
         for result in &results {
             assert!(result.error.is_some(), "expected per-item error");
             assert!(result.installed_version.is_none());
+        }
+    }
+
+    /// Drift output (e.g. a future uv release dropping the `v` prefix)
+    /// parses to zero tools, but `batch_detect` has no drift guard of its
+    /// own (unlike `discover_software`) — every requested item resolves to
+    /// `installed_version: None` with no error, same as "tool not
+    /// installed". This is the documented discovery/detection asymmetry;
+    /// this test pins the existing behavior without changing it.
+    #[tokio::test]
+    async fn batch_detect_drift_output_returns_none_not_error() {
+        let plugin = make_plugin("ruff 0.6.8\nblack 24.4.2\n");
+        let items = vec![item("ruff"), item("black")];
+        let results = plugin.batch_detect(&items).await.unwrap();
+        assert_eq!(results.len(), 2);
+        for result in &results {
+            assert_eq!(result.installed_version, None);
+            assert!(result.error.is_none());
         }
     }
 

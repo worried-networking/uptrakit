@@ -54,17 +54,22 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigV
 ///   cannot start otherwise) and contains no whitespace — any trailing
 ///   content rejects the line.
 ///
-/// Non-matching lines (entrypoint bullets, `No tools installed` on stderr,
-/// uv warnings/notices) are skipped without error; there is no "malformed
-/// payload" bail for this free-text format. The degenerate all-noise case
-/// yields an empty map, indistinguishable from "no tools" by design.
+/// This function never errors: non-matching lines (entrypoint bullets,
+/// `No tools installed` on stderr, uv warnings/notices) are skipped without
+/// error, and the degenerate all-noise case yields an empty map,
+/// indistinguishable at this layer from "no tools installed". Telling
+/// genuine format drift apart from real emptiness is the caller's job —
+/// `discover_software`'s format-drift guard treats output whose non-blank
+/// lines are all uv diagnostic lines (see [`is_uv_diagnostic_line`]) or the
+/// `No tools installed` sentinel as the empty case, and bails on anything
+/// else.
 pub fn parse_uv_tool_list(output: &str) -> HashMap<String, String> {
     let mut result = HashMap::new();
     for line in output.lines() {
         let Some((name, version)) = line.split_once(" v") else {
             continue;
         };
-        if name.is_empty() || validate_identifier(name).is_err() {
+        if validate_identifier(name).is_err() {
             continue;
         }
         if !version.starts_with(|c: char| c.is_ascii_digit())
@@ -75,6 +80,43 @@ pub fn parse_uv_tool_list(output: &str) -> HashMap<String, String> {
         result.insert(name.to_string(), version.to_string());
     }
     result
+}
+
+/// uv diagnostic line prefixes seen on stderr (warnings, errors, notes).
+///
+/// `CommandOutput.output` merges stdout and stderr (see its doc comment on
+/// `CommandOutput`), so any uv diagnostic printed to stderr — e.g.
+/// `warning: Ignoring malformed tool 'ruff': receipt is corrupted` for a
+/// corrupted tool receipt — lands in the same string `discover_software`
+/// parses. A line matching one of these prefixes is stderr noise, not
+/// evidence that the `uv tool list` format itself changed.
+const UV_DIAGNOSTIC_PREFIXES: &[&str] = &["warning:", "error:", "note:"];
+
+/// True when `line`, after stripping leading whitespace, starts with a known
+/// uv diagnostic prefix.
+fn is_uv_diagnostic_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    UV_DIAGNOSTIC_PREFIXES
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+}
+
+/// True when `output` carries no evidence of genuine `uv tool list` format
+/// drift.
+///
+/// The naive test — "parsed to zero tools but the raw output is non-empty"
+/// — is wrong: `output` is stdout *and* stderr concatenated, so a single uv
+/// diagnostic on stderr (malformed tool receipt, deprecation notice, …)
+/// makes it non-empty even when stdout genuinely listed nothing. That must
+/// not be treated as drift. Real drift means at least one non-blank line
+/// looks like it *isn't* stderr noise: `output` is blank, contains the
+/// `No tools installed` sentinel, or every non-blank line is a uv
+/// diagnostic line ([`is_uv_diagnostic_line`]).
+fn output_has_no_drift_evidence(output: &str) -> bool {
+    output.contains("No tools installed")
+        || output
+            .lines()
+            .all(|line| line.trim().is_empty() || is_uv_diagnostic_line(line))
 }
 
 /// Plugin for tracking Python CLI tools installed via `uv tool install`.
@@ -142,17 +184,16 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for UvPlugin {
 
         let installed = parse_uv_tool_list(&output);
 
-        if installed.is_empty()
-            && !output.trim().is_empty()
-            && !output.contains("No tools installed")
-        {
-            // Format-drift guard: non-empty output that parses to zero tools
-            // means the hard-anchored parser no longer matches the
-            // `uv tool list` format (e.g. a future uv release). Degrading to
-            // `Ok(vec![])` here would assert "this host has no uv tools" and
-            // deactivate every previously discovered uv item fleet-wide with
-            // nothing distinguishing it from real removal — fail loud
-            // instead so the parse failure surfaces as `Err`.
+        if installed.is_empty() && !output_has_no_drift_evidence(&output) {
+            // Format-drift guard: output that parses to zero tools *and*
+            // contains at least one non-blank line that isn't stderr noise
+            // (see `output_has_no_drift_evidence`) means the hard-anchored
+            // parser no longer matches the `uv tool list` format (e.g. a
+            // future uv release). Degrading to `Ok(vec![])` here would
+            // assert "this host has no uv tools" and deactivate every
+            // previously discovered uv item fleet-wide with nothing
+            // distinguishing it from real removal — fail loud instead so
+            // the parse failure surfaces as `Err`.
             tracing::warn!(
                 output_len = output.len(),
                 "uv tool list output parsed to zero tools; possible uv output format change"
@@ -251,6 +292,18 @@ mod tests {
         assert!(DESCRIPTOR.sudo.is_none());
     }
 
+    /// `discover_software` emits `DiscoveryTarget.plugin_type` via the
+    /// `plugin_ids::PACKAGE_MANAGER_UV` constant, while `declare_plugin!`
+    /// carries the string literal `"package-manager.uv"` independently. A
+    /// typo in either would compile and pass tests without this guard — the
+    /// registry test that normally catches such drift
+    /// (`descriptors_subset_of_known_ids`) does not cover uv, since registry
+    /// activation is deferred to a later plan.
+    #[test]
+    fn descriptor_type_id_matches_plugin_ids_constant() {
+        assert_eq!(DESCRIPTOR.type_id, plugin_ids::PACKAGE_MANAGER_UV.as_str());
+    }
+
     #[test]
     fn uv_plugin_capabilities() {
         for cap in [
@@ -317,6 +370,41 @@ mod tests {
             err.current_context(),
             PluginError::PluginInternal(_)
         ));
+    }
+
+    /// The realistic drift scenario: a future uv release drops the `v`
+    /// prefix (`ruff 0.6.8` instead of `ruff v0.6.8`). This must still bail
+    /// — it is real format drift, not stderr noise, so the F1 rewrite of the
+    /// drift guard must not swallow it.
+    #[tokio::test]
+    async fn discover_software_realistic_drift_missing_v_prefix_is_err() {
+        let Err(err) = make_plugin("ruff 0.6.8\nblack 24.4.2\n")
+            .discover_software()
+            .await
+        else {
+            panic!("expected discovery to fail on v-prefix-dropped drift");
+        };
+        assert!(matches!(
+            err.current_context(),
+            PluginError::PluginInternal(_)
+        ));
+    }
+
+    /// A uv diagnostic on stderr (merged into `output`) with zero tools
+    /// parsed must NOT trip the drift guard: `output` is stdout+stderr
+    /// concatenated (see `CommandOutput::output`'s doc comment), so a
+    /// corrupted-receipt warning on stderr with nothing on stdout is a
+    /// legitimate "no tools" state, not evidence the list format changed.
+    /// Before the F1 fix this returned `Err` on every discovery cycle for
+    /// any host with such a warning, permanently hiding uv discovery there.
+    #[tokio::test]
+    async fn discover_software_stderr_diagnostic_noise_with_no_tools_is_ok() {
+        let discovered =
+            make_plugin("warning: Ignoring malformed tool 'ruff': receipt is corrupted\n")
+                .discover_software()
+                .await
+                .unwrap();
+        assert!(discovered.is_empty());
     }
 
     /// `uv tool list` failure surfaces `PluginError::PluginInternal`:
@@ -393,20 +481,41 @@ mod tests {
         assert!(map.is_empty());
     }
 
-    /// `CommandOutput.output` merges stdout and stderr; the empty state prints
-    /// `No tools installed` on stderr with exit 0. The sentinel line must not
-    /// become a phantom entry alongside real output.
+    /// A fixture that actually reaches the parser's guards (it contains
+    /// `" v"`, so `split_once` accepts it) but fails the version-digit
+    /// guard: `"Not vinstalled"` splits into name `"Not"` (a valid
+    /// identifier) and version `"installed"` (does not start with a digit).
+    /// Unlike the old `"No tools installed"` fixture this replaces — which
+    /// contains no `" v"` and so is rejected by `split_once` before either
+    /// guard runs, pinning nothing — this catches removal of the
+    /// version-digit check: without it, `map` would gain a phantom
+    /// `"Not" -> "installed"` entry. Sentinel-path coverage (`No tools
+    /// installed` never produces an entry, and the empty-vs-drift split it
+    /// enables) lives at the `discover_software` level, where it is
+    /// load-bearing: see `discover_software_empty_list_is_ok` and
+    /// `discover_software_unparseable_output_is_err`.
     #[test]
-    fn parse_uv_tool_list_no_tools_installed_stderr_merge() {
-        let map = parse_uv_tool_list("No tools installed\nruff v0.6.8\n");
-        assert_eq!(map.len(), 1);
-        assert_eq!(map.get("ruff"), Some(&"0.6.8".to_string()));
+    fn parse_uv_tool_list_rejects_name_with_non_digit_version() {
+        let map = parse_uv_tool_list("Not vinstalled\n");
+        assert!(map.is_empty());
+    }
+
+    /// The realistic drift scenario: a future uv release drops the `v`
+    /// prefix (`ruff 0.6.8`, no `v`). No `" v"` substring exists in the
+    /// line, so `split_once` rejects it and the map is empty — pinning
+    /// `split_once(" v")` specifically: mutating the pattern to
+    /// `split_once(' ')` would instead parse `name = "ruff"`,
+    /// `version = "0.6.8"` and populate the map.
+    #[test]
+    fn parse_uv_tool_list_missing_v_prefix_yields_empty() {
+        assert!(parse_uv_tool_list("ruff 0.6.8\n").is_empty());
     }
 
     /// Merged-stream fixture: a stderr warning line is rejected by the
-    /// identifier guard alone (its trailing `foo` fragment fails the PEP
-    /// 503/508 charset even though the version part `2.0` is otherwise
-    /// clean), isolating that guard from the version-whitespace guard.
+    /// identifier guard alone (the name part `warning: foo` contains a
+    /// colon, which fails the PEP 503/508 charset, even though the version
+    /// part `2.0` is otherwise clean), isolating that guard from the
+    /// version-digit guard.
     #[test]
     fn parse_uv_tool_list_interleaved_warning_line() {
         let output = "warning: foo v2.0\nruff v0.6.8\n- ruff\n";
@@ -417,16 +526,19 @@ mod tests {
 
     /// PEP 440 normalized forms are not semver; the parser must accept them
     /// verbatim as the map value (no semver-shaped validation is performed).
+    /// Includes an epoch segment (`1!2.0`) — passes today, pinned so it
+    /// stays passing.
     #[test]
     fn parse_uv_tool_list_accepts_pep440_version_forms() {
-        let output = "ruff v1.0.0rc1\nblack v2.0.0b3\nmypy v1.0.post1\npoetry v1.0.dev0\nhttpie v1.0+local\n";
+        let output = "ruff v1.0.0rc1\nblack v2.0.0b3\nmypy v1.0.post1\npoetry v1.0.dev0\nhttpie v1.0+local\ntox v1!2.0\n";
         let map = parse_uv_tool_list(output);
         assert_eq!(map.get("ruff"), Some(&"1.0.0rc1".to_string()));
         assert_eq!(map.get("black"), Some(&"2.0.0b3".to_string()));
         assert_eq!(map.get("mypy"), Some(&"1.0.post1".to_string()));
         assert_eq!(map.get("poetry"), Some(&"1.0.dev0".to_string()));
         assert_eq!(map.get("httpie"), Some(&"1.0+local".to_string()));
-        assert_eq!(map.len(), 5);
+        assert_eq!(map.get("tox"), Some(&"1!2.0".to_string()));
+        assert_eq!(map.len(), 6);
     }
 
     /// `str::lines` strips a trailing `\r` from CRLF-terminated input, so
@@ -457,9 +569,10 @@ mod tests {
         assert!(parse_uv_tool_list("ruff v\n").is_empty());
     }
 
-    #[test]
-    fn parse_uv_tool_list_empty_input() {
-        assert!(parse_uv_tool_list("").is_empty());
-        assert!(parse_uv_tool_list("   \n\t\n").is_empty());
-    }
+    // Note: no dedicated "empty input" parser test. `parse_uv_tool_list("")`
+    // and whitespace-only input trivially yield an empty map regardless of
+    // guard implementation (no line ever reaches `split_once`), so such a
+    // test pins nothing per this round's mutation criterion — see
+    // `discover_software_empty_list_is_ok` for the load-bearing empty-input
+    // coverage (through the sentinel, at the layer where it matters).
 }
