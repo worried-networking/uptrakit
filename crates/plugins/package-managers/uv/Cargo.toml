@@ -26,6 +26,7 @@ url = { workspace = true }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }
 uptrakit-command = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
+httpmock = { workspace = true }
 
 [lints]
 workspace = true

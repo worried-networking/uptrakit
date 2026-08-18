@@ -10,7 +10,7 @@ use crate::error::UvError;
 use crate::plugin::UvPlugin;
 
 /// PEP 503 name normalization: lowercase; collapse runs of `.`, `_`, `-` to `-`.
-pub fn normalize_pep503(name: &str) -> String {
+pub(crate) fn normalize_pep503(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut prev_sep = false;
     for c in name.chars() {
@@ -40,7 +40,7 @@ pub fn normalize_pep503(name: &str) -> String {
 /// Known ceiling: a separator RUN spanning the name/version boundary
 /// (`name--1.0.tar.gz`) yields no digit-leading segment and is skipped —
 /// such filenames are pathological and per-item tolerance covers them.
-pub fn version_from_filename(filename: &str, normalized_name: &str) -> Option<String> {
+pub(crate) fn version_from_filename(filename: &str, normalized_name: &str) -> Option<String> {
     let stem = filename
         .strip_suffix(".tar.gz")
         .or_else(|| filename.strip_suffix(".tar.bz2"))
@@ -84,7 +84,10 @@ pub fn version_from_filename(filename: &str, normalized_name: &str) -> Option<St
 /// GitLab commonly lack it). Wheels and sdists carry the same version string,
 /// so dedup makes the wheel-vs-sdist preference moot for the version set.
 /// Returns the set sorted+deduped (ordering happens in [`build_releases`]).
-pub fn extract_versions(body: &str, normalized_name: &str) -> crate::error::Result<Vec<String>> {
+pub(crate) fn extract_versions(
+    body: &str,
+    normalized_name: &str,
+) -> crate::error::Result<Vec<String>> {
     #[derive(Deserialize)]
     struct SimpleProject {
         #[serde(default)]
@@ -134,7 +137,7 @@ pub fn extract_versions(body: &str, normalized_name: &str) -> crate::error::Resu
 /// (`Version::any_prerelease()` — pre-release OR dev segment) are filtered
 /// unless `include_prereleases`; an all-prerelease result is a valid empty
 /// list, not an error.
-pub fn build_releases(
+pub(crate) fn build_releases(
     raw_versions: Vec<String>,
     include_prereleases: bool,
     project_url: &str,
@@ -468,6 +471,87 @@ mod tests {
                 .as_deref()
                 .is_some_and(|e| e.contains("invalid character"))),
             "expected identifier-validation errors, got {results:?}"
+        );
+    }
+
+    // ── fetch_uv_releases: HTTP status handling ──────────────────────────
+
+    /// Build a plugin whose Simple index points at the mock server. A `Some`
+    /// `index_url` also selects `SsrfMode::Permissive`, which is what lets the
+    /// request reach 127.0.0.1 — the same fork operators get for LAN mirrors.
+    fn plugin_for_index(base_url: &str) -> std::result::Result<crate::plugin::UvPlugin, String> {
+        use uptrakit_plugin_infrastructure_core::testing::{
+            FixedOutputExecutor, test_runtime_with_executor,
+        };
+
+        crate::plugin::UvPlugin::new(
+            crate::config::UvConfig {
+                include_prereleases: false,
+                index_url: Some(base_url.to_string()),
+            },
+            test_runtime_with_executor(FixedOutputExecutor::success("")),
+        )
+    }
+
+    /// Success path over the wire: PEP 691 Accept header is actually sent (the
+    /// mock only matches when it is), the normalized name lands in the path,
+    /// and the body is parsed and ordered newest-first.
+    #[tokio::test]
+    async fn fetch_releases_negotiates_json_and_parses_body() {
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcher as _;
+
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/zope-interface/")
+                    .header("accept", "application/vnd.pypi.simple.v1+json");
+                then.status(200)
+                    .body(r#"{"versions": ["1.9", "1.10", "1.10rc1"]}"#);
+            })
+            .await;
+
+        let plugin = plugin_for_index(&server.base_url()).expect("construct plugin");
+        let releases = plugin
+            .fetch_releases("zope.interface")
+            .await
+            .expect("fetch releases");
+
+        mock.assert_calls_async(1).await;
+        assert_eq!(
+            releases.iter().map(|r| r.tag.as_str()).collect::<Vec<_>>(),
+            ["1.10", "1.9"],
+            "prerelease filtered, PEP 440 order descending"
+        );
+    }
+
+    /// Non-success status is a typed error, never a silent empty list. uv
+    /// deliberately diverges from cargo/npm's 404-as-empty here (spec
+    /// "Release fetching": HTTP errors `bail!`), so pin it — tools installed
+    /// from git/path sources are absent from the index and must surface.
+    #[tokio::test]
+    async fn fetch_releases_bails_on_non_success_status() {
+        use uptrakit_plugin_infrastructure_core::ReleaseFetcher as _;
+
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/absent-tool/");
+                then.status(404).body("Not Found");
+            })
+            .await;
+
+        let plugin = plugin_for_index(&server.base_url()).expect("construct plugin");
+        let error = plugin
+            .fetch_releases("absent-tool")
+            .await
+            .expect_err("404 must not degrade to an empty release list");
+
+        mock.assert_calls_async(1).await;
+        let rendered = format!("{error:?}");
+        assert!(
+            rendered.contains("404"),
+            "expected the upstream status in the error, got {rendered}"
         );
     }
 }
