@@ -9,4 +9,4 @@ pub mod config;
 pub mod plugin;
 
 pub use config::UvConfig;
-pub use plugin::validate_identifier;
+pub use plugin::{parse_uv_tool_list, validate_identifier};
