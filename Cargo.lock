@@ -8425,6 +8425,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-plugin-package-manager-uv"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uptrakit-plugin-infrastructure-core",
+ "uptrakit-shared-types",
+ "url",
+]
+
+[[package]]
 name = "uptrakit-plugin-releases-docker"
 version = "0.0.3"
 dependencies = [
