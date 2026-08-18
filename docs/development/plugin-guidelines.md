@@ -1714,14 +1714,21 @@ in a container and emit `DiscoveryTarget` values that tell the controller which 
 
 **Capabilities:** `DiscoverLocalSoftware` only (auto-derived from `DiscoveryPlugin` role).
 
-**Discovery targets emitted:**
+**Discovery targets emitted:** each app source pairs a release/detect target with a shared PHS Shell target
+(`plugin_ids::GENERIC_SHELL`). Constants `PHS_DETECT_VERSION_CMD` and `PHS_INSTALL_CMD` are defined in
+`crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`.
 
-- GitHub-managed apps: `DiscoveryTarget { plugin_type: PluginTypeId::from_static("releases.github"), ... }` with owner, repo,
-  `detect_installed_version_command`, and `install_command` pre-configured. Constants `PHS_DETECT_VERSION_CMD` and `PHS_INSTALL_CMD` are defined in
-  `crates/plugins/discovery/proxmox-helper-scripts/src/discovery.rs`.
-- APT-managed apps: `DiscoveryTarget { plugin_type: PluginTypeId::from_static("package-manager.apt"), config: {}, name: "APT (auto)" }`.
+- GitHub-managed apps: `releases.github`, `FetchReleases` only; the config carries only `tag_strip_prefix`, `include_prereleases`, and
+  `asset_patterns` -- `owner/repo` is **not** in the config, it travels as the `package_identifier` override.
+- Codeberg-managed apps: `releases.forgejo` with `api_base_url: "https://codeberg.org"`, `FetchReleases` only, `owner/repo` again via
+  `package_identifier`.
+- npm-managed apps: `package-manager.npm`, `DetectVersion` + `FetchReleases`.
+- APT-managed apps: `package-manager.apt`, `DetectVersion` + `FetchReleases`, config `{}`, name `"APT (auto)"`.
+- Every kind above also gets a PHS Shell target (`generic.shell`) for `DetectVersion`/`ExecuteUpdate` via the PHS `/usr/bin/update` script and
+  version helper.
 
-Cross-reference: [PHS end-user guide](../end-user/autodiscovery.md#proxmox-helper-scripts-discovery),
+Full per-target config keys, role sets, and PTY rationale: [autodiscovery internals](autodiscovery-internals.md#phs-proxmox-helper-scripts).
+Cross-reference: [PHS end-user guide](../end-user/autodiscovery.md#proxmox-helper-scripts-discovery).
 
 ## Shared Update Helpers
 
