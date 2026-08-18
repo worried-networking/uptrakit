@@ -60,7 +60,7 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigV
 /// indistinguishable at this layer from "no tools installed". Telling
 /// genuine format drift apart from real emptiness is the caller's job —
 /// `discover_software`'s format-drift guard treats output whose non-blank
-/// lines are all uv diagnostic lines (see [`is_uv_diagnostic_line`]) or the
+/// lines are all uv diagnostic lines (see `is_uv_diagnostic_line`) or the
 /// `No tools installed` sentinel as the empty case, and bails on anything
 /// else.
 pub fn parse_uv_tool_list(output: &str) -> HashMap<String, String> {
@@ -194,6 +194,17 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for UvPlugin {
             // previously discovered uv item fleet-wide with nothing
             // distinguishing it from real removal — fail loud instead so
             // the parse failure surfaces as `Err`.
+            //
+            // Traded-off case: a host where *every* installed uv tool has a
+            // malformed/missing receipt prints only diagnostic lines and
+            // exits 0 — the tools are genuinely installed but none get
+            // listed. The merged stdout+stderr stream gives this guard no
+            // way to tell that apart from "listed nothing because there is
+            // nothing", so it reports zero tools and those items deactivate
+            // after the two-miss hysteresis (ADR-0027) rather than erroring
+            // every cycle. That is the accepted trade: a permanent hard
+            // failure on an otherwise-healthy host would be worse than a
+            // deactivation that a subsequent successful discovery reverses.
             tracing::warn!(
                 output_len = output.len(),
                 "uv tool list output parsed to zero tools; possible uv output format change"
@@ -405,6 +416,27 @@ mod tests {
                 .await
                 .unwrap();
         assert!(discovered.is_empty());
+    }
+
+    /// The mixed case that isolates `.all` from `.any` in
+    /// `output_has_no_drift_evidence`: one uv diagnostic line plus one
+    /// non-diagnostic, unparseable line (drift, reproduced against real uv
+    /// 0.12.5 as a malformed-receipt warning alongside a v-prefix-dropped
+    /// listing line). `.all(diagnostic-or-blank)` is false here (the second
+    /// line is neither), so the guard correctly sees drift evidence and
+    /// bails — this is the single input that distinguishes the current
+    /// design from a broken `.any` variant, which would see the diagnostic
+    /// line alone and wrongly call it noise-only.
+    #[tokio::test]
+    async fn discover_software_mixed_diagnostic_and_drift_lines_is_err() {
+        let output = "warning: Ignoring malformed tool `ruff`\nblack 24.4.2\n";
+        let Err(err) = make_plugin(output).discover_software().await else {
+            panic!("expected discovery to fail on mixed diagnostic+drift output");
+        };
+        assert!(matches!(
+            err.current_context(),
+            PluginError::PluginInternal(_)
+        ));
     }
 
     /// `uv tool list` failure surfaces `PluginError::PluginInternal`:
