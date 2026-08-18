@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.5...uptrakit-mqtt-v0.0.6) - 2026-08-18
+
+### Fixed
+
+- *(mqtt)* evict surfaces of yielded services on external connect
+- *(mqtt)* register settings surface globally for untenanted system service
+
+### Other
+
+- *(mqtt)* own the MQTT service definition in mqtt-runtime
+- *(mqtt)* cover per-tenant isolation of surface list and get
+
 ## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.4...uptrakit-mqtt-v0.0.5) - 2026-08-13
 
 ### Added

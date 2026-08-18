@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-v0.0.5...uptrakit-agent-v0.0.6) - 2026-08-18
+
+### Added
+
+- *(agent)* expose bootstrap-host subcommand on the agent binary
+- *(agent-runtime)* add bootstrap-host maintenance subcommand
+- *(agent-core)* add sudoers provisioning module with validated activation
+
+### Other
+
+- *(agent-core)* tidy the moved sudoers module and CT provisioning
+
 ## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-v0.0.4...uptrakit-agent-v0.0.5) - 2026-08-13
 
 ### Added

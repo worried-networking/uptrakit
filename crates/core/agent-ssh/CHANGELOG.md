@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.6...uptrakit-agent-ssh-v0.0.7) - 2026-08-18
+
+### Added
+
+- *(agent-ssh)* wipe proxmox agent-local state on tenant rebind
+- *(proxmox)* cluster-scoped credential flow with prove-then-delete legacy migration
+- *(agent-ssh)* correlate ReportPluginConfig acks to their originating host
+- *(proxmox)* typed credential outcomes surface as bootstrap summary lines
+- *(agent-ssh)* read-only probe_host connect phase; provisioning runs once in execute
+- *(agent-core)* add sudoers provisioning module with validated activation
+
+### Fixed
+
+- *(agent-ssh)* keep bearer credentials out of traced remote commands
+- *(proxmox)* make the tenant-rebind wipe atomic and its test unfiltered
+- *(agent-ssh)* document the pending-ack test SQL exception and drop stranded entries
+- *(agent-ssh)* pve_setup and configure_sudoers skips are real and independent; single merged sudoers write
+
+### Other
+
+- update Cargo.lock dependencies
+- *(agent-ssh)* consume sudoers provisioning from agent-core
+- *(agent-ssh)* return Result from the test_db helper
+- *(agent-ssh)* make the skip_pve credential-suppression assertion red-able
+- *(agent-core)* tidy the moved sudoers module and CT provisioning
+
 ## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.5...uptrakit-agent-ssh-v0.0.6) - 2026-08-13
 
 ### Added

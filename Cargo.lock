@@ -7252,7 +7252,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "uptrakit-agent"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "async-trait",
  "clap",
@@ -7274,7 +7274,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-agent-core"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "backon",
@@ -7300,7 +7300,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-agent-runtime"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -7324,7 +7324,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-agent-ssh"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "clap",
  "rootcause",
@@ -7348,7 +7348,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-agent-ssh-runtime"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -7433,7 +7433,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-cli"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "base64 0.23.1",
  "clap",
@@ -7513,7 +7513,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-controller"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "uptrakit-build-info",
  "uptrakit-controller-runtime",
@@ -7521,7 +7521,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-controller-core"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "axum",
@@ -7555,7 +7555,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-controller-runtime"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "arc-swap",
  "async-nats",
@@ -7627,7 +7627,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-controller-standalone"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "uptrakit-build-info",
  "uptrakit-controller-runtime",
@@ -7676,7 +7676,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-frontend"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "rust-embed",
 ]
@@ -7787,7 +7787,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-mcp"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "axum",
  "jsonwebtoken",
@@ -7818,7 +7818,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-mqtt"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "clap",
  "tokio",
@@ -7831,7 +7831,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-mqtt-runtime"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "async-trait",
  "backon",
@@ -7880,7 +7880,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-notification-delivery"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -7911,7 +7911,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-notification-plugin-email"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "mail-builder",
@@ -7933,7 +7933,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-notification-plugin-telegram"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "reqwest",
@@ -7955,7 +7955,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-notification-plugin-webhook"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "hmac 0.13.0",
@@ -7976,7 +7976,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-openapi-client"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "async-trait",
  "cargo_metadata",
@@ -8004,7 +8004,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-package-manager-routeros"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -8022,7 +8022,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-discovery-proxmox-helper-scripts"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "reqwest",
@@ -8039,7 +8039,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-discovery-uptrakit-self-update"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8055,7 +8055,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-enhancement-dashboard-icons"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -8073,7 +8073,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-generic-shell"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8090,7 +8090,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-hook-shell"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8105,7 +8105,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-hook-systemd"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8119,7 +8119,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-infrastructure-core"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -8149,7 +8149,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-infrastructure-proxmox"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -8181,7 +8181,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-infrastructure-registry"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -8232,7 +8232,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-apk"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8249,7 +8249,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-apt"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8266,7 +8266,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-cargo"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -8287,7 +8287,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-dnf"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8304,7 +8304,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-homebrew"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8320,7 +8320,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-mas"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8336,7 +8336,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-npm"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "backon",
@@ -8356,7 +8356,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-pacman"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8373,7 +8373,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-pkg"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8390,7 +8390,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-skills"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8409,7 +8409,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-package-manager-snap"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "rootcause",
@@ -8427,7 +8427,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-releases-docker"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -8455,7 +8455,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-releases-forgejo"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -8476,7 +8476,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-releases-github"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -8498,7 +8498,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-plugin-releases-gitlab"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -8519,7 +8519,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-scheduler"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "async-trait",
  "clap",
@@ -8545,7 +8545,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-scheduler-runtime"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "async-trait",
  "const-oid 0.9.6",
@@ -8607,7 +8607,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-service-sdk"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -8712,7 +8712,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-surface-proxy"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "metrics",
@@ -8776,7 +8776,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-web-api"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "arc-swap",
  "async-nats",
@@ -8859,7 +8859,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-web-api-auth"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "argon2 0.5.3",
  "async-trait",
@@ -8892,7 +8892,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-web-api-queries"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -8924,7 +8924,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-web-api-types"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "jsonwebtoken",
  "rootcause",
@@ -8967,7 +8967,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-zeroconf"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "mdns-sd",
  "rootcause",

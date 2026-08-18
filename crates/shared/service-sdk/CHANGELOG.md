@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.3...uptrakit-service-sdk-v0.0.4) - 2026-08-18
+
+### Other
+
+- *(tracing-init)* replace service-sdk's copied TracingBuilder with a real dependency
+- update Cargo.toml dependencies
+
 ## [0.0.3](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.2...uptrakit-service-sdk-v0.0.3) - 2026-08-13
 
 ### Added
