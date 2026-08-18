@@ -117,7 +117,6 @@ mod tests {
     #[test]
     fn validate_rejects_bad_index_urls() {
         for u in [
-            "",
             "not a url",
             "ftp://mirror/simple",
             "https://user:pw@mirror/simple",
@@ -128,6 +127,27 @@ mod tests {
                 index_url: Some(u.to_string()),
             };
             config.validate().unwrap_err();
+        }
+    }
+
+    #[test]
+    fn validate_rejects_empty_index_url() {
+        let config = UvConfig {
+            include_prereleases: false,
+            index_url: Some(String::new()),
+        };
+        let Err(err) = config.validate() else {
+            panic!("expected empty index_url to be rejected");
+        };
+        match err {
+            PluginConfigValidationError::InvalidField { field, message } => {
+                assert_eq!(field, "index_url");
+                assert!(
+                    message.contains("must not be empty when set"),
+                    "expected the dedicated empty-string message, got: {message}"
+                );
+            }
+            other => panic!("expected InvalidField, got {other:?}"),
         }
     }
 
