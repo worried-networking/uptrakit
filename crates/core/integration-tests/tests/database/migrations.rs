@@ -249,22 +249,29 @@ async fn test_encrypt_config_columns_down(harness: &TestHarness) {
         "m20260812_000003_encrypt_instance_plugin_setting_config",
     ];
     let all_migrations = Migrator::migrations();
-    let tail: Vec<&str> = all_migrations
+    let total = all_migrations.len();
+    let idx1 = all_migrations
         .iter()
-        .rev()
+        .position(|m| m.name() == MIGRATION_NAMES[0])
+        .expect("plugin_configs encryption migration must be registered");
+    let block: Vec<&str> = all_migrations
+        .iter()
+        .skip(idx1)
         .take(MIGRATION_NAMES.len())
         .map(|m| m.name())
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
         .collect();
     assert_eq!(
-        tail, MIGRATION_NAMES,
-        "the three ENC: migrations must be the tip-most three entries in Migrator::migrations(), \
-         in this exact order — this test drives them with step-counted Migrator::down/up calls \
-         (Some(3), then three Some(1) calls), and a migration appended after them would silently \
-         retarget every one of those calls to the wrong migration without any test noticing"
+        block, MIGRATION_NAMES,
+        "the three ENC: migrations must be consecutive and in this exact order in \
+         Migrator::migrations() — this test drives them with step-counted Migrator::down/up \
+         calls computed relative to idx1 (not the absolute tip), so migrations appended after \
+         them (e.g. m20260811_000001_materialize_mcp_enabled, which lands last in the vec \
+         despite its earlier filename date) are tolerated as long as this block stays intact"
     );
+    // Number of migrations registered after the three-migration ENC block (0 originally;
+    // trailing migrations, appended per the "new migrations always go last" rule, add to this).
+    let after_block =
+        u32::try_from(total - (idx1 + MIGRATION_NAMES.len())).expect("after_block fits u32");
 
     // Every timestamp column below is `timestamptz` on Postgres, which rejects a bare string
     // literal (unlike SQLite, which accepts it via type affinity) — always pass a typed
@@ -391,14 +398,24 @@ async fn test_encrypt_config_columns_down(harness: &TestHarness) {
     .await;
     seed_instance_plugin_setting(&harness.db, "subpass3.plain", r#"{"foo":"bar"}"#, now).await;
 
-    Migrator::down(&harness.db, Some(3))
-        .await
-        .expect("three-step down over plaintext rows must succeed on both backends");
+    // Revert the ENC block plus any migrations registered after it (e.g. a later,
+    // unrelated data-migration appended to the tip), landing right before idx1.
+    Migrator::down(
+        &harness.db,
+        Some(u32::try_from(MIGRATION_NAMES.len()).expect("fits u32") + after_block),
+    )
+    .await
+    .expect("down over plaintext rows must succeed on both backends");
 
-    // Re-apply so the tip is back at m20260812_000003 for phase 2.
-    Migrator::up(&harness.db, None)
-        .await
-        .expect("re-apply the three encryption migrations");
+    // Re-apply exactly the three ENC migrations so the tip is back at
+    // m20260812_000003 for phase 2 — not `up(&db, None)`, which would also
+    // re-apply any migrations registered after the block.
+    Migrator::up(
+        &harness.db,
+        Some(u32::try_from(MIGRATION_NAMES.len()).expect("fits u32")),
+    )
+    .await
+    .expect("re-apply the three encryption migrations");
 
     // Phase 2: seed an ENC:-prefixed row per table, using key values distinct
     // from phase 1's (still-present) rows, and confirm each migration's

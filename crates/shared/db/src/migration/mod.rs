@@ -89,6 +89,7 @@ mod m20260728_000001_access_grants_and_role_scope;
 mod m20260728_000002_seed_access_grants;
 mod m20260803_000001_seed_mcp_use_grants;
 mod m20260807_000001_drop_permissions_tables;
+mod m20260811_000001_materialize_mcp_enabled;
 mod m20260812_000001_encrypt_plugin_configs_config;
 mod m20260812_000002_encrypt_plugin_type_settings_config;
 mod m20260812_000003_encrypt_instance_plugin_setting_config;
@@ -187,6 +188,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260812_000001_encrypt_plugin_configs_config::Migration),
             Box::new(m20260812_000002_encrypt_plugin_type_settings_config::Migration),
             Box::new(m20260812_000003_encrypt_instance_plugin_setting_config::Migration),
+            Box::new(m20260811_000001_materialize_mcp_enabled::Migration),
         ]
     }
 }
