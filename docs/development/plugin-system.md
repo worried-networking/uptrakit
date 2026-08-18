@@ -672,6 +672,7 @@ only exist when the `catalog` feature is active (controller builds).
 | `releases.forgejo`                 | `uptrakit-plugin-releases-forgejo`                 | Software       |    No     |          Yes          |     No      |       No        |
 | `releases.docker`                  | `uptrakit-plugin-releases-docker`                  | Software       |    Yes    |          Yes          |     No      |       No        |
 | `discovery.proxmox-helper-scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Software       |    Yes    |          No           |     No      |       No        |
+| `discovery.uptrakit-self-update`   | `uptrakit-plugin-discovery-uptrakit-self-update`   | Software       |    Yes    |          No           |     No      |       No        |
 | `package-manager.apt`              | `uptrakit-plugin-package-manager-apt`              | Software       |    Yes    |          No           |     Yes     |       No        |
 | `package-manager.homebrew`         | `uptrakit-plugin-package-manager-homebrew`         | Software       |    Yes    |          No           |     Yes     |       No        |
 | `package-manager.dnf`              | `uptrakit-plugin-package-manager-dnf`              | Software       |    Yes    |          No           |     Yes     |       No        |
@@ -681,7 +682,10 @@ only exist when the `catalog` feature is active (controller builds).
 | `package-manager.pkg`              | `uptrakit-plugin-package-manager-pkg`              | Software       |    Yes    |          No           |     Yes     |       No        |
 | `package-manager.apk`              | `uptrakit-plugin-package-manager-apk`              | Software       |    Yes    |          No           |     Yes     |       No        |
 | `package-manager.snap`             | `uptrakit-plugin-package-manager-snap`             | Software       |    Yes    |          No           |     Yes     |       No        |
-| `package-manager.cargo`            | `uptrakit-plugin-package-manager-cargo`            | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.cargo`            | `uptrakit-plugin-package-manager-cargo`            | Software       |    Yes    |          Yes          |     Yes     |       No        |
+| `package-manager.uv`               | `uptrakit-plugin-package-manager-uv`               | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.routeros`         | `uptrakit-package-manager-routeros`                | Software       |    Yes    |          No           |     Yes     |       No        |
+| `package-manager.skills`           | `uptrakit-plugin-package-manager-skills`           | Software       |    Yes    |          Yes          |     Yes     |       No        |
 | `generic.shell`                    | `uptrakit-plugin-generic-shell`                    | Software       |    No     |          No           |     No      |       No        |
 | `hook.systemd`                     | `uptrakit-plugin-hook-systemd`                     | Hook           |    No     |          No           |     No      |       Yes       |
 | `hook.shell`                       | `uptrakit-plugin-hook-shell`                       | Hook           |    No     |          No           |     No      |       Yes       |

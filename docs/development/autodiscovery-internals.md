@@ -172,6 +172,12 @@ whether discovery reports all installed packages or only manually-installed ones
 Always emits one `DiscoveryTarget` per discovered crate with `plugin_type: PackageManagerCargo`,
 config `{}`, name `"cargo"`, and all three roles.
 
+### uv
+
+Always emits one `DiscoveryTarget` per discovered tool with `plugin_type: PackageManagerUv`, config `{}`, name `"uv"`, and the `detect_version` role
+(release fetching and update execution roles are added as those plugin roles land). Each uv tool is a **featured** item — an individual software item
+row, not a per-host aggregate.
+
 ### npm
 
 Always emits one `DiscoveryTarget` per discovered package with `plugin_type: PackageManagerNpm`,
@@ -329,8 +335,8 @@ via `GET /api/v1/plugin-types`:
 - `ServiceMigrations` — the plugin contributes service-side database migrations.
 - `ControllerMigrations` — the plugin contributes controller-side database migrations.
 - `ConfigTest` — the plugin supports dry-run configuration testing via `POST
-/api/v1/plugin-configs/test`. Declared by all 17 plugins (10 package managers, 4 release
-  plugins, 2 hook plugins, generic shell). Controller-side plugins
+/api/v1/plugin-configs/test`. Declared by all 19 plugins (11 package managers, 3 release
+  plugins, 2 hook plugins, 2 discovery plugins, generic shell). Controller-side plugins
   (`ControllerSideFetchReleases`) test connectivity without a host; agent-side plugins require a
   `host_id` and run tests on the target host. The proxy pattern (`ConfigTestProxy` in
   `crates/ui/web-api/src/config_test_proxy.rs`) mirrors `ServiceSurfaceProxy`. Wire messages:

@@ -1182,11 +1182,11 @@ Every discovery plugin must set the `featured` field on each `DiscoveredSoftware
 item in the UI:
 
 - **`featured: true`** -- the item appears individually in the main Software list with role-based plugin assignments (`host_software_item_plugins`).
-  Use this for items the user explicitly wants to track (Docker images, GitHub releases, PHS-discovered apps).
+  Use this for items the user explicitly wants to track (Docker images, GitHub releases, PHS-discovered apps, Cargo crates, uv tools).
 
 - **`featured: false`** -- the item appears as part of aggregated per-host package summaries. The `plugin_config_id` and `package_identifier` are
   stored directly on the `host_software_items` junction row. Use this for package managers that discover large numbers of system packages (APT,
-  Homebrew, npm, Cargo, Snap).
+  Homebrew, npm, Snap).
 
 All discovered items are created immediately with `enabled: true` -- there is no pending state or approval workflow.
 

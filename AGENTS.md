@@ -108,7 +108,7 @@ uptrakit/
 │   │   │   └── proxmox/                # uptrakit-plugin-infrastructure-proxmox  (lib) — Proxmox VE infrastructure plugin
 │   │   ├── releases/                   # docker, github, gitlab, forgejo release-source plugins
 │   │   ├── generic/shell/              # uptrakit-plugin-generic-shell           (lib) — version/update via shell commands
-│   │   ├── package-managers/           # homebrew, apt, npm, mas, pacman, pkg, apk, dnf, snap, cargo
+│   │   ├── package-managers/           # homebrew, apt, npm, mas, pacman, pkg, apk, dnf, snap, cargo, routeros, skills, uv
 │   │   ├── hooks/                      # systemd, shell update-lifecycle hook plugins
 │   │   ├── notifications/              # core, webhook, telegram, email notification plugins
 │   │   ├── enhancements/dashboard-icons/ # uptrakit-plugin-enhancement-dashboard-icons (lib) — icon-URL assignment
