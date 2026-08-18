@@ -40,7 +40,7 @@ async fn load_oauth_settings_from_db(state: &AppState) -> OAuthSettingsFromDb {
         .await
         .unwrap_or(None)
         .and_then(|v| v.as_bool());
-    let mcp = resolve_mcp_enabled(mcp_raw, canonical_host.as_deref());
+    let mcp = resolve_mcp_enabled(mcp_raw);
 
     let dcr = load_global_setting_raw(state.db(), "oauth.dcr_enabled")
         .await

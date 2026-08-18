@@ -269,16 +269,8 @@ pub async fn boot_oauth_state(db: &DatabaseConnection) -> Result<super::OAuthSta
             .and_then(|v| v.as_str().map(ToOwned::to_owned));
 
     // ── Step 2: Resolve → fast-path disabled ──
-    if !super::resolve_mcp_enabled(mcp_raw, canonical_host_str.as_deref()) {
+    if !super::resolve_mcp_enabled(mcp_raw) {
         return Ok(super::OAuthState::disabled());
-    }
-
-    if mcp_raw.is_none() {
-        tracing::warn!(
-            canonical_host = canonical_host_str.as_deref().unwrap_or(""),
-            "OAuth auto-enabling: oauth.mcp_enabled row absent but canonical_host is \
-             configured; to disable, write oauth.mcp_enabled = false"
-        );
     }
 
     // ── Step 3: Read-only settings (outside tx) ──
