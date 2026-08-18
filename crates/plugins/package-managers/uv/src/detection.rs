@@ -14,7 +14,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for UvPlugin {
     ///
     /// uv has no per-package query; the full `uv tool list` output is parsed
     /// and the matching row selected. An absent row is `Ok(None)`.
-    #[tracing::instrument(skip_all, fields(package_identifier))]
+    #[tracing::instrument(skip_all, fields(package_identifier = %package_identifier))]
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
 
@@ -139,7 +139,7 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_invalid_identifier_fails() {
         let plugin = make_plugin("");
-        let Err(err) = plugin.detect_installed_version("../etc/passwd").await else {
+        let Err(err) = plugin.detect_installed_version("owner/pkg").await else {
             panic!("expected validation to fail");
         };
         assert!(matches!(
@@ -190,5 +190,21 @@ mod tests {
         let plugin = make_plugin("");
         let results = plugin.batch_detect(&[]).await.unwrap();
         assert!(results.is_empty());
+    }
+
+    /// The per-item identifier validation loop in `batch_detect` must reject
+    /// an invalid identifier before ever issuing `uv tool list` — an invalid
+    /// item anywhere in the batch fails the whole call.
+    #[tokio::test]
+    async fn batch_detect_invalid_identifier_fails() {
+        let plugin = make_plugin("");
+        let items = vec![item("owner/pkg")];
+        let Err(err) = plugin.batch_detect(&items).await else {
+            panic!("expected validation to fail");
+        };
+        assert!(matches!(
+            err.current_context(),
+            PluginError::Configuration(_)
+        ));
     }
 }

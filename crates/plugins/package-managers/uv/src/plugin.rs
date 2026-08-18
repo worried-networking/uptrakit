@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
-    HostRequirements, HostRuntime, PluginConfig, PluginConfigValidationError, PluginFamily,
-    PluginRole, Result, declare_plugin, execute_and_capture, plugin_ids,
+    HostRequirements, HostRuntime, PluginConfig, PluginConfigValidationError, PluginError,
+    PluginFamily, PluginRole, Result, declare_plugin, execute_and_capture, plugin_ids,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
 
@@ -115,7 +116,7 @@ impl UvPlugin {
 // [PluginCapability::ControllerSideFetchReleases].
 // Plan 3 adds: UpdateExecutor role + ConfigTestKind::UpdateCommandValidation.
 
-declare_plugin!(UvPlugin, UvConfig, "package_manager_uv", {
+declare_plugin!(UvPlugin, UvConfig, "package-manager.uv", {
     display_name: "uv Tools",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -147,13 +148,20 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for UvPlugin {
         {
             // Format-drift guard: non-empty output that parses to zero tools
             // means the hard-anchored parser no longer matches the
-            // `uv tool list` format (e.g. a future uv release). Without this
-            // signal every uv item would go `missing_since` → deactivated
-            // fleet-wide with nothing distinguishing it from real removal.
+            // `uv tool list` format (e.g. a future uv release). Degrading to
+            // `Ok(vec![])` here would assert "this host has no uv tools" and
+            // deactivate every previously discovered uv item fleet-wide with
+            // nothing distinguishing it from real removal — fail loud
+            // instead so the parse failure surfaces as `Err`.
             tracing::warn!(
                 output_len = output.len(),
                 "uv tool list output parsed to zero tools; possible uv output format change"
             );
+            bail!(PluginError::PluginInternal(format!(
+                "uv tool list output ({} bytes) did not match the expected format \
+                 (possible uv output format change)",
+                output.len()
+            )));
         }
 
         let tools: Vec<DiscoveredSoftware> = installed
@@ -293,15 +301,22 @@ mod tests {
     }
 
     /// Non-empty output that is neither `No tools installed` nor parseable
-    /// (future uv format drift) still returns `Ok(empty)` — the format-drift
-    /// `warn!` in `discover_software` is the only signal.
+    /// (future uv format drift) must fail loud: degrading to `Ok(vec![])`
+    /// would assert "no uv tools on this host" and deactivate every
+    /// previously discovered uv item fleet-wide, indistinguishable from real
+    /// removal.
     #[tokio::test]
-    async fn discover_software_unparseable_output_is_ok_empty() {
-        let discovered = make_plugin("something entirely different\n")
+    async fn discover_software_unparseable_output_is_err() {
+        let Err(err) = make_plugin("something entirely different\n")
             .discover_software()
             .await
-            .unwrap();
-        assert!(discovered.is_empty());
+        else {
+            panic!("expected discovery to fail on unparseable output");
+        };
+        assert!(matches!(
+            err.current_context(),
+            PluginError::PluginInternal(_)
+        ));
     }
 
     /// `uv tool list` failure surfaces `PluginError::PluginInternal`:

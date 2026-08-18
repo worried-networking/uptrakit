@@ -92,7 +92,7 @@ modeled on cargo's file layout (`config.rs`, `plugin.rs` + discovery, `detection
 (see Config section). Descriptor mirrors cargo's `declare_plugin!` (`cargo/src/plugin.rs`) verbatim in shape:
 
 ```rust
-declare_plugin!(UvPlugin, UvConfig, "package_manager_uv", {
+declare_plugin!(UvPlugin, UvConfig, "package-manager.uv", {
     display_name: "uv Tools",
     family: PluginFamily::Software,
     config_model: ConfigModel::PluginConfig,
@@ -159,7 +159,7 @@ cannot start otherwise) and contain no whitespace; any trailing content rejects 
 
 Each parsed tool emits one `DiscoveredSoftware` with `featured: true`, `package_identifier` = tool name (uv
 prints PEP 503-normalized names), `installed_version` = version string, and one `DiscoveryTarget` carrying
-`plugin_type: package_manager_uv`, empty config `{}` (package-manager types use type settings; no
+`plugin_type: package-manager.uv`, empty config `{}` (package-manager types use type settings; no
 `plugin_config` row is created — `discovery_items.rs:203-216`), and all three roles
 (`detect_version`, `fetch_releases`, `execute_update`). Document the exact emission shape in
 `docs/development/autodiscovery-internals.md` §"Plugin-driven discovery targets" (new `### uv` entry).
@@ -436,8 +436,8 @@ extra feature flags to thread). `cargo deny check` required for the new dependen
 1. `docs/development/autodiscovery-internals.md` — new `### uv` emission entry in §"Plugin-driven discovery
    targets"; adjust the capability-count prose in §"Plugin capabilities" **by re-counting from source at edit
    time** (hand-written counts there are pre-existing drift hazards).
-2. `docs/end-user/plugin-configs.md` — new `package_manager_uv` row in the plugin table + a
-   `### package_manager_uv configuration fields` subsection (fields, discovery behaviour, tools-only scope,
+2. `docs/end-user/plugin-configs.md` — new `package-manager.uv` row in the plugin table + a
+   `### package-manager.uv configuration fields` subsection (fields, discovery behaviour, tools-only scope,
    agent-user visibility, `PATH`/`~/.local/bin` operator note, "No sudo required", and the
    update-preservation contract with its loud-failure cases: recorded `[tool.options]` beyond the
    matched-mirror default-index carve-out (`no-binary`, mismatched index, …), non-index sources, missing
@@ -450,7 +450,7 @@ extra feature flags to thread). `cargo deny check` required for the new dependen
    `cargo/src/plugin.rs:221`) so the table matches reality.
 4. Root `AGENTS.md` — codebase-layout tree line for `package-managers/`: append `uv` (the list is already
    missing `routeros`/`skills`; fix those in the same edit).
-5. `docs/development/plugin-system.md` — "First-Party Plugin Crates" table: new `package_manager_uv` row
+5. `docs/development/plugin-system.md` — "First-Party Plugin Crates" table: new `package-manager.uv` row
    (`uptrakit-plugin-package-manager-uv`, Family Software, Discovery Yes, Controller-side fetch Yes, Host
    compat Yes, Lifecycle hooks No), and fix the stale `package_manager_cargo` "Controller-side fetch" cell
    in the same edit (table says No; cargo declares `PluginCapability::ControllerSideFetchReleases`,
@@ -507,12 +507,12 @@ No `CONTEXT.md` change: no new domain vocabulary ("uv tool" is plugin-internal).
 
 ## Verification (mechanical)
 
-- `grep -rn "package_manager_uv" crates/shared/types/src/plugin_type_id.rs crates/plugins/infrastructure/registry/src/registry.rs`
+- `grep -rn "package-manager.uv" crates/shared/types/src/plugin_type_id.rs crates/plugins/infrastructure/registry/src/registry.rs`
   → const, `ALL`, descriptor, `PACKAGE_MANAGER_IDS` hits all present.
 - `grep -c "featured: true" crates/plugins/package-managers/uv/src/*.rs` → non-zero.
 - `grep -n "uv" docs/end-user/plugin-configs.md docs/development/autodiscovery-internals.md docs/development/plugin-guidelines.md`
   → table row, emission entry, featured-routing row present.
-- `grep -n "package_manager_uv" docs/development/plugin-system.md` → First-Party Plugin Crates row present.
+- `grep -n "package-manager.uv" docs/development/plugin-system.md` → First-Party Plugin Crates row present.
 - `grep -c "uptrakit-plugin-package-manager-uv" release-plz.toml` → `3` (`[[package]]` entry + two
   `changelog_include` rows).
 - Full canonical gate list from `docs/development/quality-gates.md`, plus `cargo deny check` and

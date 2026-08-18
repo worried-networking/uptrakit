@@ -123,7 +123,7 @@ pub mod plugin_ids {
     // TODO(uv-plan-3): not yet in the registry's all_descriptors() — the uv
     // series' final plan activates it (no CI gate asserts ALL ⊆ descriptors,
     // so this breadcrumb is the only in-code signal until then).
-    pub const PACKAGE_MANAGER_UV: PluginTypeId = PluginTypeId::from_static("package_manager_uv");
+    pub const PACKAGE_MANAGER_UV: PluginTypeId = PluginTypeId::from_static("package-manager.uv");
     pub const GENERIC_SHELL: PluginTypeId = PluginTypeId::from_static("generic.shell");
     pub const HOOK_SHELL: PluginTypeId = PluginTypeId::from_static("hook.shell");
     pub const HOOK_SYSTEMD: PluginTypeId = PluginTypeId::from_static("hook.systemd");
