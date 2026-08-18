@@ -84,7 +84,7 @@ code -- nearly every case is already covered by one of these helpers.
 
 ## Package-identifier validation
 
-Plugins with charset constraints on `package_identifier` (apt, apk, cargo, dnf, pacman, pkg, snap) declare a
+Plugins with charset constraints on `package_identifier` (apt, apk, cargo, dnf, pacman, pkg, snap, uv) declare a
 local `const IDENTIFIER_RULES: PackageIdentifierRules` (struct in `crates/shared/types/src/package_identifier.rs`)
 and expose a crate-level `pub fn validate_identifier(value: &str) -> Result<(), String>` that calls
 `IDENTIFIER_RULES.validate(value)`, plus any plugin-specific extra checks. The `PluginConfig::validate_identifier`

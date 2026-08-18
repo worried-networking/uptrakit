@@ -1,14 +1,11 @@
 use async_trait::async_trait;
-use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
-use uptrakit_plugin_infrastructure_core::helpers::{
-    execute_batch_detect_read_command, validation_error_message,
-};
+use uptrakit_plugin_infrastructure_core::helpers::execute_batch_detect_read_command;
 use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, BatchDetectResult, PluginError, Result, Version, execute_and_capture,
+    BatchDetectItem, BatchDetectResult, Result, Version, execute_and_capture,
 };
 
-use crate::plugin::{UvPlugin, parse_uv_tool_list, validate_identifier};
+use crate::plugin::{UvPlugin, parse_uv_tool_list};
 
 #[async_trait]
 impl uptrakit_plugin_infrastructure_core::VersionDetector for UvPlugin {
@@ -39,8 +36,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for UvPlugin {
         }
 
         for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
+            self.require_package_identifier(&item.package_identifier)?;
         }
 
         let output = match execute_batch_detect_read_command(
@@ -71,15 +67,56 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for UvPlugin {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use uptrakit_plugin_infrastructure_core::command::{
+        CommandExecutor, CommandOutput, CommandSpec,
+    };
+    use uptrakit_plugin_infrastructure_core::mpsc;
     use uptrakit_plugin_infrastructure_core::testing::{
         FixedOutputExecutor, test_runtime_with_executor,
     };
     use uptrakit_plugin_infrastructure_core::{
-        BatchDetectItem, PluginError, Version, VersionDetector,
+        BatchDetectItem, PluginError, UpdateOutputLine, Version, VersionDetector,
     };
 
     use crate::config::UvConfig;
     use crate::plugin::UvPlugin;
+
+    /// Executor that records how many commands it was asked to run, so a test
+    /// can assert a code path never reached the executor at all.
+    #[derive(Default)]
+    struct CountingExecutor {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl CommandExecutor for CountingExecutor {
+        async fn execute(
+            &self,
+            _spec: &CommandSpec,
+            _output_tx: &mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(CommandOutput {
+                output: String::new(),
+                exit_code: 0,
+            })
+        }
+
+        async fn execute_quiet(
+            &self,
+            _spec: &CommandSpec,
+        ) -> uptrakit_command::Result<CommandOutput> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(CommandOutput {
+                output: String::new(),
+                exit_code: 0,
+            })
+        }
+    }
 
     fn make_plugin(stdout: &str) -> UvPlugin {
         UvPlugin::new(
@@ -198,11 +235,35 @@ mod tests {
         }
     }
 
+    /// The `items.is_empty()` early return in `batch_detect` must short-circuit
+    /// *before* the executor is touched.
+    ///
+    /// Asserting only on the returned `Vec` cannot catch that guard's deletion:
+    /// with zero items every downstream path yields an empty `Vec` too — the
+    /// validation loop runs zero iterations, both branches of
+    /// `execute_batch_detect_read_command` map over zero items, and so does the
+    /// final `map`. Whether a process was spawned is the only observable
+    /// difference, so the invocation count is what this test asserts.
     #[tokio::test]
-    async fn batch_detect_empty_returns_empty() {
-        let plugin = make_plugin("");
-        let results = plugin.batch_detect(&[]).await.unwrap();
+    async fn batch_detect_empty_never_invokes_executor() {
+        let executor = Arc::new(CountingExecutor::default());
+        let plugin = UvPlugin::new(
+            UvConfig::default(),
+            test_runtime_with_executor(executor.clone() as Arc<dyn CommandExecutor>),
+        )
+        .expect("construct plugin");
+
+        let results = plugin
+            .batch_detect(&[])
+            .await
+            .expect("empty batch succeeds");
+
         assert!(results.is_empty());
+        assert_eq!(
+            executor.calls.load(Ordering::SeqCst),
+            0,
+            "empty batch must not spawn `uv tool list`"
+        );
     }
 
     /// The per-item identifier validation loop in `batch_detect` must reject

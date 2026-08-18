@@ -12,6 +12,7 @@ use uptrakit_plugin_infrastructure_core::{
 use uptrakit_shared_types::PackageIdentifierRules;
 
 use crate::config::UvConfig;
+use crate::error::UvError;
 
 /// PEP 503/508 project-name charset: ASCII alphanumeric plus `.`, `_`, `-`;
 /// must start (and per PEP 508 end, enforced loosely here) alphanumeric.
@@ -130,6 +131,10 @@ fn output_has_no_drift_evidence(output: &str) -> bool {
 /// the unprivileged-agent invariant. The agent user's `PATH` must include
 /// uv's bin dir (typically `~/.local/bin`).
 pub struct UvPlugin {
+    // `UvConfig` is validated in `new()` and then dropped rather than stored:
+    // every field it carries (`include_prereleases`, `index_url`) is reserved
+    // for the Plan 2 release-fetch role, so retaining it here would be a field
+    // no code reads. Plan 2 adds `config: UvConfig` back when it has a reader.
     pub(crate) executor: Arc<dyn CommandExecutor>,
 }
 
@@ -209,11 +214,10 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for UvPlugin {
                 output_len = output.len(),
                 "uv tool list output parsed to zero tools; possible uv output format change"
             );
-            bail!(PluginError::PluginInternal(format!(
-                "uv tool list output ({} bytes) did not match the expected format \
-                 (possible uv output format change)",
-                output.len()
-            )));
+            // Typed at the crate boundary, converted to the infra-core
+            // `PluginError` the `Discoverer` trait returns.
+            return Err(report!(UvError::OutputFormatDrift(output.len())))
+                .context_to::<PluginError>();
         }
 
         let tools: Vec<DiscoveredSoftware> = installed

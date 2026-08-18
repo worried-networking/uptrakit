@@ -7,7 +7,9 @@
 
 pub mod config;
 pub mod detection;
+pub mod error;
 pub mod plugin;
 
 pub use config::UvConfig;
+pub use error::{Result, UvError};
 pub use plugin::{DESCRIPTOR, UvPlugin, parse_uv_tool_list, validate_identifier};
