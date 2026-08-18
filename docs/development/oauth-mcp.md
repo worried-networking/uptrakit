@@ -143,16 +143,20 @@ the typed `AuditActionType` constant.
 startup — after `seed_oauth_defaults` and before `validate_configuration` — in
 `crates/core/controller-runtime/src/lib.rs`.
 
-`resolve_mcp_enabled(explicit: Option<bool>, canonical_host: Option<&str>) -> bool` determines
-whether the OAuth surface is active. The truth table is:
+`resolve_mcp_enabled(explicit: Option<bool>) -> bool` determines whether the OAuth surface is active
+(`explicit.unwrap_or(false)`). `oauth.canonical_host` plays no part in this decision — enabling the
+OAuth surface always requires an explicit `oauth.mcp_enabled` row. The truth table is:
 
-| `explicit` | `canonical_host` | Result  | Reason                                 |
-| ---------- | ---------------- | ------- | -------------------------------------- |
-| absent     | absent           | `false` | Nothing configured                     |
-| absent     | set              | `true`  | Auto-enable                            |
-| `false`    | set              | `false` | Operator override wins                 |
-| `true`     | absent           | `true`  | Explicit; `CanonicalHostMissing` fires |
-| `true`     | set              | `true`  | Normal enabled path                    |
+| `explicit` | Result  | Reason                                                                                  |
+| ---------- | ------- | --------------------------------------------------------------------------------------- |
+| absent     | `false` | Explicit opt-in required                                                                |
+| `false`    | `false` | Operator disabled                                                                       |
+| `true`     | `true`  | Enabled; boot then fails with `CanonicalHostMissing` if `oauth.canonical_host` is unset |
+
+A one-shot data migration, `m20260811_000001_materialize_mcp_enabled`
+(`crates/shared/db/src/migration/`), wrote an explicit `true` row for deployments that were
+previously auto-enabled under the old rule (missing `mcp_enabled` row plus a set `canonical_host`),
+so no deployment silently changed behavior on upgrade.
 
 Boot runs a single `BEGIN IMMEDIATE` transaction that reads or generates `oauth.jwt_signing_secret`
 (32 random bytes, hex-encoded) and then calls `validate_and_register` in the same transaction. Using

@@ -16,9 +16,8 @@ Complete these steps in order before exposing the MCP OAuth surface to users.
    hostname (optionally with port) that clients use to reach the controller — no scheme, no path, no
    trailing slash. Examples: `controller.example.com`, `controller.example.com:9443`. This value is
    used to derive the AS issuer (`https://<canonical_host>`) and the MCP resource URL
-   (`https://<canonical_host>/mcp`). If this setting is unset when `oauth.mcp_enabled = true`, the
-   controller refuses to start. On a fresh installation, setting `oauth.canonical_host` is sufficient
-   to auto-enable OAuth — no separate `oauth.mcp_enabled = true` step is required.
+   (`https://<canonical_host>/mcp`). Setting `oauth.canonical_host` alone does not enable OAuth — see
+   step 4. If this setting is unset when `oauth.mcp_enabled = true`, the controller refuses to start.
 
 2. **Set `oauth.accepted_audience_hosts`** if the controller is behind a reverse proxy or split DNS,
    or if clients reach it under a different hostname than the primary. The RS validates that the token
@@ -40,11 +39,10 @@ Complete these steps in order before exposing the MCP OAuth surface to users.
    invalidates all issued tokens — all MCP clients must re-authenticate after each restart. For
    production deployments, always set a stable secret.
 
-4. **(Optional for new installs) Flip `oauth.mcp_enabled = true`.** On a fresh installation,
-   `oauth.canonical_host` alone auto-enables OAuth — no explicit flag is required. Set this to `true`
-   only if you are upgrading an existing deployment that already has `oauth.mcp_enabled = false` in the
-   database, or if you want an explicit on/off toggle that is not affected by the presence of
-   `oauth.canonical_host`. To explicitly disable OAuth on a deployment with `canonical_host` set, write
+4. **Set `oauth.mcp_enabled = true`.** This is a required, explicit opt-in — OAuth stays disabled by
+   default even with `oauth.canonical_host` set. A missing `oauth.mcp_enabled` row is treated as
+   `false`. Once `oauth.mcp_enabled = true`, the controller requires `oauth.canonical_host` to be set
+   and refuses to start otherwise (see step 1). To disable OAuth again, write
    `oauth.mcp_enabled = false`.
 
 5. **(Optional) Enable DCR and/or CIMD** after reading `docs/security/oauth-mcp.md`. Both default to
