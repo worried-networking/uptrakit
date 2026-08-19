@@ -704,11 +704,11 @@ mod tests {
             .await
             .expect("query seeded row")
             .expect("seeded row must still exist");
-        let new_config_id: Option<String> = row
+        let pve_plugin_config_id: Option<String> = row
             .try_get_by_index(0)
             .expect("pve_plugin_config_id column");
         assert_eq!(
-            new_config_id, None,
+            pve_plugin_config_id, None,
             "a mismatched plugin_type ack must never write proxmox host state"
         );
     }

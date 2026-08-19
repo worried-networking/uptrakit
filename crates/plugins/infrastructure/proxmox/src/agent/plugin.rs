@@ -150,7 +150,7 @@ impl HostLifecycle for crate::ProxmoxPlugin {
             tracing::warn!(error = %e, "failed to persist PVE state for host");
         }
 
-        // Run the credential/migration flow, unless credential provisioning
+        // Run the credential flow, unless credential provisioning
         // was explicitly skipped (`pve_setup` skip) — detection, host-state
         // persistence, and sudo-command collection still run either way.
         let (report, existing_config_id, summary_lines) = if ctx.provision_credentials {
@@ -222,7 +222,7 @@ impl HostLifecycle for crate::ProxmoxPlugin {
             tracing::warn!(error = %e, "failed to persist PVE node name during sync");
         }
 
-        // Credential/migration flow. Its own tenant-context check produces
+        // Credential flow. Its own tenant-context check produces
         // the "skipped: no tenant context" summary line when `ctx.tenant_id`
         // is absent or unparseable — sync's early no-tenant return is thus
         // this call itself, run after the node-name upsert above.

@@ -438,9 +438,6 @@ mod tests {
                 self.timeline.lock().push(self.label);
                 return Ok(ok("[]"));
             }
-            if command.contains("pveum user list") {
-                return Ok(ok("[]"));
-            }
             if command.contains("pveum user token add") {
                 return Ok(token_add_ok("secret-timeline"));
             }
@@ -594,9 +591,12 @@ mod tests {
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
         let cluster_json = cluster_status(Some("BAREOPCLUSTER"), &["pve1"]);
         // The token IS present — a stored pve_plugin_config_id plus a
-        // confirmed-present token must satisfy reuse; scripting a
-        // create/regenerate shape here would fail if reuse were not
-        // actually taken (no other script entries match).
+        // confirmed-present token must satisfy reuse. The script below has
+        // no create/regenerate entries, but `ScriptedRemoteExecutor` answers
+        // unmatched commands with empty stdout / exit 0 rather than failing,
+        // so that alone proves nothing; the real protection is the
+        // `outcome == Reused` assertion plus the recorded-calls check that
+        // no `pveum user token add` was issued, below.
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             (
