@@ -215,6 +215,8 @@ These are non-negotiable design constraints. Do not violate them.
    Entity](docs/architecture/update-history-entity.md).
 1. **No raw SQL.** Use SeaORM and `sea_query` builders everywhere, including migrations. The approved exceptions (each needing an inline comment
    naming the limitation) and the table-recreation guide live in [database-migrations.md](docs/development/database-migrations.md).
+   Clippy-enforced via `disallowed-methods`/`disallowed-macros`; the `#[expect]` escape hatch and its four-category taxonomy are documented in
+   [coding-standards.md](docs/development/coding-standards.md).
 1. **Cover new logic with tests.** Cover both success and failure paths. See [Testing](docs/development/testing.md).
 1. **Document everything.** Any code change must be documented in code or docs. Wire-protocol changes must be documented in
    `crates/shared/wire/asyncapi.yaml` and reflected in [wire-protocol.md](docs/api/wire-protocol.md). Architectural decisions are recorded as ADRs

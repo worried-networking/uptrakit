@@ -112,6 +112,63 @@ When a suppression is the right call, write a **specific** reason: name the inva
 ("idx came from `lines.iter().rposition(...)`"). Avoid generic placeholders like "in bounds" or "checked above" — they rot the moment surrounding code
 shifts.
 
+### Raw-SQL ban (`disallowed-methods` / `disallowed-macros`)
+
+`clippy.toml` bans the raw-SQL entry points `sea_orm::Statement::from_string`,
+`sea_orm::Statement::from_sql_and_values`, `sea_orm::ConnectionTrait::execute_unprepared`,
+`sea_query::Expr::cust`, `sea_query::Expr::cust_with_values`, `sea_query::Expr::cust_with_expr`,
+`sea_query::Expr::cust_with_exprs`, and the `sea_orm::raw_sql!` macro
+(AGENTS.md rule "No raw SQL."). Consumers (`execute_raw`, `query_one_raw`, …) are deliberately
+unbanned — banning the `Statement` sources chokes them all. Known lint-invisible gaps, also
+deliberate: constructing `Statement` as a struct literal (all its fields are `pub`), the direct
+sqlx query API, and driver-inherent `execute_unprepared` on the concrete `Sqlx*PoolConnection`
+types — none occur in the workspace; the evasion grep in the quality-gate sweep is the backstop.
+`Func::cust` is likewise deliberately unbanned: it names a custom SQL function as an iden while
+all arguments stay builder-typed expressions — the idiomatic escape for functions sea-query
+lacks, not a raw-fragment constructor.
+Liveness probes use a builder `SELECT 1`
+(`Query::select().expr(Expr::val(1))` sent via `query_one`), never
+`execute_unprepared("SELECT 1")` — and not `DatabaseConnection::ping()`, which executes no SQL
+on SQLite (a worker-thread liveness round-trip only) and is a strictly weaker check.
+
+A site may opt out only with
+`#[expect(clippy::disallowed_methods, reason = "<category>: <concrete limitation>")]`
+(`clippy::disallowed_macros` for `raw_sql!`), where `<category>` is exactly one of:
+
+1. **builder limitation** — SQL genuinely inexpressible in sea_query, wherever it occurs:
+   SQLite `ALTER TABLE`/`PRAGMA` shapes (including `PRAGMA foreign_keys` toggles in test setup),
+   `CREATE DATABASE`, window functions, functional indexes, `typeof()`, the SQLite
+   table-recreation pattern. Detail: [database-migrations.md](database-migrations.md#no-raw-sql--use-sea_query-builders-for-dml).
+2. **connectivity probe** — only where no builder query can be issued at all (the builder
+   `SELECT 1` works over any `ConnectionTrait`, so this category is currently empty — prefer
+   the builder form; the category exists for genuinely builder-less handles).
+3. **test-only schema sabotage** — corrupting schema/data to exercise DB-failure paths, only
+   where inexpressible via builders (e.g. `CREATE TRIGGER` fault injection). Plain `DROP TABLE`
+   never qualifies — web-api tests use the `test_harness::fixtures::drop_table` builder helper.
+4. **frozen merged migration** — raw SQL inside an `up()`/`down()` body merged to `main`,
+   regardless of expressibility: merged migrations are treated as applied, and rewriting one
+   risks live-vs-fresh-install divergence. Migration files' `#[cfg(test)]` halves are ordinary
+   test code — rewrite-by-default. The frozen set is bounded by the union of category 1 and
+   category 4 annotations inside migration `up()`/`down()` bodies (the shape rule routes
+   `ALTER`/`PRAGMA`/window/functional-index SQL to category 1 even when frozen); the taxonomy
+   gate (`ci/verify_raw_sql_expect_taxonomy.sh`) pins the category-4 count so it can only
+   shrink without owner sign-off.
+
+The reason must name the real limitation — never an unverified claim about a dependency's API;
+reviewers verify the stated rationale independently. Granularity: statement-level by default;
+fn-level only on free or plain-impl single-rationale migration helper fns that open no
+transaction — never on an `#[async_trait]` trait method like `up()`/`down()` itself, where the
+body moves into a generated `Box::pin` and `#[expect]` fulfillment is unverified
+(`disallowed_methods`
+also carries the `begin*` bans — a fn-level expect would mask a stray `.begin()`, and it
+likewise swallows any future `disallowed-methods` entry: whoever adds a new ban entry must
+re-audit the fn-level-expected migration fns); never file-level. There is no test exemption:
+`disallowed-methods` has no `allow-*-in-tests` flag, so test code follows the same taxonomy.
+
+Each ban entry has a canary in `crates/shared/db-tx`'s `#[cfg(test)]` canary module: if an
+upgrade renames a banned path, the entry degrades to a config warning, but the canary's
+`#[expect]` goes unfulfilled and `unfulfilled_lint_expectations = "deny"` fails the build.
+
 ## Shared Contract Crates
 
 - Public fallible APIs in shared or reusable contract crates should document a `# Errors` section.

@@ -294,6 +294,13 @@ All DML (`INSERT`, `UPDATE`, `DELETE`, `SELECT`) that cannot be expressed with t
 API must use the **sea_query typed builder API** instead of `execute_unprepared()` or
 `format!()`-constructed strings.
 
+This rule is clippy-enforced: `clippy.toml` bans the raw-SQL entry points via
+`disallowed-methods`/`disallowed-macros`. Exceptions require a taxonomy-conformant
+`#[expect(..., reason)]` — the categories, granularity rules, and the merged-migration freeze
+live in [coding-standards.md](coding-standards.md#raw-sql-ban-disallowed-methods--disallowed-macros),
+which is the canonical home; this section keeps owning what qualifies as genuinely
+inexpressible (category 1).
+
 ### Why
 
 - Raw strings bypass the type system — a renamed column silently breaks a query at runtime.
