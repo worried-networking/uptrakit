@@ -117,9 +117,14 @@ mod tests {
             .expect("migrations through oauth_controller_instances must apply");
 
         // Verify the table is present and queryable.
-        db.execute_unprepared("SELECT COUNT(*) FROM oauth_controller_instances")
-            .await
-            .expect("oauth_controller_instances should be queryable after up");
+        db.execute(
+            &Query::select()
+                .expr(Expr::col(Asterisk).count())
+                .from(Alias::new("oauth_controller_instances"))
+                .to_owned(),
+        )
+        .await
+        .expect("oauth_controller_instances should be queryable after up");
 
         // Roll back just this migration.
         Migrator::down(&db, Some(1))
@@ -128,7 +133,12 @@ mod tests {
 
         // After down, the table must be gone.
         let res = db
-            .execute_unprepared("SELECT COUNT(*) FROM oauth_controller_instances")
+            .execute(
+                &Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(Alias::new("oauth_controller_instances"))
+                    .to_owned(),
+            )
             .await;
         assert!(
             res.is_err(),
@@ -186,7 +196,12 @@ mod tests {
         Migration.down(&schema_manager).await.expect("down");
 
         let res = db
-            .execute_unprepared("SELECT COUNT(*) FROM oauth_controller_instances")
+            .execute(
+                &Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(Alias::new("oauth_controller_instances"))
+                    .to_owned(),
+            )
             .await;
         assert!(
             res.is_err(),

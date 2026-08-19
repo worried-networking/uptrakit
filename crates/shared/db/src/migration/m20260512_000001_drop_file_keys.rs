@@ -105,16 +105,38 @@ mod tests {
             .expect("migrations through drop_file_keys must apply");
 
         // Insert one file-only key and one that must survive.
-        db.execute_unprepared(
-            "INSERT INTO global_settings (key, value, updated_at) \
-             VALUES ('network.https_addr', '\"https://example.com\"', CURRENT_TIMESTAMP)",
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("global_settings"))
+                .columns([
+                    Alias::new("key"),
+                    Alias::new("value"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    "network.https_addr".into(),
+                    "\"https://example.com\"".into(),
+                    Expr::current_timestamp(),
+                ])
+                .to_owned(),
         )
         .await
         .expect("seed file-only key");
 
-        db.execute_unprepared(
-            "INSERT INTO global_settings (key, value, updated_at) \
-             VALUES ('registration.mode', '\"open\"', CURRENT_TIMESTAMP)",
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("global_settings"))
+                .columns([
+                    Alias::new("key"),
+                    Alias::new("value"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    "registration.mode".into(),
+                    "\"open\"".into(),
+                    Expr::current_timestamp(),
+                ])
+                .to_owned(),
         )
         .await
         .expect("seed survivor key");
@@ -128,28 +150,32 @@ mod tests {
 
         // file-only key must be gone
         let row = db
-            .query_one_raw(sea_orm::Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT COUNT(*) AS cnt FROM global_settings WHERE key = 'network.https_addr'"
-                    .to_string(),
-            ))
+            .query_one(
+                &Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(Alias::new("global_settings"))
+                    .and_where(Expr::col(Alias::new("key")).eq("network.https_addr"))
+                    .to_owned(),
+            )
             .await
             .expect("count query should succeed")
             .expect("count row must exist");
-        let cnt: i64 = row.try_get("", "cnt").expect("cnt column");
+        let cnt: i64 = row.try_get_by_index(0).expect("count value");
         assert_eq!(cnt, 0, "network.https_addr must be deleted by up()");
 
         // survivor key must remain
         let row = db
-            .query_one_raw(sea_orm::Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT COUNT(*) AS cnt FROM global_settings WHERE key = 'registration.mode'"
-                    .to_string(),
-            ))
+            .query_one(
+                &Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(Alias::new("global_settings"))
+                    .and_where(Expr::col(Alias::new("key")).eq("registration.mode"))
+                    .to_owned(),
+            )
             .await
             .expect("count query should succeed")
             .expect("count row must exist");
-        let cnt: i64 = row.try_get("", "cnt").expect("cnt column");
+        let cnt: i64 = row.try_get_by_index(0).expect("count value");
         assert_eq!(cnt, 1, "registration.mode must survive up()");
     }
 
@@ -162,11 +188,19 @@ mod tests {
             .expect("migrations through drop_file_keys must apply");
 
         for key in FILE_ONLY_KEYS {
-            let sql = format!(
-                "INSERT INTO global_settings (key, value, updated_at) \
-                 VALUES ('{key}', '\"val\"', CURRENT_TIMESTAMP)"
-            );
-            db.execute_unprepared(&sql).await.expect("seed row");
+            db.execute(
+                &Query::insert()
+                    .into_table(Alias::new("global_settings"))
+                    .columns([
+                        Alias::new("key"),
+                        Alias::new("value"),
+                        Alias::new("updated_at"),
+                    ])
+                    .values_panic([(*key).into(), "\"val\"".into(), Expr::current_timestamp()])
+                    .to_owned(),
+            )
+            .await
+            .expect("seed row");
         }
 
         let schema_manager = SchemaManager::new(&db);
@@ -176,14 +210,16 @@ mod tests {
             .expect("up() must succeed");
 
         let row = db
-            .query_one_raw(sea_orm::Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT COUNT(*) AS cnt FROM global_settings".to_string(),
-            ))
+            .query_one(
+                &Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(Alias::new("global_settings"))
+                    .to_owned(),
+            )
             .await
             .expect("count query should succeed")
             .expect("count row must exist");
-        let cnt: i64 = row.try_get("", "cnt").expect("cnt column");
+        let cnt: i64 = row.try_get_by_index(0).expect("count value");
         assert_eq!(cnt, 0, "all file-only rows must be deleted");
     }
 

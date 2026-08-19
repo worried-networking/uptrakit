@@ -249,36 +249,66 @@ mod tests {
             .await
             .expect("migrations through 2fa must apply");
 
-        db.execute_unprepared("SELECT COUNT(*) FROM user_totp")
-            .await
-            .expect("user_totp should be queryable after up");
-        db.execute_unprepared("SELECT COUNT(*) FROM user_recovery_codes")
-            .await
-            .expect("user_recovery_codes should be queryable after up");
-        db.execute_unprepared("SELECT COUNT(*) FROM mfa_challenges")
-            .await
-            .expect("mfa_challenges should be queryable after up");
+        db.execute(
+            &Query::select()
+                .expr(Expr::col(Asterisk).count())
+                .from(Alias::new("user_totp"))
+                .to_owned(),
+        )
+        .await
+        .expect("user_totp should be queryable after up");
+        db.execute(
+            &Query::select()
+                .expr(Expr::col(Asterisk).count())
+                .from(Alias::new("user_recovery_codes"))
+                .to_owned(),
+        )
+        .await
+        .expect("user_recovery_codes should be queryable after up");
+        db.execute(
+            &Query::select()
+                .expr(Expr::col(Asterisk).count())
+                .from(Alias::new("mfa_challenges"))
+                .to_owned(),
+        )
+        .await
+        .expect("mfa_challenges should be queryable after up");
 
         Migrator::down(&db, Some(1))
             .await
             .expect("2fa migration must roll back cleanly");
 
         let res = db
-            .execute_unprepared("SELECT COUNT(*) FROM mfa_challenges")
+            .execute(
+                &Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(Alias::new("mfa_challenges"))
+                    .to_owned(),
+            )
             .await;
         assert!(
             res.is_err(),
             "mfa_challenges table should be dropped by down"
         );
         let res = db
-            .execute_unprepared("SELECT COUNT(*) FROM user_recovery_codes")
+            .execute(
+                &Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(Alias::new("user_recovery_codes"))
+                    .to_owned(),
+            )
             .await;
         assert!(
             res.is_err(),
             "user_recovery_codes table should be dropped by down"
         );
         let res = db
-            .execute_unprepared("SELECT COUNT(*) FROM user_totp")
+            .execute(
+                &Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(Alias::new("user_totp"))
+                    .to_owned(),
+            )
             .await;
         assert!(res.is_err(), "user_totp table should be dropped by down");
 
@@ -298,30 +328,77 @@ mod tests {
         // Insert a user row to satisfy the FK constraint on user_totp.user_id.
         // The `users` table has no `tenant_id` column.
         let user_id = uuid::Uuid::now_v7();
-        db.execute_unprepared(&format!(
-            "INSERT INTO users \
-             (id, email, first_name, last_name, is_active, created_at, updated_at) \
-             VALUES ('{user_id}', 'u@example.com', 'A', 'B', 1, \
-             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-        ))
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("users"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("email"),
+                    Alias::new("first_name"),
+                    Alias::new("last_name"),
+                    Alias::new("is_active"),
+                    Alias::new("created_at"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    user_id.to_string().into(),
+                    "u@example.com".into(),
+                    "A".into(),
+                    "B".into(),
+                    1.into(),
+                    Expr::current_timestamp(),
+                    Expr::current_timestamp(),
+                ])
+                .to_owned(),
+        )
         .await
         .expect("user insert");
 
         let totp_id1 = uuid::Uuid::now_v7();
         let totp_id2 = uuid::Uuid::now_v7();
 
-        db.execute_unprepared(&format!(
-            "INSERT INTO user_totp (id, user_id, secret, is_active, created_at) \
-             VALUES ('{totp_id1}', '{user_id}', 'secret1', 0, CURRENT_TIMESTAMP)"
-        ))
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("user_totp"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("user_id"),
+                    Alias::new("secret"),
+                    Alias::new("is_active"),
+                    Alias::new("created_at"),
+                ])
+                .values_panic([
+                    totp_id1.to_string().into(),
+                    user_id.to_string().into(),
+                    "secret1".into(),
+                    0.into(),
+                    Expr::current_timestamp(),
+                ])
+                .to_owned(),
+        )
         .await
         .expect("first user_totp insert must succeed");
 
         let res = db
-            .execute_unprepared(&format!(
-                "INSERT INTO user_totp (id, user_id, secret, is_active, created_at) \
-                 VALUES ('{totp_id2}', '{user_id}', 'secret2', 0, CURRENT_TIMESTAMP)"
-            ))
+            .execute(
+                &Query::insert()
+                    .into_table(Alias::new("user_totp"))
+                    .columns([
+                        Alias::new("id"),
+                        Alias::new("user_id"),
+                        Alias::new("secret"),
+                        Alias::new("is_active"),
+                        Alias::new("created_at"),
+                    ])
+                    .values_panic([
+                        totp_id2.to_string().into(),
+                        user_id.to_string().into(),
+                        "secret2".into(),
+                        0.into(),
+                        Expr::current_timestamp(),
+                    ])
+                    .to_owned(),
+            )
             .await;
         assert!(
             res.is_err(),
@@ -370,7 +447,12 @@ mod tests {
 
         for table in ["user_totp", "user_recovery_codes", "mfa_challenges"] {
             let res = db
-                .execute_unprepared(&format!("SELECT COUNT(*) FROM {table}"))
+                .execute(
+                    &Query::select()
+                        .expr(Expr::col(Asterisk).count())
+                        .from(Alias::new(table))
+                        .to_owned(),
+                )
                 .await;
             assert!(res.is_err(), "{table} should not exist after down");
         }

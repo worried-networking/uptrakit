@@ -193,9 +193,14 @@ mod tests {
             .expect("migrations through oauth_authorization_requests must apply");
 
         // Verify the table is present and queryable.
-        db.execute_unprepared("SELECT COUNT(*) FROM oauth_authorization_requests")
-            .await
-            .expect("oauth_authorization_requests should be queryable after up");
+        db.execute(
+            &Query::select()
+                .expr(Expr::col(Asterisk).count())
+                .from(Alias::new("oauth_authorization_requests"))
+                .to_owned(),
+        )
+        .await
+        .expect("oauth_authorization_requests should be queryable after up");
 
         // Roll back just this migration.
         Migrator::down(&db, Some(1))
@@ -204,7 +209,12 @@ mod tests {
 
         // After down, the table must be gone.
         let res = db
-            .execute_unprepared("SELECT COUNT(*) FROM oauth_authorization_requests")
+            .execute(
+                &Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(Alias::new("oauth_authorization_requests"))
+                    .to_owned(),
+            )
             .await;
         assert!(
             res.is_err(),
@@ -263,7 +273,12 @@ mod tests {
         Migration.down(&schema_manager).await.expect("down");
 
         let res = db
-            .execute_unprepared("SELECT COUNT(*) FROM oauth_authorization_requests")
+            .execute(
+                &Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(Alias::new("oauth_authorization_requests"))
+                    .to_owned(),
+            )
             .await;
         assert!(
             res.is_err(),
