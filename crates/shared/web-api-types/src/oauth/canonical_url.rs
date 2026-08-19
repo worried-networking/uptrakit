@@ -116,7 +116,10 @@ impl CanonicalResourceUrl {
 /// compare case-insensitively on its side.
 #[must_use]
 pub fn is_bare_host(host: &str) -> bool {
-    !host.contains(['/', '@', '?', '#'])
+    // `\` is banned alongside `/`: for special schemes the WHATWG URL parser
+    // treats a backslash as a path separator, so `evil.com\path` would parse
+    // to host `evil.com` and silently drop the rest of the operator's input.
+    !host.contains(['/', '\\', '@', '?', '#'])
         && !host.contains(char::is_whitespace)
         && url::Url::parse(&format!("https://{host}")).is_ok_and(|u| u.host_str().is_some())
 }

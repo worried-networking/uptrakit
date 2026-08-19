@@ -56,8 +56,11 @@ impl MigrationTrait for Migration {
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection, EntityTrait};
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
+    };
     use sea_orm_migration::prelude::*;
+    use time::OffsetDateTime;
 
     use crate::migration::Migrator;
 
@@ -67,25 +70,34 @@ mod tests {
     }
 
     fn migration_index() -> u32 {
-        Migrator::migrations()
+        let idx = Migrator::migrations()
             .iter()
             .position(|m| m.name() == "m20260811_000001_materialize_mcp_enabled")
-            .expect("materialize_mcp_enabled migration must be registered") as u32
+            .expect("materialize_mcp_enabled migration must be registered");
+        // `u32::try_from` is ambiguous here: the `sea_orm_migration::prelude`
+        // glob brings `ValueType::try_from` into scope for `u32`.
+        let idx: u32 = idx.try_into().expect("migration index fits u32");
+        idx
     }
 
-    /// Run migrations up to (but excluding) this one, seed via raw SQL
-    /// statements (one `INSERT` per slice entry), then run the remaining
+    /// Run migrations up to (but excluding) this one, seed one
+    /// `global_settings` row per slice entry, then run the remaining
     /// migrations (this one included) through `Migrator`.
-    async fn seed_and_run_up(seed_sql: &[&str]) -> DatabaseConnection {
+    async fn seed_and_run_up(seed_rows: &[(&str, serde_json::Value)]) -> DatabaseConnection {
         let db = test_db().await;
         Migrator::up(&db, Some(migration_index()))
             .await
             .expect("migrations before materialize_mcp_enabled must apply");
 
-        for sql in seed_sql {
-            db.execute_unprepared(sql)
-                .await
-                .expect("seed global_settings row");
+        for (key, value) in seed_rows {
+            crate::entity::global_setting::ActiveModel {
+                key: Set((*key).to_string()),
+                value: Set(value.clone()),
+                updated_at: Set(OffsetDateTime::UNIX_EPOCH),
+            }
+            .insert(&db)
+            .await
+            .expect("seed global_settings row");
         }
 
         Migrator::up(&db, None)
@@ -106,8 +118,10 @@ mod tests {
 
     #[tokio::test]
     async fn materializes_true_when_host_set_and_row_absent() {
-        let db = seed_and_run_up(&["INSERT INTO global_settings (key, value, updated_at) \
-             VALUES ('oauth.canonical_host', '\"auth.example.com\"', '2026-08-11T00:00:00Z')"])
+        let db = seed_and_run_up(&[(
+            "oauth.canonical_host",
+            serde_json::json!("auth.example.com"),
+        )])
         .await;
 
         let row = mcp_enabled_row(&db)
@@ -129,10 +143,11 @@ mod tests {
     #[tokio::test]
     async fn explicit_row_untouched() {
         let db = seed_and_run_up(&[
-            "INSERT INTO global_settings (key, value, updated_at) \
-             VALUES ('oauth.canonical_host', '\"auth.example.com\"', '2026-08-11T00:00:00Z')",
-            "INSERT INTO global_settings (key, value, updated_at) \
-             VALUES ('oauth.mcp_enabled', 'false', '2026-08-11T00:00:00Z')",
+            (
+                "oauth.canonical_host",
+                serde_json::json!("auth.example.com"),
+            ),
+            ("oauth.mcp_enabled", serde_json::json!(false)),
         ])
         .await;
 
@@ -148,9 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn null_host_value_is_not_set() {
-        let db = seed_and_run_up(&["INSERT INTO global_settings (key, value, updated_at) \
-             VALUES ('oauth.canonical_host', 'null', '2026-08-11T00:00:00Z')"])
-        .await;
+        let db = seed_and_run_up(&[("oauth.canonical_host", serde_json::Value::Null)]).await;
 
         assert!(
             mcp_enabled_row(&db).await.is_none(),
@@ -160,9 +173,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_host_string_is_not_set() {
-        let db = seed_and_run_up(&["INSERT INTO global_settings (key, value, updated_at) \
-             VALUES ('oauth.canonical_host', '\"\"', '2026-08-11T00:00:00Z')"])
-        .await;
+        let db = seed_and_run_up(&[("oauth.canonical_host", serde_json::json!(""))]).await;
 
         assert!(
             mcp_enabled_row(&db).await.is_none(),

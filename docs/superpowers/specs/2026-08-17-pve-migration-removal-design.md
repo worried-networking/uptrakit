@@ -349,14 +349,16 @@ Swept all open spec/plan epics for overlap with the in-scope files
 **Soft relation (not blocking): `uptrakit-spec-2026-08-11-cimd-relying-party`**, in
 particular `uptrakit-plan-2026-08-11-cimd-a-mcp-opt-in` (Tasks A2 inversion, A3
 canonical-host shape validation, A6 Global Settings "Instance" card). The instance host
-this spec reads is `oauth.canonical_host`, and until Plan A lands:
+this spec reads is `oauth.canonical_host`. Plan A tasks A2 and A3 have landed, so:
 
-- setting it also boots the MCP OAuth authorization server (`resolve_mcp_enabled`
-  auto-enables when the canonical host is set), so an operator cannot set it _only_ to
-  stamp PVE token comments;
-- its stored shape is loosely validated (`user@example.com`, `example.com/app` pass),
-  which is why sanitization lives on the agent side of the boundary regardless;
-- there is no Global Settings home for it outside the MCP Access tab.
+- setting the host no longer boots the MCP OAuth authorization server — `resolve_mcp_enabled`
+  is explicit opt-in on `oauth.mcp_enabled` (ADR-0045), so an operator can set the host _only_
+  to stamp PVE token comments;
+- its stored shape is validated at write time as a bare host with an optional port
+  (`user@example.com`, `example.com/app` are rejected), though sanitization still lives on the
+  agent side of the boundary as defence in depth;
+- there is still no Global Settings home for it outside the MCP Access tab (Task A6, not yet
+  landed).
 
 Consequence, accepted deliberately: on a deployment with the canonical host unset the
 token comment ships in its tenant-only form and gains the FQDN with no code change once

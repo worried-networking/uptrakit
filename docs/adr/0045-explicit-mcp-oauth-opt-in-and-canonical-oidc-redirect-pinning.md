@@ -1,4 +1,4 @@
-# 45. Explicit MCP OAuth Opt-In And Canonical OIDC Redirect Pinning
+# 0045 — Explicit MCP OAuth opt-in and canonical OIDC redirect pinning
 
 Date: 2026-08-18
 
@@ -157,5 +157,5 @@ one setting and one cap.
 Sequencing note: this ADR may land before the redirect-pinning implementation itself. If that implementation later
 diverges from the specifics recorded here — the pending-flow snapshot shape, or the `MAX_ACCEPTED_AUDIENCE_HOSTS = 5`
 cap — the task that introduces the divergence must update this ADR through the process in
-[Architecture Decision Records](../development/architecture-decision-records.md); `adrs.toml` sets `no_edit = true`,
-so an accepted ADR is never hand-edited in place.
+[Architecture Decision Records](../development/architecture-decision-records.md) — amend this file and regenerate the
+TOC with `scripts/regen-adr-toc.sh`, never by hand-editing the generated `docs/adr/README.md`.

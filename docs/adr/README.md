@@ -45,4 +45,4 @@
 - [0042 — Untenanted System-Service Surfaces and a Single Runtime-Owned MQTT Definition](0042-untenanted-system-service-surfaces-and-a-single-runtime-owned-mqtt-definition.md)
 - [0043 — Journald-native log sink selection](0043-journald-native-log-sink-selection.md)
 - [0044 — Shared PVE user with per-tenant privilege-separated API tokens](0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
-- [45. Explicit MCP OAuth Opt-In And Canonical OIDC Redirect Pinning](0045-explicit-mcp-oauth-opt-in-and-canonical-oidc-redirect-pinning.md)
+- [0045 — Explicit MCP OAuth opt-in and canonical OIDC redirect pinning](0045-explicit-mcp-oauth-opt-in-and-canonical-oidc-redirect-pinning.md)

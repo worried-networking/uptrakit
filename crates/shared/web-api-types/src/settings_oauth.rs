@@ -181,6 +181,22 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_host_with_backslash() {
+        // Isolates the `\` clause of is_bare_host: the WHATWG URL parser
+        // treats a backslash as a path separator for special schemes, so
+        // without this clause the value would parse to host `example.com`
+        // and silently drop `\app`.
+        let req = UpdateOAuthSettingsRequest {
+            mcp_enabled: None,
+            dcr_enabled: None,
+            cimd_enabled: None,
+            canonical_host: Some("example.com\\app".to_string()),
+        };
+        let err = req.validate().expect_err("should reject backslash path");
+        assert_eq!(err.field, "canonical_host");
+    }
+
+    #[test]
     fn validate_rejects_host_with_userinfo() {
         // Isolates the `@` clause of is_bare_host.
         let req = UpdateOAuthSettingsRequest {
