@@ -166,6 +166,10 @@ impl Migration {
             // This uses execute_unprepared because sea_query's INSERT…SELECT builder does not
             // support CASE expressions in the SELECT column list. This is a migration-only
             // statement and is the accepted pattern for complex data transformations.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "builder limitation: SQLite table-recreation copy step uses CASE, which sea_query's INSERT...SELECT builder does not support"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared(
@@ -260,6 +264,10 @@ impl Migration {
         ];
 
         for &(task_type, interval, jitter) in task_mappings {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+            )]
             conn.execute_unprepared(&format!(
                 "UPDATE scheduled_tasks SET interval_seconds = {interval}, jitter_seconds = {jitter} \
                  WHERE task_type = '{task_type}'"

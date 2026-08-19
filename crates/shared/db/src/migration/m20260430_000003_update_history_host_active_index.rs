@@ -7,8 +7,16 @@ pub(super) struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         db.execute_unprepared("DROP INDEX IF EXISTS uix_update_history_host_active")
             .await?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+        )]
         db.execute_unprepared(
             "CREATE UNIQUE INDEX uix_update_history_host_active \
              ON update_history (host_id) \
@@ -20,8 +28,16 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         db.execute_unprepared("DROP INDEX IF EXISTS uix_update_history_host_active")
             .await?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+        )]
         db.execute_unprepared(
             "CREATE UNIQUE INDEX uix_update_history_host_active \
              ON update_history (host_id) \

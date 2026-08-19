@@ -246,6 +246,10 @@ pub async fn run_migrations_debug(db: &DatabaseConnection) -> Result<(), sea_orm
                     clippy::let_underscore_must_use,
                     reason = "best-effort ROLLBACK to clear aborted transaction state; failure is intentionally ignored"
                 )]
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "builder limitation: ROLLBACK is a transaction-control verb with no sea_query builder"
+                )]
                 let _ = db.execute_unprepared("ROLLBACK").await;
                 return Err(sea_orm::DbErr::Custom(format!(
                     "migration {name} (#{}) failed: {e}",
@@ -358,6 +362,10 @@ async fn sqlite_main_db_file(db: &DatabaseConnection) -> Result<Option<String>, 
     use sea_orm::TryGetable;
     // `PRAGMA database_list` is a SQLite-specific statement with no
     // sea_query equivalent.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: PRAGMA database_list has no sea_query equivalent"
+    )]
     let rows = db
         .query_all_raw(sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
@@ -387,6 +395,10 @@ async fn sqlite_foreign_key_check(db: &DatabaseConnection) -> Result<(), sea_orm
     use sea_orm::TryGetable;
     // `PRAGMA foreign_key_check` is a SQLite-specific statement with no
     // sea_query equivalent.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: PRAGMA foreign_key_check has no sea_query equivalent"
+    )]
     let rows = db
         .query_all_raw(sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
@@ -990,6 +1002,10 @@ mod tests {
         //
         // `typeof()` is a SQLite-specific function with no sea_query equivalent;
         // query_one_raw with a Statement is the approved exception for this.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: typeof() has no typed sea_query expression"
+        )]
         let typeof_before = db
             .query_one_raw(Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
@@ -1008,6 +1024,10 @@ mod tests {
             .expect("repair migration must succeed");
 
         // After the repair, typeof(id) must be 'blob'.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: typeof() has no typed sea_query expression"
+        )]
         let typeof_after = db
             .query_one_raw(Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
@@ -1410,6 +1430,10 @@ mod tests {
         let mut opt = ConnectOptions::new("sqlite::memory:");
         opt.max_connections(1);
         let db = Database::connect(opt).await.expect("db");
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: PRAGMA foreign_keys toggle has no sea_query equivalent"
+        )]
         db.execute_unprepared("PRAGMA foreign_keys = OFF")
             .await
             .expect("fk off");

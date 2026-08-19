@@ -35,6 +35,10 @@ pub(super) struct Migration;
 /// Helper: insert a row into `role_permissions` by resolving role and
 /// permission by name via a subquery.  Idempotent (uses `WHERE NOT EXISTS`
 /// to skip if the assignment already exists — portable across all backends).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+)]
 async fn grant_permission(
     manager: &SchemaManager<'_>,
     role_name: &str,
@@ -68,6 +72,10 @@ impl MigrationTrait for Migration {
         //    sea-query's ON CONFLICT support is not portable across all backends.
         //    UUIDs must be bound via sea-query (not format!) to store as BLOB on SQLite.
         {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+            )]
             let exists = manager
                 .get_connection()
                 .query_one_raw(sea_orm::Statement::from_string(

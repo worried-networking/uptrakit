@@ -147,6 +147,10 @@ impl MigrationTrait for Migration {
         // sea_query does not support `WHERE` clauses on `CREATE INDEX`, so use
         // raw SQL. SQLite and PostgreSQL both support partial indexes with
         // identical `WHERE column IS NULL` syntax.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+        )]
         manager
             .get_connection()
             .execute_unprepared(

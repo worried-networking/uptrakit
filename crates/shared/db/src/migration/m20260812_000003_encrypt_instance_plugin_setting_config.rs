@@ -27,6 +27,10 @@ impl MigrationTrait for Migration {
             // SQLite: deliberate no-op — Json columns already store TEXT (type affinity), so no table recreation is needed (exception to the column-type-change→recreation default; see ADR). The declared column type remains 'json' while the entity declares Text — harmless via affinity; a future schema-comparison gate must not be surprised by it.
         } else {
             // Raw SQL exception (spec 2026-08-09 §4; comment protocol per docs/development/database-migrations.md): sea_query's alter-column builder cannot express the USING clause, and Postgres has no assignment cast from json to text.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "builder limitation: ALTER COLUMN TYPE ... USING is not expressible in sea_query"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared(
@@ -63,6 +67,10 @@ impl MigrationTrait for Migration {
 
         if !helpers::is_sqlite(manager) {
             // Raw SQL exception (spec 2026-08-09 §4; comment protocol per docs/development/database-migrations.md): sea_query's alter-column builder cannot express the USING clause, and Postgres has no assignment cast from json to text.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "builder limitation: ALTER COLUMN TYPE ... USING is not expressible in sea_query"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared(

@@ -72,6 +72,10 @@ impl MigrationTrait for Migration {
         // raw SQL. SQLite and PostgreSQL both support partial unique indexes
         // with identical `WHERE column IS NULL` syntax, so a single statement
         // covers both backends.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+        )]
         manager
             .get_connection()
             .execute_unprepared(

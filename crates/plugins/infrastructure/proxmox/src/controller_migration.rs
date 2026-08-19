@@ -406,6 +406,10 @@ impl MigrationTrait for AddProxmoxHmLowerNameIndex {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // sea_query Index::create() does not support expression columns
         // (functional indexes); raw SQL required.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: functional index on lower() is not expressible in sea_query"
+        )]
         manager
             .get_connection()
             .execute_unprepared(
@@ -449,6 +453,10 @@ impl MigrationTrait for AddProxmoxHmUniqueHostIdIndex {
         // Keep the newest mapping (updated_at desc, id desc) for each host_id
         // and clear host_id + match_method on older duplicates so the index
         // can be created safely.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: window function (ROW_NUMBER() OVER) is not expressible in sea_query"
+        )]
         manager
             .get_connection()
             .execute_unprepared(
@@ -1117,6 +1125,10 @@ impl MigrationTrait for ProxmoxHmVmidUniquePerConfig {
         // Remove duplicate rows that arose from guests migrating between nodes.
         // Keep the "best" row per (plugin_config_id, proxmox_vmid): prefer the
         // row with a host_id (already matched), then the most recently updated.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: window function (ROW_NUMBER() OVER) is not expressible in sea_query"
+        )]
         conn.execute_unprepared(
             "DELETE FROM proxmox_host_mappings
              WHERE id NOT IN (
@@ -2161,6 +2173,10 @@ impl MigrationTrait for RepairProxmoxScalingUuidStorage {
 /// indexes into `uuid_cols` and names the table's UNIQUE tuple.
 /// Invariant: `uuid_cols[0]` MUST be `"id"` — the detection predicate,
 /// the UPDATE/DELETE key, and `old_texts[0]` all assume it.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "builder limitation: typeof() has no typed sea_query expression"
+)]
 async fn repair_scaling_table(
     txn: &sea_orm::DatabaseTransaction,
     table: &str,
@@ -2295,6 +2311,10 @@ mod tests {
     use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
     use sea_orm_migration::{MigrationTrait, SchemaManager};
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: PRAGMA table_info() has no sea_query equivalent"
+    )]
     async fn column_names(db: &sea_orm::DatabaseConnection, table: &str) -> Vec<String> {
         let rows = db
             .query_all_raw(Statement::from_string(
@@ -2308,6 +2328,10 @@ mod tests {
             .collect()
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: PRAGMA table_info() has no sea_query equivalent"
+    )]
     async fn column_decl_types(
         db: &sea_orm::DatabaseConnection,
         table: &str,

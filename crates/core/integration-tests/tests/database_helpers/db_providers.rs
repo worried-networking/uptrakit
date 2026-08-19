@@ -61,6 +61,10 @@ pub(crate) async fn setup_postgres() -> (
         .await
         .expect("connect to admin PG db");
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: CREATE DATABASE has no sea_query equivalent"
+    )]
     admin_db
         .execute_unprepared(&format!("CREATE DATABASE \"{db_name}\""))
         .await

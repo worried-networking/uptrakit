@@ -164,6 +164,10 @@ async fn create_partial_name_indexes(manager: &SchemaManager<'_>) -> Result<(), 
     // so we use `execute_unprepared` with raw SQL. This is the same pattern
     // used by other migrations that need partial unique indexes
     // (m20260309_000003_host_tags.rs). The SQL is identical on both backends.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+    )]
     manager
         .get_connection()
         .execute_unprepared(
@@ -171,6 +175,10 @@ async fn create_partial_name_indexes(manager: &SchemaManager<'_>) -> Result<(), 
              WHERE tenant_id IS NULL",
         )
         .await?;
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+    )]
     manager
         .get_connection()
         .execute_unprepared(
@@ -239,6 +247,10 @@ impl MigrationTrait for Migration {
                 .await?;
             // Raw SQL: sea_query's Table::alter() has no builder for adding a
             // table-level UNIQUE constraint (only FK builders exist).
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "builder limitation: ALTER TABLE ADD CONSTRAINT UNIQUE has no sea_query builder (only FK builders exist)"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared("ALTER TABLE roles ADD CONSTRAINT roles_name_key UNIQUE (name)")
@@ -394,6 +406,10 @@ async fn rescope_roles_postgres(manager: &SchemaManager<'_>) -> Result<(), DbErr
     // auto-name for the inline UNIQUE from the initial CREATE TABLE's
     // `string_uniq(Roles::Name)`; the Docker database suite (Task 5) is the
     // empirical proof — a wrong name fails there loudly, never silently.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: ALTER TABLE DROP CONSTRAINT has no sea_query builder equivalent"
+    )]
     manager
         .get_connection()
         .execute_unprepared("ALTER TABLE roles DROP CONSTRAINT roles_name_key")

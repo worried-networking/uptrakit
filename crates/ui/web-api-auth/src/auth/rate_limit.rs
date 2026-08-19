@@ -115,6 +115,10 @@ impl RateLimitStore {
                      expires_at = excluded.expires_at"#;
         let params = vec![key.into(), now.into(), expires_at.into(), threshold.into()];
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: ON CONFLICT ... DO UPDATE with CASE WHEN expressions is not expressible in sea_query's on_conflict builder"
+        )]
         let stmt = sea_orm::Statement::from_sql_and_values(backend, sql, params);
         self.db.execute_raw(stmt).await.context_to()?;
 

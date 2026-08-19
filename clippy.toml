@@ -31,4 +31,21 @@ disallowed-methods = [
     { path = "sea_orm::DatabaseConnection::transaction_with_config_async", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
     { path = "sea_orm::DatabaseExecutor::transaction_async", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
     { path = "sea_orm::DatabaseExecutor::transaction_with_config_async", reason = "use begin_immediate() — the closure API opens BEGIN DEFERRED" },
+
+    # AGENTS.md rule 10: no raw SQL. Use sea_query builders (SeaORM's typed
+    # query API) everywhere, including migrations. See
+    # docs/development/database-migrations.md for the approved-exception
+    # table and the SQLite table-recreation guide; escape hatch is
+    # #[expect(clippy::disallowed_methods, reason = "...")].
+    { path = "sea_orm::Statement::from_string", reason = "raw SQL banned (AGENTS.md rule 10) — use sea_query builders; see docs/development/coding-standards.md § Raw-SQL ban" },
+    { path = "sea_orm::Statement::from_sql_and_values", reason = "raw SQL banned (AGENTS.md rule 10) — use sea_query builders; see docs/development/coding-standards.md § Raw-SQL ban" },
+    { path = "sea_orm::ConnectionTrait::execute_unprepared", reason = "raw SQL banned (AGENTS.md rule 10) — use sea_query builders; liveness probes use a builder SELECT 1, see docs/development/coding-standards.md § Raw-SQL ban" },
+    { path = "sea_query::Expr::cust", reason = "raw SQL fragment inside a builder — use typed expressions (Expr::current_timestamp, ExprTrait methods)" },
+    { path = "sea_query::Expr::cust_with_values", reason = "raw SQL fragment inside a builder — use typed expressions" },
+    { path = "sea_query::Expr::cust_with_expr", reason = "raw SQL fragment inside a builder — use typed expressions" },
+    { path = "sea_query::Expr::cust_with_exprs", reason = "raw SQL fragment inside a builder — use typed expressions" },
+]
+
+disallowed-macros = [
+    { path = "sea_orm::raw_sql", reason = "raw SQL banned (AGENTS.md rule 10) — use sea_query builders" },
 ]

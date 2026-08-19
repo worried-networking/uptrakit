@@ -220,6 +220,10 @@ impl Migration {
             // `config_override` is renamed to `config` in the copy.
             // `execute_unprepared` is the approved pattern for complex INSERT...SELECT
             // with JOINs that sea_query cannot express.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT with a JOIN into a rebuilt table) is not expressible via sea_query's builder API"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared(
@@ -324,6 +328,10 @@ impl Migration {
             .await?;
 
         // Populate plugin_type from joined plugin_configs.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: UPDATE ... SET col = COALESCE((correlated SELECT ...)) is not expressible in sea_query's builder API"
+        )]
         manager
             .get_connection()
             .execute_unprepared(
@@ -397,6 +405,10 @@ impl Migration {
                      LIMIT 1 \
                    )"
             );
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "builder limitation: INSERT...SELECT with NOT EXISTS and a correlated ORDER BY/LIMIT subquery is not expressible in sea_query's builder API"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared(&insert_sql)
@@ -408,6 +420,10 @@ impl Migration {
                  SET plugin_config_id = NULL \
                  WHERE plugin_type = '{pm_type}'"
             );
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared(&update_sql)
@@ -420,6 +436,10 @@ impl Migration {
                  WHERE plugin_type = '{pm_type}' \
                    AND deactivated_at IS NULL"
             );
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared(&deactivate_sql)
@@ -488,6 +508,10 @@ impl Migration {
                 .await?;
 
             // Copy data back (only rows with non-NULL plugin_config_id).
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "builder limitation: SQLite table-recreation copy-back step (INSERT...SELECT into a rebuilt table) is not expressible via sea_query's builder API"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared(
@@ -531,6 +555,10 @@ impl Migration {
             .await?;
 
         // Reverse C: Make plugin_config_id NOT NULL again (delete rows with NULL first).
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         manager
             .get_connection()
             .execute_unprepared(

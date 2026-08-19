@@ -68,6 +68,10 @@ impl MigrationTrait for CreateProxmoxHostState {
 
         // SQLite-specific: check if the old column exists via pragma.
         // query_one_raw with a Statement is the approved exception for raw SQL.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: PRAGMA table_info() has no sea_query equivalent"
+        )]
         let has_legacy = db
             .query_one_raw(sea_orm::Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
@@ -89,6 +93,10 @@ impl MigrationTrait for CreateProxmoxHostState {
             // Copy PVE hosts into the new table.
             // SQLite limitation: INSERT...SELECT with sea_query is awkward,
             // so we use a raw parameterised statement.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+            )]
             db.execute_raw(sea_orm::Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Sqlite,
                 "INSERT OR IGNORE INTO proxmox_host_state \
@@ -172,6 +180,10 @@ impl MigrationTrait for CreateProxmoxPendingMatches {
 
         // Migrate data from the legacy table if it exists.
         let db = manager.get_connection();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         let has_legacy = db
             .query_one_raw(sea_orm::Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
@@ -186,6 +198,10 @@ impl MigrationTrait for CreateProxmoxPendingMatches {
             > 0;
 
         if table_exists {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+            )]
             db.execute_unprepared(
                 "INSERT OR IGNORE INTO proxmox_pending_matches (host_id, mapping_id, created_at) \
                  SELECT host_id, mapping_id, created_at FROM pending_proxmox_matches",

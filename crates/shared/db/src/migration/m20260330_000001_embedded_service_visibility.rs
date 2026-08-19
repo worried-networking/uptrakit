@@ -56,6 +56,10 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         manager
             .get_connection()
             .execute_unprepared(
@@ -63,6 +67,10 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         manager
             .get_connection()
             .execute_unprepared(

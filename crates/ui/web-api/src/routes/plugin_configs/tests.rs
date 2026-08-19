@@ -1046,6 +1046,10 @@ async fn delete_plugin_config_delete_db_failure_writes_failed_audit_event() {
         .expect("query created plugin config")
         .expect("created plugin config row");
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test-only schema sabotage: CREATE TRIGGER injects a forced DB-level failure to exercise the error path"
+    )]
     db.execute_unprepared(
         "CREATE TRIGGER plugin_config_block_soft_delete BEFORE UPDATE ON plugin_configs BEGIN SELECT RAISE(ABORT, 'blocked'); END;",
     )

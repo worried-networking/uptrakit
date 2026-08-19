@@ -33,6 +33,10 @@ pub(super) struct Migration;
 /// Uses check-then-insert instead of ON CONFLICT DO NOTHING because
 /// sea-query's ON CONFLICT support is not portable across all backends.
 /// UUIDs must be bound via sea-query (not format!) to store as BLOB on SQLite.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+)]
 async fn insert_permission(
     manager: &SchemaManager<'_>,
     perm_id: Uuid,
@@ -67,6 +71,10 @@ async fn insert_permission(
 }
 
 /// Insert a role by name. Idempotent (check-then-insert).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+)]
 async fn insert_role(
     manager: &SchemaManager<'_>,
     role_id: Uuid,
@@ -109,6 +117,10 @@ async fn insert_role(
 
 /// Grant a permission to a role by resolving both by name via a subquery.
 /// Idempotent (uses `WHERE NOT EXISTS` — portable across all backends).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+)]
 async fn grant_permission(
     manager: &SchemaManager<'_>,
     role_name: &str,
@@ -133,6 +145,10 @@ async fn grant_permission(
 /// For every `user_role` row referencing `old_role_name`, insert new rows for
 /// each `new_role_name` (preserving tenant_id, user_id, assigned_at).
 /// Uses `WHERE NOT EXISTS` for idempotency — portable across all backends.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+)]
 async fn migrate_user_roles(
     manager: &SchemaManager<'_>,
     old_role_name: &str,

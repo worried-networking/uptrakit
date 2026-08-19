@@ -14,6 +14,10 @@ impl MigrationTrait for Migration {
         // sea_query Index::create() does not support expression columns (functional indexes);
         // raw SQL required. The SSH agent uses SQLite exclusively, so no backend branching
         // is needed.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: functional index on lower() is not expressible in sea_query"
+        )]
         manager
             .get_connection()
             .execute_unprepared("CREATE INDEX idx_ssh_hosts_lower_name ON ssh_hosts (lower(name))")

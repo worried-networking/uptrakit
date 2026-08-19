@@ -110,6 +110,10 @@ impl MigrationTrait for Migration {
         // `typeof()` is a SQLite-specific function with no sea_query equivalent;
         // using query_all_raw with a Statement is the approved exception for this
         // pattern.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         let rows = db
             .query_all_raw(Statement::from_string(
                 DatabaseBackend::Sqlite,

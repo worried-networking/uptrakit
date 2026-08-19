@@ -24,6 +24,10 @@ impl MigrationTrait for Migration {
         if helpers::is_sqlite(manager) {
             self.down_sqlite(manager).await
         } else {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "builder limitation: ALTER TABLE DROP CONSTRAINT has no sea_query builder equivalent"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared(
@@ -64,6 +68,10 @@ impl Migration {
             )
             .await?;
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: ALTER TABLE ADD CONSTRAINT CHECK has no sea_query builder equivalent"
+        )]
         manager
             .get_connection()
             .execute_unprepared(
@@ -258,6 +266,10 @@ fn build_update_history_table(
 }
 
 async fn copy_update_history_into_new_table(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT into a rebuilt table) is not expressible via sea_query's builder API"
+    )]
     manager
         .get_connection()
         .execute_unprepared(
@@ -315,6 +327,10 @@ async fn copy_update_history_into_new_table(manager: &SchemaManager<'_>) -> Resu
 }
 
 async fn copy_update_history_into_old_table(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT into a rebuilt table) is not expressible via sea_query's builder API"
+    )]
     manager
         .get_connection()
         .execute_unprepared(

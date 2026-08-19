@@ -25,6 +25,10 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let conn = manager.get_connection();
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         let exists = conn
             .query_one_raw(sea_orm::Statement::from_string(
                 manager.get_database_backend(),
@@ -43,6 +47,10 @@ impl MigrationTrait for Migration {
         // would open a SAVEPOINT (always deferred in SQLite), not a true BEGIN IMMEDIATE.
         // The actual safety guarantee is ON CONFLICT DO NOTHING: duplicates are silently
         // skipped, and the DELETE is a single-row keyed write. No extra locking needed.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: bulk INSERT ... VALUES rows call the SQLite unixepoch() function, which sea_query's insert builder cannot embed without the banned Expr::cust"
+        )]
         conn.execute_unprepared(
             "INSERT INTO seaql_migrations (version, applied_at) VALUES
                ('m20260215_000001_initial',                     unixepoch()),
@@ -62,6 +70,10 @@ impl MigrationTrait for Migration {
         )
         .await?;
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         conn.execute_unprepared(
             "DELETE FROM seaql_migrations \
              WHERE version = 'm20260331_000001_ssh_agent_tables'",

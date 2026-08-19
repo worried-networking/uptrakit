@@ -598,6 +598,10 @@ mod tests {
         let db = test_db().await;
         // Disable FK enforcement so the missing `users` parent table does not
         // block api_token inserts during this unit test.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: PRAGMA foreign_keys toggle has no sea_query equivalent"
+        )]
         db.execute_unprepared("PRAGMA foreign_keys = OFF")
             .await
             .expect("disable fk");

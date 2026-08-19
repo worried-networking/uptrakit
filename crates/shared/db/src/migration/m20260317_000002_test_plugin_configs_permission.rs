@@ -26,6 +26,10 @@ pub(super) struct Migration;
 
 /// Grant a permission to a role by resolving both by name via a subquery.
 /// Idempotent (uses `WHERE NOT EXISTS` — portable across all backends).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+)]
 async fn grant_permission(
     manager: &SchemaManager<'_>,
     role_name: &str,
@@ -54,6 +58,10 @@ impl MigrationTrait for Migration {
         let perm_name = "test_plugin_configs";
         let perm_desc = "Test plugin configurations against hosts";
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         let exists = manager
             .get_connection()
             .query_one_raw(sea_orm::Statement::from_string(

@@ -1391,6 +1391,10 @@ mod tests {
             .await
             .unwrap();
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test-only schema sabotage: CREATE TRIGGER injects a forced DB-level failure to exercise the error path"
+        )]
         db.execute_unprepared(
             "CREATE TRIGGER fail_revoke BEFORE UPDATE OF revoked_at ON sessions BEGIN SELECT RAISE(FAIL, 'forced revoke failure'); END;",
         )

@@ -3219,6 +3219,10 @@ mod audit_tests {
             .await
             .expect("store pending link");
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test-only schema sabotage: CREATE TRIGGER injects a forced DB-level side effect to exercise the error path"
+        )]
         app.db
             .execute_unprepared(
                 "CREATE TRIGGER delete_user_after_oidc_link_insert \

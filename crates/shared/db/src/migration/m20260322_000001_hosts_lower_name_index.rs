@@ -13,6 +13,10 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // sea_query Index::create() does not support expression columns (functional indexes);
         // raw SQL required. SQLite and PostgreSQL support LOWER() functional indexes natively.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: functional index on lower() is not expressible in sea_query"
+        )]
         manager
             .get_connection()
             .execute_unprepared(

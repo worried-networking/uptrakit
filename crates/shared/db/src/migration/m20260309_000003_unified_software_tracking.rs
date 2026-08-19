@@ -296,6 +296,10 @@ async fn rebuild_software_items_sqlite(manager: &SchemaManager<'_>) -> Result<()
                     CASE WHEN discovery_state = 'pending' THEN 0 ELSE 1 END, \
                     last_checked_at, created_at, updated_at, deactivated_at \
              FROM software_items";
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: SQLite table-recreation copy step uses CASE, which sea_query's INSERT...SELECT builder does not support"
+        )]
         manager
             .get_connection()
             .execute_unprepared(copy_sql)
@@ -333,6 +337,10 @@ async fn alter_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
     // Backfill featured from discovery_state: anything not 'pending' becomes featured.
     // sea_query cannot express UPDATE ... SET col = CASE WHEN ... in its builder API,
     // so we use execute_unprepared.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: UPDATE ... SET col = CASE WHEN ... is not expressible in sea_query's builder API"
+    )]
     manager
         .get_connection()
         .execute_unprepared(
@@ -450,6 +458,10 @@ async fn rebuild_host_software_items_sqlite(manager: &SchemaManager<'_>) -> Resu
                    latest_version_fetched_at, latest_release_metadata, last_updated_at, \
                    linked_at, update_category, NULL \
             FROM host_software_items";
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT into a rebuilt table) is not expressible via sea_query's builder API"
+        )]
         manager
             .get_connection()
             .execute_unprepared(copy_sql)
@@ -699,6 +711,10 @@ async fn rebuild_update_history_sqlite(manager: &SchemaManager<'_>) -> Result<()
                     uh.completed_at, uh.created_at, uh.batch_id \
              FROM update_history uh \
              INNER JOIN hosts h ON h.id = uh.host_id";
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT with a JOIN into a rebuilt table) is not expressible via sea_query's builder API"
+        )]
         manager
             .get_connection()
             .execute_unprepared(copy_sql)
@@ -735,6 +751,10 @@ async fn alter_update_history(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
     // Backfill tenant_id from the hosts table via a correlated subquery.
     // sea_query cannot express UPDATE ... SET col = (SELECT ...) correlated
     // subqueries in its builder API, so we use execute_unprepared.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "builder limitation: UPDATE ... SET col = (correlated SELECT ...) is not expressible in sea_query's builder API"
+    )]
     manager
         .get_connection()
         .execute_unprepared(
@@ -1103,6 +1123,10 @@ async fn rebuild_update_batches_sqlite(manager: &SchemaManager<'_>) -> Result<()
             SELECT id, tenant_id, batch_type, status, total_count, actor_type, actor_id, \
                    '', 0, created_at, completed_at \
             FROM update_batches";
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT into a rebuilt table) is not expressible via sea_query's builder API"
+        )]
         manager
             .get_connection()
             .execute_unprepared(copy_sql)
@@ -1260,6 +1284,10 @@ async fn create_software_ignores(manager: &SchemaManager<'_>) -> Result<(), DbEr
             INSERT INTO software_ignores (id, tenant_id, host_id, name, created_at) \
             SELECT id, tenant_id, NULL, name, created_at \
             FROM autodiscovery_ignores";
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+        )]
         manager
             .get_connection()
             .execute_unprepared(migrate_sql)

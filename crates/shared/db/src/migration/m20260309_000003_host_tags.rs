@@ -62,6 +62,10 @@ impl MigrationTrait for Migration {
         let partial_unique_sql = "CREATE UNIQUE INDEX uix_host_tags_tenant_name \
              ON host_tags (tenant_id, name) \
              WHERE deactivated_at IS NULL";
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+        )]
         manager
             .get_connection()
             .execute_unprepared(partial_unique_sql)

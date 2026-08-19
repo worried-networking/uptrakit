@@ -709,6 +709,10 @@ mod tests {
             .as_str()
             .expect("create response should contain id");
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test-only schema sabotage: CREATE TRIGGER injects a forced DB-level failure to exercise the error path"
+        )]
         app.db
             .execute_unprepared(
                 "CREATE TRIGGER software_ignore_delete_block BEFORE DELETE ON software_ignores BEGIN SELECT RAISE(ABORT, 'blocked'); END;",

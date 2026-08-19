@@ -55,6 +55,10 @@ impl MigrationTrait for Migration {
         // Copy data, converting INTEGER Unix epoch seconds to RFC 3339 text.
         // `strftime` is a SQLite-specific function with no sea_query equivalent;
         // execute_unprepared is the approved exception for this pattern.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: strftime() epoch/RFC3339 conversion has no sea_query equivalent"
+        )]
         manager
             .get_connection()
             .execute_unprepared(
@@ -126,6 +130,10 @@ impl MigrationTrait for Migration {
         // Convert RFC 3339 text back to INTEGER Unix epoch seconds.
         // `strftime` is a SQLite-specific function with no sea_query equivalent;
         // execute_unprepared is the approved exception for this pattern.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "builder limitation: strftime() epoch/RFC3339 conversion has no sea_query equivalent"
+        )]
         manager
             .get_connection()
             .execute_unprepared(

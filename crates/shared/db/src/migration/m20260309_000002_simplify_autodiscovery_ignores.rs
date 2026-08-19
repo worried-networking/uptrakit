@@ -50,6 +50,10 @@ impl MigrationTrait for Migration {
 
         if is_postgres {
             // PostgreSQL: truncate, drop old columns and indexes, add new column.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+            )]
             manager
                 .get_connection()
                 .execute_unprepared("DELETE FROM autodiscovery_ignores")
