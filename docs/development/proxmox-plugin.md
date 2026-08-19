@@ -54,7 +54,7 @@ Controller
 | `plugin.rs`                   | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent)                                                                          |
 | `agent/plugin.rs`             | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin`                                                                        |
 | `agent/surface_actions.rs`    | Dispatch shim over the plugin's `agent_interactions()` table (`discovered-guests`, `bootstrap-proxmox-guest`); implementation fns for both interactions |
-| `agent/credential_flow.rs`    | `run_credential_flow()` — cluster-scoped PVE identity provisioning and the two-phase legacy-user migration state machine                                |
+| `agent/credential_flow.rs`    | `run_credential_flow()` — cluster-scoped PVE identity provisioning                                                                                      |
 | `agent/db_ops.rs`             | Agent-local DB operations (PVE host state, pending matches)                                                                                             |
 | `agent/entity.rs`             | SeaORM entities for the agent-local `proxmox_host_state` / `proxmox_pending_matches` tables                                                             |
 | `agent/guest_exec_adapter.rs` | `GuestExecProvider` impl wrapping `guest_exec.rs` so the SSH agent can run guest commands without depending on this crate directly                      |
@@ -206,42 +206,36 @@ and [Proxmox Bootstrap Privileges](proxmox-bootstrap.md#pve-api-token-privileges
 for the role/ACL detail. `pve_user_realm(tenant_id)` (the legacy per-tenant
 username builder) no longer exists.
 
-| Function                                                   | Description                                                                         |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `detect_pve_node(executor)`                                | Runs `command -v pveversion` to detect a PVE node                                   |
-| `check_pve_state(executor, tenant_id)`                     | Reads `PVE_USER`'s token list and the full user list; returns `PveCredentialState`  |
-| `create_pve_api_credentials(executor, tenant_id)`          | Creates `PVE_USER` (if absent, no password) and a fresh `--privsep=1` token         |
-| `regenerate_pve_api_token(executor, tenant_id)`            | Removes then recreates this tenant's token on `PVE_USER`                            |
-| `ensure_pve_privileges(executor, tenant_id)`               | Idempotently (re)creates the three custom roles and (re)grants all ACL pairs        |
-| `delete_pve_user(executor, user_realm)`                    | Deletes a PVE user (used in migration phase 2 to remove the legacy per-tenant user) |
-| `pve_token_id(tenant_id)` / `pve_full_token_id(tenant_id)` | Build `tenant-{tenant_uuid}` / `uptrakit@pve!tenant-{tenant_uuid}`                  |
+| Function                                                         | Description                                                                        |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `detect_pve_node(executor)`                                      | Runs `command -v pveversion` to detect a PVE node                                  |
+| `check_pve_state(executor, tenant_id)`                           | Reads `PVE_USER`'s token list and the full user list; returns `PveCredentialState` |
+| `create_pve_api_credentials(executor, tenant_id, instance_host)` | Creates `PVE_USER` (if absent, no password) and a fresh `--privsep=1` token        |
+| `regenerate_pve_api_token(executor, tenant_id, instance_host)`   | Removes then recreates this tenant's token on `PVE_USER`                           |
+| `ensure_pve_privileges(executor, tenant_id)`                     | Idempotently (re)creates the three custom roles and (re)grants all ACL pairs       |
+| `pve_token_id(tenant_id)` / `pve_full_token_id(tenant_id)`       | Build `tenant-{tenant_uuid}` / `uptrakit@pve!tenant-{tenant_uuid}`                 |
 
-#### PVE Cluster Deduplication and Legacy Migration
+#### PVE Cluster Deduplication
 
 PVE clusters share a cluster-wide user and token database, so credential
 provisioning is cluster-scoped, not per-host: `run_credential_flow`
 (`crates/plugins/infrastructure/proxmox/src/agent/credential_flow.rs`) is the
 single entry point both bootstrap and sync delegate to, serialized per
 cluster by a process-global lock so two nodes syncing at once never race the
-migration bookkeeping. Each run first calls `check_pve_state()`, which reads
-`PVE_USER`'s token list (also the user-existence probe) and the full
-`pveum user list` output, returning a `PveCredentialState` — this tenant's
-token presence, whether the shared user exists, and (scoped to this tenant
-only, never a cross-tenant scan) any leftover legacy per-tenant user still on
-the cluster.
+credential bookkeeping. Each run first calls `check_pve_state()`, which reads
+`PVE_USER`'s token list (also the user-existence probe) and returns a
+`PveCredentialState` carrying this tenant's token presence and whether the
+shared user exists.
 
-The flow then decides between reuse (a `new_pve_plugin_config_id` ack
-marker is present across the cluster's known rows, and this run's read did
-not confirm the token absent), regenerate (token confirmed present but no
-reusable evidence), or create (no token, or another tenant's coexisting
-token — left untouched). If a legacy per-tenant user is detected, the flow
-records it (migration phase 1), and once a token has been proven working
-under the new identity, deletes the legacy user and promotes the cluster's
-rows to the new plugin config id (phase 2, prove-then-delete, retried up to
-`MAX_MIGRATION_ATTEMPTS` before being reported stuck). Any `check_pve_state`
-read failure marks the run degraded: migration bookkeeping sits out entirely
-and credential creation falls back to a guarded add-user-then-regenerate
-shape rather than the unguarded create path.
+The flow then decides between reuse (a `pve_plugin_config_id` is stored on
+this host's own row or a cluster peer's, and this run's read did not confirm
+the token absent — Branch 4), regenerate (token confirmed present but no
+reusable evidence anywhere — Branch 6), or create (no reusable evidence and
+no confirmed token, or another tenant's coexisting token, left untouched —
+Branch 5). Any `check_pve_state` read failure marks the run degraded: reuse
+is invalidated only by a read that confirms the token gone (so a degraded
+read never blocks reuse), and credential creation falls back to a guarded
+add-user-then-regenerate shape rather than the unguarded create path.
 
 #### Shared-User PVE Credentials
 
@@ -254,7 +248,8 @@ token on that shared user. The tenant ID is received via
 
 1. `ensure_pve_roles()` — idempotently creates/updates the three custom PVE roles
 2. `pveum user add 'uptrakit@pve' --comment 'Uptrakit managed user'` — creates the shared user (ignores "already exists"); never passes `--password`
-3. `pveum user token add 'uptrakit@pve' 'tenant-{tenant_uuid}' --privsep=1 --output-format json` — creates this tenant's token
+3. `pveum user token add 'uptrakit@pve' 'tenant-{tenant_uuid}' --privsep=1 --comment '<comment>' --output-format json`
+   — creates this tenant's token (see [Token comment](#token-comment) for `<comment>`)
 4. `ensure_pve_acls()` — grants both user- and token-level ACLs for all four `(path, role)` pairs
 
 Returns `PveCredentials { api_url, api_token }` where `api_url` is derived from
@@ -262,6 +257,24 @@ the PVE node's hostname (`https://{hostname}:8006`). The `api_url` does **not**
 include the `/api2/json` path — that prefix is added per-request by `ProxmoxClient`.
 `prove_token_on_node()` then proves the freshly issued token works, over the
 same SSH session, before it is ever reported to the controller.
+
+#### Token comment
+
+Both token-creation sites (`create_pve_api_credentials` and
+`regenerate_pve_api_token`) stamp the token's `--comment` via
+`pve_setup::token_comment(instance_host, tenant_id)`:
+
+- `Uptrakit managed token ({instance_host}, tenant {tenant_uuid})` when an
+  instance host is available and sanitizes cleanly.
+- `Uptrakit managed token (tenant {tenant_uuid})` when the host is unset, or
+  fails `sanitize_instance_host()` (empty, over `MAX_INSTANCE_HOST_LEN`, or
+  containing a character outside `[A-Za-z0-9.\-:\[\]]`).
+
+`instance_host` is the controller's `oauth.canonical_host` global setting,
+delivered to agents as `ServiceSettingsPayload.instance_host` and passed
+through as `InfraPluginContext::instance_host` — see [SSH-Backed Agent
+Architecture](../architecture/ssh-agent.md#pve-identity-and-credential-flow)
+for how the agent caches and forwards it.
 
 ### `guest_exec.rs` — Guest Command Execution
 

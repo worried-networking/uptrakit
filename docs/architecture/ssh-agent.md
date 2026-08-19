@@ -335,61 +335,64 @@ where each tenant got its own dedicated user (`uptrakit-{tenant_uuid}@pve`) with
 [ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md) for
 the rationale.
 
+Each token's `--comment` is stamped with the Uptrakit instance's public host, when known,
+plus the tenant id — see [Token comment](../development/proxmox-plugin.md#token-comment) for
+the exact format and fallback. That host comes from the controller's `oauth.canonical_host`
+setting, delivered per-session via `ServiceSettings`
+(`SshAgentSettings`/`RuntimeSessionState.instance_host` in
+`crates/core/agent-ssh-runtime/src/lib.rs`): the agent caches it in memory for the life of
+the session, hands it to infrastructure plugins (including the PVE token-comment builder),
+and never persists it — a later `ServiceSettings` without the field clears the cached value.
+
 ### Cluster-scoped credential flow
 
 Both `on_host_bootstrapped` and `on_host_synced` delegate to a single entry point,
 `run_credential_flow()` (`crates/plugins/infrastructure/proxmox/src/agent/credential_flow.rs`),
 serialized per cluster by a process-global lock (keyed on the detected cluster name, or the
 fixed string `"standalone"` for a lone node) so bootstrap and sync racing — or two cluster
-nodes syncing at once — never corrupt the migration bookkeeping below.
+nodes syncing at once — never corrupt the credential bookkeeping below.
 
-Ownership is now determined by the per-tenant **token**, not the user: several tenants can
+Ownership is determined by the per-tenant **token**, not the user: several tenants can
 coexist on the same `uptrakit@pve` user, each with its own token, and a run only ever matches
 its own `tenant-{tenant_uuid}` token id — it never scans for or touches other tenants' tokens.
 
-1. Detects the PVE cluster (or standalone node) and its member nodes.
-2. Reads the current PVE identity state for the tenant (`pve_setup::check_pve_state`). A
-   failed read degrades the run: migration bookkeeping (phases 1/2 and the recovery arm below)
-   is skipped entirely for that run, and — only when this cluster has a recorded legacy user
-   on at least one row — reported as `PVE state read degraded; migration paused
-this run (…)`.
-3. Resolves the plugin-config name: `pve-{cluster_name}` when a cluster name is detected,
-   otherwise the standalone fallback `pve-{node_name}-{first 8 chars of host_id}`.
-4. Creates or regenerates the tenant's token as needed; a created or regenerated token is then
-   proved on the node via `pve_setup::prove_token_on_node` — a `curl` over the existing SSH
-   session against `https://localhost:8006/api2/json/version` with an
+1. **Branch 1** — no tenant context yet: the flow returns `SkippedNoTenant` before touching
+   the remote host.
+2. Detects the PVE cluster (or standalone node) and its member nodes; **Branch 2** — detection
+   coming back with no member nodes at all returns `Failed` before any `pveum` mutation,
+   including the state read below.
+3. Reads the current PVE identity state for the tenant (`pve_setup::check_pve_state`). A
+   failed read degrades the run: reuse (branch 4 below) is invalidated only by a read that
+   _confirms_ the token gone, so a degraded read never blocks reuse; and a create (branch 5)
+   falls back to a guarded add-user-then-regenerate shape instead of the unguarded create path,
+   since a degraded read cannot rule out the token already existing.
+4. **Branch 3** — resolves the plugin-config name: `pve-{cluster_name}` when a cluster name is
+   detected, otherwise the standalone fallback `pve-{node_name}-{first 8 chars of host_id}`.
+5. **Branch 4** — reuse: if any row in the cluster row set (this host's own row plus any peer
+   sharing a detected cluster node name) carries a stored `pve_plugin_config_id` and this run's
+   read didn't confirm the token gone, that id is reused and persisted onto this flow host's
+   own row (peers disagreeing on the id fall back to the lexicographic max as a deterministic
+   tie-break). A reused token is not re-proved.
+6. **Branch 6** — token confirmed present but no reusable evidence anywhere: regenerate via
+   `pve_setup::regenerate_pve_api_token` (remove, then add fresh).
+7. **Branch 5** — neither reusable evidence nor a confirmed token: create. A created or
+   regenerated token is then proved on the node via `pve_setup::prove_token_on_node` — a `curl`
+   over the existing SSH session against `https://localhost:8006/api2/json/version` with an
    `Authorization: PVEAPIToken=…` header, requiring HTTP 200. A failed proof yields
-   `PveCredentialOutcome::Failed` and the flow stops there; it never falls through to touching
-   a legacy user. A reused token (the ack marker for a prior report is already present and
-   this run's read didn't confirm the token is gone) is not re-proved.
+   `PveCredentialOutcome::Failed` and the flow stops there.
 
-### Legacy-user migration (two-phase, cluster-scoped)
+### Legacy-user migration (historical)
 
-The row set touched by migration bookkeeping is this host's own row plus any peer rows whose
-`pve_node_name` matches a detected cluster node (the peer arm only applies in a multi-node
-cluster):
-
-- **Phase 1 — record + provision**: any detected legacy user (`uptrakit-{tenant_uuid}@pve`) is
-  recorded on every cluster row (`db_ops::set_legacy_pve_user`, non-destructive) while the new
-  token is provisioned and proved, and the resulting plugin config is reported to the
-  controller.
-- **Ack marker**: the controller acks the new plugin-config id back to the agent, which is
-  stored in a separate `new_pve_plugin_config_id` column
-  (`HostLifecycle::on_plugin_config_reported` → `db_ops::set_new_plugin_config_id`). Phase 2
-  does not fire on a bare `pve_plugin_config_id` alone — only the ack marker gates it.
-- **Phase 2 — prove, then delete**: once the ack marker is present and the token exists,
-  `pve_setup::delete_pve_user` removes the legacy identity; only on success does
-  `db_ops::promote_cluster_rows` promote every cluster row's operative `pve_plugin_config_id`
-  and clear the legacy marker. A delete failure increments `migration_attempts` (reporting cap
-  `MAX_MIGRATION_ATTEMPTS = 5`; retries continue past it) and reports `MigrationPending`, or a
-  `"migration STUCK after N attempts"` summary line once the cap is reached.
-- **Recovery arm**: if the legacy marker is stored but this run's successful read shows the
-  legacy user already gone, state is reconciled without a redundant delete call.
+Deployments created before ADR-0044 used per-tenant `uptrakit-{tenant}@pve` users. A
+two-phase, cluster-scoped migration moved them to the shared `uptrakit@pve` user with
+per-tenant tokens; it completed on all live deployments and the machinery has been removed —
+see [ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
+for the design and its completion note.
 
 Rebinding a host to a different tenant (`HostLifecycle::on_tenant_changed` →
 `db_ops::wipe_all`) deletes the agent-local `proxmox_host_state` and `proxmox_pending_matches`
-rows, including the ack marker, so a rebound host never reuses another tenant's migration
-state.
+rows, including any stored `pve_plugin_config_id`, so a rebound host never reuses another
+tenant's stored config id.
 
 Because `pveum` is never sudo-allowlisted, this credential work can only _succeed_ in a root
 session — but `on_host_synced` is invoked on every sync that runs the `infra_sync` action

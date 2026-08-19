@@ -104,8 +104,8 @@ guest network-interface/IP discovery) were introduced in PVE 9, replacing
 the older `VM.Monitor` privilege; the custom `UptrakitAudit` role has carried
 `VM.GuestAgent.*` since it was introduced (replacing the built-in `PVEAuditor`
 role, which never included `VM.Monitor` either), so `machine_id`/guest-agent
-collection predates the shared-user identity model this migration introduces
-and is not new capability added by it.
+collection predates the shared-user identity model (ADR-0044) and is not new
+capability added by it.
 
 LXC containers do not support the guest agent file-read API. Their
 `machine_id` is populated after bootstrap when the host reports its
