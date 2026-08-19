@@ -155,6 +155,8 @@ a value PVE itself never lets a caller read back after creation. This is the sam
 `check_pve_state` read forces the flow to fall back to a guarded add-user-then-regenerate path instead of the
 unguarded create path, so a flaky read never risks a "token already exists" failure from blindly calling create.
 
+### Completion note
+
 > **Completion note (2026-08-18):** the two-phase migration completed on the
 > single live deployment and the machinery (branches 7–10, the
 > `legacy_pve_user`/`new_pve_plugin_config_id`/`migration_attempts` columns,

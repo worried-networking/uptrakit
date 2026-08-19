@@ -206,14 +206,14 @@ and [Proxmox Bootstrap Privileges](proxmox-bootstrap.md#pve-api-token-privileges
 for the role/ACL detail. `pve_user_realm(tenant_id)` (the legacy per-tenant
 username builder) no longer exists.
 
-| Function                                                         | Description                                                                        |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `detect_pve_node(executor)`                                      | Runs `command -v pveversion` to detect a PVE node                                  |
-| `check_pve_state(executor, tenant_id)`                           | Reads `PVE_USER`'s token list and the full user list; returns `PveCredentialState` |
-| `create_pve_api_credentials(executor, tenant_id, instance_host)` | Creates `PVE_USER` (if absent, no password) and a fresh `--privsep=1` token        |
-| `regenerate_pve_api_token(executor, tenant_id, instance_host)`   | Removes then recreates this tenant's token on `PVE_USER`                           |
-| `ensure_pve_privileges(executor, tenant_id)`                     | Idempotently (re)creates the three custom roles and (re)grants all ACL pairs       |
-| `pve_token_id(tenant_id)` / `pve_full_token_id(tenant_id)`       | Build `tenant-{tenant_uuid}` / `uptrakit@pve!tenant-{tenant_uuid}`                 |
+| Function                                                         | Description                                                                                 |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `detect_pve_node(executor)`                                      | Runs `command -v pveversion` to detect a PVE node                                           |
+| `check_pve_state(executor, tenant_id)`                           | Reads `PVE_USER`'s token list (also the user-existence probe); returns `PveCredentialState` |
+| `create_pve_api_credentials(executor, tenant_id, instance_host)` | Creates `PVE_USER` (if absent, no password) and a fresh `--privsep=1` token                 |
+| `regenerate_pve_api_token(executor, tenant_id, instance_host)`   | Removes then recreates this tenant's token on `PVE_USER`                                    |
+| `ensure_pve_privileges(executor, tenant_id)`                     | Idempotently (re)creates the three custom roles and (re)grants all ACL pairs                |
+| `pve_token_id(tenant_id)` / `pve_full_token_id(tenant_id)`       | Build `tenant-{tenant_uuid}` / `uptrakit@pve!tenant-{tenant_uuid}`                          |
 
 #### PVE Cluster Deduplication
 
@@ -230,8 +230,9 @@ shared user exists.
 The flow then decides between reuse (a `pve_plugin_config_id` is stored on
 this host's own row or a cluster peer's, and this run's read did not confirm
 the token absent — Branch 4), regenerate (token confirmed present but no
-reusable evidence anywhere — Branch 6), or create (no reusable evidence and
-no confirmed token, or another tenant's coexisting token, left untouched —
+reusable evidence anywhere — Branch 6), or create (no usable evidence —
+evidence absent, or invalidated by a confirmed-absent token — and no token
+confirmed present; another tenant's coexisting token is left untouched —
 Branch 5). Any `check_pve_state` read failure marks the run degraded: reuse
 is invalidated only by a read that confirms the token gone (so a degraded
 read never blocks reuse), and credential creation falls back to a guarded

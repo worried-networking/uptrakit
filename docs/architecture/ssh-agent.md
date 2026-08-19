@@ -368,26 +368,20 @@ its own `tenant-{tenant_uuid}` token id — it never scans for or touches other 
    since a degraded read cannot rule out the token already existing.
 4. **Branch 3** — resolves the plugin-config name: `pve-{cluster_name}` when a cluster name is
    detected, otherwise the standalone fallback `pve-{node_name}-{first 8 chars of host_id}`.
-5. **Branch 4** — reuse: if any row in the cluster row set (this host's own row plus any peer
-   sharing a detected cluster node name) carries a stored `pve_plugin_config_id` and this run's
-   read didn't confirm the token gone, that id is reused and persisted onto this flow host's
-   own row (peers disagreeing on the id fall back to the lexicographic max as a deterministic
-   tie-break). A reused token is not re-proved.
+5. **Branch 4** — reuse: if any row in the cluster row set (this host's own row plus, only in a
+   multi-node cluster, any peer sharing a detected cluster node name) carries a stored
+   `pve_plugin_config_id` and this run's read didn't confirm the token gone, that id is reused
+   and persisted onto this flow host's own row (peers disagreeing on the id fall back to the
+   lexicographic max as a deterministic tie-break). A reused token is not re-proved.
 6. **Branch 6** — token confirmed present but no reusable evidence anywhere: regenerate via
    `pve_setup::regenerate_pve_api_token` (remove, then add fresh).
-7. **Branch 5** — neither reusable evidence nor a confirmed token: create. A created or
-   regenerated token is then proved on the node via `pve_setup::prove_token_on_node` — a `curl`
-   over the existing SSH session against `https://localhost:8006/api2/json/version` with an
+7. **Branch 5** — create: reached when there's no usable evidence for reuse (no stored
+   `pve_plugin_config_id` anywhere in the cluster row set, or one is stored but this run's read
+   confirmed the token gone) and no token confirmed present. A created or regenerated token is
+   then proved on the node via `pve_setup::prove_token_on_node` — a `curl` over the existing SSH
+   session against `https://localhost:8006/api2/json/version` with an
    `Authorization: PVEAPIToken=…` header, requiring HTTP 200. A failed proof yields
    `PveCredentialOutcome::Failed` and the flow stops there.
-
-### Legacy-user migration (historical)
-
-Deployments created before ADR-0044 used per-tenant `uptrakit-{tenant}@pve` users. A
-two-phase, cluster-scoped migration moved them to the shared `uptrakit@pve` user with
-per-tenant tokens; it completed on all live deployments and the machinery has been removed —
-see [ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
-for the design and its completion note.
 
 Rebinding a host to a different tenant (`HostLifecycle::on_tenant_changed` →
 `db_ops::wipe_all`) deletes the agent-local `proxmox_host_state` and `proxmox_pending_matches`
@@ -403,6 +397,14 @@ gated by `!skip_actions.contains(ACTION_INFRA_SYNC)` and then per-bundle by
 
 This flow enables the `bootstrap-proxmox-guest` action to auto-resolve PVE nodes as gateways
 from the controller's discovered guest data.
+
+### Legacy-user migration (historical)
+
+Deployments created before ADR-0044 used per-tenant `uptrakit-{tenant_uuid}@pve` users. A
+two-phase, cluster-scoped migration moved them to the shared `uptrakit@pve` user with
+per-tenant tokens; it completed on all live deployments and the machinery has been removed —
+see [ADR-0044](../adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
+for the design and its completion note.
 
 ## Sudo Context and Dynamic Execution
 
