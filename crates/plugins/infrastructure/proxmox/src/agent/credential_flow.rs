@@ -245,7 +245,7 @@ async fn run_locked(
         // run. If a genuinely fresh node ever reaches a regenerate call with
         // roles never created, ACLs would be granted against roles that do
         // not exist. This is a known limitation, not a bug to fix here.
-        match pve_setup::regenerate_pve_api_token(executor, tenant_id).await {
+        match pve_setup::regenerate_pve_api_token(executor, tenant_id, ctx.instance_host).await {
             Ok(creds) => match pve_setup::prove_token_on_node(executor, &creds.api_token).await {
                 Ok(()) => {
                     report = build_pve_config_report(cfg_name.clone(), &creds);
@@ -280,9 +280,9 @@ async fn run_locked(
                     "failed to ensure the shared PVE user exists before a degraded-read regenerate"
                 );
             }
-            pve_setup::regenerate_pve_api_token(executor, tenant_id).await
+            pve_setup::regenerate_pve_api_token(executor, tenant_id, ctx.instance_host).await
         } else {
-            pve_setup::create_pve_api_credentials(executor, tenant_id).await
+            pve_setup::create_pve_api_credentials(executor, tenant_id, ctx.instance_host).await
         };
         match create_result {
             Ok(creds) => match pve_setup::prove_token_on_node(executor, &creds.api_token).await {
@@ -543,7 +543,8 @@ mod tests {
         let invoker = RecordingActionInvoker::new();
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
-        let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
+        let mut ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
+        ctx.instance_host = Some("uptrakit.example.com");
         let cluster_json = cluster_status(Some("COTENANTCLUSTER"), &["pve1"]);
         let token_list = ok(format!(r#"[{{"tokenid":"tenant-{other_tid}"}}]"#));
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
@@ -571,6 +572,12 @@ mod tests {
         assert!(
             add_call.contains(&format!("tenant-{tid}")),
             "must add OUR tenant's token id: {add_call}"
+        );
+        assert!(
+            add_call.contains(&format!(
+                "--comment 'Uptrakit managed token (uptrakit.example.com, tenant {tid})'"
+            )),
+            "ctx.instance_host must reach the pve_setup token comment: {add_call}"
         );
     }
 

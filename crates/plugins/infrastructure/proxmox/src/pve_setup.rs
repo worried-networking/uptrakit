@@ -383,6 +383,49 @@ pub async fn ensure_pve_privileges(
     Ok(())
 }
 
+/// Maximum accepted instance-host length (DNS name length limit).
+const MAX_INSTANCE_HOST_LEN: usize = 253;
+
+/// Sanitize the controller-supplied instance host for shell interpolation.
+///
+/// The value is operator-entered free text that ends up inside a
+/// single-quoted shell argument. Accept only characters that can appear in a
+/// `host[:port]` or bracketed-IPv6 literal; anything else returns `None`, so
+/// an unusable value degrades to the tenant-only comment instead of reaching
+/// a command string.
+fn sanitize_instance_host(host: &str) -> Option<String> {
+    if host.is_empty() || host.len() > MAX_INSTANCE_HOST_LEN {
+        return None;
+    }
+    host.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+        .then(|| host.to_string())
+}
+
+/// Build the `--comment` value for a per-tenant API token.
+///
+/// The tenant UUID is shell-safe by construction (UUID formatting), same
+/// posture as the existing `token_id` interpolation.
+fn token_comment(instance_host: Option<&str>, tenant_id: &uuid::Uuid) -> String {
+    if let Some(raw) = instance_host {
+        match sanitize_instance_host(raw) {
+            Some(host) => {
+                return format!("Uptrakit managed token ({host}, tenant {tenant_id})");
+            }
+            None => {
+                // Operator diagnosability: without this, "host unset" and
+                // "host rejected" are indistinguishable. The host is
+                // operator-entered public data, not a secret.
+                tracing::debug!(
+                    host = raw,
+                    "instance host rejected by sanitizer; using tenant-only token comment"
+                );
+            }
+        }
+    }
+    format!("Uptrakit managed token (tenant {tenant_id})")
+}
+
 /// Create the [`PVE_USER`] (if absent) and a fresh `privsep=1` API token for
 /// `tenant_id`.
 ///
@@ -396,6 +439,7 @@ pub async fn ensure_pve_privileges(
 pub async fn create_pve_api_credentials(
     executor: &dyn RemoteExecutor,
     tenant_id: &uuid::Uuid,
+    instance_host: Option<&str>,
 ) -> Result<PveCredentials> {
     // Step 1: Ensure custom roles exist with correct privilege sets.
     ensure_pve_roles(executor).await?;
@@ -411,8 +455,11 @@ pub async fn create_pve_api_credentials(
 
     // Step 3: Create the per-tenant API token.
     let token_id = pve_token_id(tenant_id);
-    let create_token_cmd =
-        format!("pveum user token add '{PVE_USER}' '{token_id}' --privsep=1 --output-format json");
+    let comment = token_comment(instance_host, tenant_id);
+    let create_token_cmd = format!(
+        "pveum user token add '{PVE_USER}' '{token_id}' --privsep=1 --comment '{comment}' \
+         --output-format json"
+    );
     let token_result = executor
         .exec_command(&create_token_cmd)
         .await
@@ -457,6 +504,7 @@ pub async fn create_pve_api_credentials(
 pub async fn regenerate_pve_api_token(
     executor: &dyn RemoteExecutor,
     tenant_id: &uuid::Uuid,
+    instance_host: Option<&str>,
 ) -> Result<PveCredentials> {
     let token_id = pve_token_id(tenant_id);
 
@@ -468,8 +516,11 @@ pub async fn regenerate_pve_api_token(
         .context_to::<ProxmoxError>()?;
 
     // Step 2: Create the token again.
-    let create_token_cmd =
-        format!("pveum user token add '{PVE_USER}' '{token_id}' --privsep=1 --output-format json");
+    let comment = token_comment(instance_host, tenant_id);
+    let create_token_cmd = format!(
+        "pveum user token add '{PVE_USER}' '{token_id}' --privsep=1 --comment '{comment}' \
+         --output-format json"
+    );
     let token_result = executor
         .exec_command(&create_token_cmd)
         .await
@@ -640,6 +691,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn sanitize_instance_host_accepts_and_rejects() {
+        for ok in [
+            "uptrakit.example.com",
+            "host:8443",
+            "192.168.1.10",
+            "[::1]:8443",
+        ] {
+            assert_eq!(
+                sanitize_instance_host(ok).as_deref(),
+                Some(ok),
+                "must accept {ok}"
+            );
+        }
+        let too_long = "a".repeat(254);
+        for bad in [
+            "bad'host",
+            "bad;host",
+            "bad host",
+            "user@host",
+            "host/path",
+            "",
+            too_long.as_str(),
+        ] {
+            assert_eq!(sanitize_instance_host(bad), None, "must reject {bad:?}");
+        }
+    }
+
+    #[test]
+    fn token_comment_includes_host_when_sanitizable_and_falls_back_otherwise() {
+        let tenant = uuid::Uuid::nil();
+        assert_eq!(
+            token_comment(Some("uptrakit.example.com"), &tenant),
+            format!("Uptrakit managed token (uptrakit.example.com, tenant {tenant})")
+        );
+        assert_eq!(
+            token_comment(None, &tenant),
+            format!("Uptrakit managed token (tenant {tenant})")
+        );
+        // Failure path: a rejected host degrades to the tenant-only comment.
+        assert_eq!(
+            token_comment(Some("evil' --injected"), &tenant),
+            format!("Uptrakit managed token (tenant {tenant})")
+        );
+    }
+
     #[tokio::test]
     async fn check_pve_state_fresh_cluster() {
         let tid = tenant();
@@ -762,7 +859,7 @@ mod tests {
             ("pveum acl modify", ok("")),
             ("hostname -f", ok("pve.example.com")),
         ]);
-        let creds = create_pve_api_credentials(&executor, &tid)
+        let creds = create_pve_api_credentials(&executor, &tid, Some("uptrakit.example.com"))
             .await
             .expect("credential creation succeeds");
 
@@ -774,6 +871,13 @@ mod tests {
         assert!(
             token_add_line.contains("--privsep=1"),
             "token add must request privsep=1: {token_add_line}"
+        );
+        assert!(
+            token_add_line.contains(&format!(
+                "--comment 'Uptrakit managed token (uptrakit.example.com, tenant {tid})'"
+            )),
+            "token add must carry the host+tenant comment when a sanitizable host is \
+             supplied: {token_add_line}"
         );
         let user_add_line = calls
             .iter()
@@ -803,7 +907,7 @@ mod tests {
             ("pveum acl modify", ok("")),
             ("hostname -f", ok("pve.example.com")),
         ]);
-        regenerate_pve_api_token(&executor, &tid)
+        regenerate_pve_api_token(&executor, &tid, None)
             .await
             .expect("regeneration succeeds");
 
@@ -824,6 +928,13 @@ mod tests {
             remove_idx < add_idx && add_idx < acl_idx,
             "expected order remove < add < first acl modify: {calls:?}"
         );
+        let add_call = &calls[add_idx];
+        assert!(
+            add_call.contains(&format!(
+                "--comment 'Uptrakit managed token (tenant {tid})'"
+            )),
+            "no instance host supplied must yield the tenant-only comment: {add_call}"
+        );
 
         // Variant: an acl modify failure must fail the whole regeneration.
         let executor2 = ScriptedRemoteExecutor::with_matcher(vec![
@@ -831,7 +942,7 @@ mod tests {
             ("pveum user token add", ok(token_json)),
             ("pveum acl modify", err(1, "denied")),
         ]);
-        let result = regenerate_pve_api_token(&executor2, &tid).await;
+        let result = regenerate_pve_api_token(&executor2, &tid, None).await;
         assert!(
             result.is_err(),
             "an acl modify failure during regeneration must not silently succeed"
