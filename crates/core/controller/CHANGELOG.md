@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-v0.0.7...uptrakit-controller-v0.0.8) - 2026-08-19
+
+### Added
+
+- *(controller)* send instance host in service settings
+- *(oauth)* [**breaking**] require explicit oauth.mcp_enabled opt-in (drop canonical-host auto-enable)
+- *(agent-ssh)* plumb controller instance host to infra plugin context
+- *(plugins/proxmox)* stamp instance and tenant into PVE token comments
+- *(plugins/uv)* controller-side release fetching with SSRF-forked client
+- *(plugins/uv)* add Simple-API parsing with PEP 700 + filename fallback
+- *(plugins/uv)* add pep440_rs dependency and release-fetch error variants
+- *(plugins/uv)* implement discovery and version detection
+- *(plugins/uv)* add hard-anchored uv tool list parser
+- *(plugins/uv)* scaffold uv plugin crate with config and identifier rules
+
+### Fixed
+
+- *(pve)* correct ADR-0044 self-repair condition and ack-marker history, pin upsert invariants
+- *(proxmox)* pin regenerate host wiring, escape rejected host in logs
+- *(plugins/proxmox)* correct fold doc comment, add fold-behaviour test
+- *(plugins/uv)* tighten index_url validation and make batch guard test discriminating
+- *(plugins/uv)* scope drift guard to real format changes, de-vacuum tests
+- *(plugins/uv)* use dotted-kebab type id and fail loud on parse drift
+
+### Other
+
+- *(settings)* read oauth.canonical_host via the typed settings API
+- *(controller)* cover embedded instance host filter and document the parameter
+- *(frontend)* refresh the AGENTS.md technology-stack versions
+- *(deps)* upgrade Skeleton UI 4.15.2 -> 5.0.0
+- *(deps)* override js-yaml ^4.3.1 and patch brace-expansion
+- *(deps)* bump frontend majors jsdom 30, jest-dom 7, markdown-it 15
+- *(deps)* bump 19 in-range frontend npm packages
+- *(deps)* drop unused paste dependency from plugin-infrastructure-core
+- *(plugins/proxmox)* drop migration bookkeeping columns from proxmox_host_state
+- *(pve)* fix stale migration wording and dead test arm after cleanup
+- *(plugins/proxmox)* collapse ack-marker/operative config-id duality
+- *(plugins/proxmox)* drop legacy-user probe and delete_pve_user from pve_setup
+- *(plugins/proxmox)* remove legacy-user migration branches from credential flow
+- *(plugins/uv)* cover Simple-API HTTP status handling, narrow helper visibility
+- *(plugins/uv)* add typed crate error, adopt shared identifier guard
+- *(plugins/uv)* pin drift guard against mixed diagnostic and drift output
+- *(plugins/uv)* pin PEP440/CRLF/last-wins parsing, de-vacuum weak tests
+- *(plugins/uv)* pin empty index_url rejection branch
+
 ## [0.0.7](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-v0.0.6...uptrakit-controller-v0.0.7) - 2026-08-18
 
 ### Added

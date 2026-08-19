@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.4...uptrakit-service-sdk-v0.0.5) - 2026-08-19
+
+### Added
+
+- *(wire)* add optional instance_host to ServiceSettingsPayload
+- *(plugins/uv)* implement discovery and version detection
+
+### Fixed
+
+- *(plugins/uv)* use dotted-kebab type id and fail loud on parse drift
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.3...uptrakit-service-sdk-v0.0.4) - 2026-08-18
 
 ### Other

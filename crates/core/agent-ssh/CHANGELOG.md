@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.7...uptrakit-agent-ssh-v0.0.8) - 2026-08-19
+
+### Added
+
+- *(agent-ssh)* plumb controller instance host to infra plugin context
+
+### Other
+
+- *(agent-ssh)* document instance host origin and trust level
+- *(pve)* fix stale migration wording and dead test arm after cleanup
+- *(plugins/proxmox)* collapse ack-marker/operative config-id duality
+- *(agent-ssh-runtime)* delete proxmox_host_state via sea_query builder
+
 ## [0.0.7](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.6...uptrakit-agent-ssh-v0.0.7) - 2026-08-18
 
 ### Added
