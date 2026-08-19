@@ -118,13 +118,19 @@ fn controller_capabilities_for_embedded() -> std::collections::BTreeSet<Capabili
     .collect()
 }
 
-fn embedded_service_settings(tenant_id: Option<Uuid>) -> ServiceSettingsPayload {
+fn embedded_service_settings(
+    tenant_id: Option<Uuid>,
+    instance_host: Option<String>,
+) -> ServiceSettingsPayload {
     // Non-zero: tokio::time::interval panics on Duration::ZERO.
     // The embedded loop ignores the ping timer entirely.
     let mut settings = ServiceSettingsPayload::new(0, std::time::Duration::from_secs(60))
         .with_capabilities(controller_capabilities_for_embedded());
     if let Some(tid) = tenant_id {
         settings = settings.with_tenant_id(tid);
+    }
+    if let Some(host) = instance_host.filter(|h| !h.is_empty()) {
+        settings = settings.with_instance_host(host);
     }
     settings
 }
@@ -260,9 +266,20 @@ impl EmbeddedServiceHost {
 
         // Send ServiceSettings to the embedded service. `run_embedded_service` waits
         // for this as its first message before entering the event loop.
+        let instance_host = uptrakit_web_api::settings_store::load_global_setting_raw(
+            state.db(),
+            uptrakit_web_api::SettingKey::OauthCanonicalHost.as_str(),
+        )
+        .await
+        .unwrap_or_else(|error| {
+            tracing::debug!(error = %error, "failed to load canonical host for embedded service settings");
+            None
+        })
+        .and_then(|v| v.as_str().map(ToOwned::to_owned));
+
         ctrl_tx
             .send(ControllerMessage::ServiceSettings(
-                embedded_service_settings(tenant_id),
+                embedded_service_settings(tenant_id, instance_host),
             ))
             .await
             .map_err(|e| {

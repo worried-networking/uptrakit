@@ -458,6 +458,7 @@ fn build_service_settings(
     renewal_window_hours: u16,
     ca_bundle_hash: String,
     trust_domain: String,
+    instance_host: Option<String>,
 ) -> ServiceSettingsPayload {
     let capabilities = parse_capabilities(&service_status.capabilities_json);
     let profile = ServiceProfile::from_capabilities(&capabilities);
@@ -478,6 +479,9 @@ fn build_service_settings(
     if !trust_domain.is_empty() {
         settings = settings.with_trust_domain(trust_domain);
     }
+    if let Some(host) = instance_host.filter(|h| !h.is_empty()) {
+        settings = settings.with_instance_host(host);
+    }
     settings
 }
 
@@ -491,11 +495,23 @@ async fn send_service_settings(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
 ) -> Result<(), ()> {
+    let instance_host = crate::settings_store::load_global_setting_raw(
+        state.db(),
+        crate::SettingKey::OauthCanonicalHost.as_str(),
+    )
+    .await
+    .unwrap_or_else(|error| {
+        tracing::debug!(error = %error, "failed to load canonical host for service settings");
+        None
+    })
+    .and_then(|v| v.as_str().map(ToOwned::to_owned));
+
     let settings = build_service_settings(
         service_status,
         state.settings.renewal_window_hours(),
         state.cert.ca_snapshot.borrow().bundle_hash.clone(),
         state.tls_config_rx.borrow().trust_domain.clone(),
+        instance_host,
     );
     let settings_msg = ControllerMessage::ServiceSettings(settings);
 
@@ -1107,6 +1123,7 @@ mod tests {
             6,
             "bundle-hash".to_string(),
             String::new(),
+            None,
         );
         assert_eq!(settings.tenant_id, None);
     }
@@ -1119,8 +1136,48 @@ mod tests {
             6,
             "bundle-hash".to_string(),
             String::new(),
+            None,
         );
         assert_eq!(settings.tenant_id, Some(tenant_id));
+    }
+
+    #[test]
+    fn build_service_settings_sets_instance_host_when_present() {
+        let settings = build_service_settings(
+            &test_service_status(None),
+            24,
+            String::new(),
+            String::new(),
+            Some("uptrakit.example.com".to_string()),
+        );
+        assert_eq!(
+            settings.instance_host.as_deref(),
+            Some("uptrakit.example.com")
+        );
+    }
+
+    #[test]
+    fn build_service_settings_omits_empty_instance_host() {
+        let settings = build_service_settings(
+            &test_service_status(None),
+            24,
+            String::new(),
+            String::new(),
+            Some(String::new()),
+        );
+        assert_eq!(settings.instance_host, None);
+    }
+
+    #[test]
+    fn build_service_settings_omits_instance_host_when_none() {
+        let settings = build_service_settings(
+            &test_service_status(None),
+            24,
+            String::new(),
+            String::new(),
+            None,
+        );
+        assert_eq!(settings.instance_host, None);
     }
 
     #[test]
