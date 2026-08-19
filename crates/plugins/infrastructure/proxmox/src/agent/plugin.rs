@@ -52,7 +52,6 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         vec![
             "Ensure uptrakit@pve user + per-tenant API token".to_string(),
             "Ensure user-ceiling and per-token ACL grants".to_string(),
-            "Advance legacy-user migration when pending".to_string(),
         ]
     }
 
@@ -91,12 +90,6 @@ impl HostLifecycle for crate::ProxmoxPlugin {
                     } else {
                         actions.push(
                             "Create per-tenant Proxmox API token on uptrakit@pve".to_string(),
-                        );
-                    }
-                    if state.legacy_user.is_some() {
-                        actions.push(
-                            "Migrate legacy per-tenant PVE user to the shared uptrakit@pve scheme"
-                                .to_string(),
                         );
                     }
                 }
@@ -238,18 +231,13 @@ impl HostLifecycle for crate::ProxmoxPlugin {
                 .await;
         lines.extend(output.summary_lines);
 
-        // Repair ACL/role grants when this run reused an existing token OR
-        // is mid-migration (legacy stored, ack marker not yet returned —
-        // which can persist for an extended window), under a healthy
-        // (non-degraded) read. A degraded read cannot be trusted to gate a
-        // further round of `pveum` mutations. Every other outcome
-        // (created/regenerated/failed/skipped) already ran or attempted the
-        // relevant provisioning itself.
+        // Repair ACL/role grants when this run reused an existing token,
+        // under a healthy (non-degraded) read. A degraded read cannot be
+        // trusted to gate a further round of `pveum` mutations. Every other
+        // outcome (created/regenerated/failed/skipped) already ran or
+        // attempted the relevant provisioning itself.
         if !output.degraded
-            && matches!(
-                output.outcome,
-                PveCredentialOutcome::Reused | PveCredentialOutcome::MigrationPending
-            )
+            && output.outcome == PveCredentialOutcome::Reused
             && let Some(tid_uuid) = ctx.tenant_id.and_then(|s| uuid::Uuid::parse_str(s).ok())
         {
             match pve_setup::ensure_pve_privileges(executor, &tid_uuid).await {
