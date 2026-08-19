@@ -1017,6 +1017,9 @@ pub struct SurfaceRuntimeContext<'a> {
     pub private_key_der: Option<&'a [u8]>,
     pub service_id: Option<uuid::Uuid>,
     pub tenant_id: Option<uuid::Uuid>,
+    /// The Uptrakit instance's public host, from the controller's
+    /// `oauth.canonical_host` setting via `ServiceSettingsPayload`;
+    /// unvalidated operator input — sanitize before use.
     pub instance_host: Option<&'a str>,
     pub bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
     pub surface_proxy: &'a Arc<uptrakit_service_sdk::ServiceSurfaceProxy>,

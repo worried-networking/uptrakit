@@ -318,6 +318,10 @@ pub struct SshAgentIdentity {
 pub struct SshAgentSettings {
     pub tenant_id: Option<uuid::Uuid>,
     pub ui_surfaces_enabled: bool,
+    /// The Uptrakit instance's public host, delivered from the controller's
+    /// `oauth.canonical_host` setting via `ServiceSettingsPayload` — a
+    /// controller session fact, never a surface-request param; unvalidated
+    /// operator input — sanitize before use.
     pub instance_host: Option<String>,
 }
 
@@ -326,6 +330,10 @@ pub struct RuntimeSessionState {
     pub service_id: Option<uuid::Uuid>,
     pub tenant_id: Option<uuid::Uuid>,
     pub private_key_der: Option<Vec<u8>>,
+    /// The Uptrakit instance's public host, from the controller's
+    /// `oauth.canonical_host` setting via `ServiceSettingsPayload`;
+    /// unvalidated operator input — sanitize before use. Session-scoped:
+    /// refreshed or cleared on every `ServiceSettings`.
     pub instance_host: Option<String>,
 }
 
@@ -550,7 +558,7 @@ where
         transport: &mut dyn ServiceTransport,
     ) -> Result<(), TransportError> {
         // Session-scoped: refreshed (or cleared) on every ServiceSettings.
-        self.session_state.instance_host = settings.instance_host.clone();
+        self.session_state.instance_host = settings.instance_host;
 
         if let Some(tenant_id) = settings.tenant_id {
             // Fall back to the persisted tenant id when the in-memory field is
