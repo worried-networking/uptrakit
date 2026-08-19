@@ -428,13 +428,7 @@ tenant ID>`), created with privilege separation on so the token's effective
   settings from the controller yet), PVE credential creation is skipped with
   a warning and retried on the next bootstrap or sync.
 
-Existing deployments created under an earlier per-tenant-user model are
-migrated to this shared-user model automatically, but migration completes
-over two syncs run with a privileged (root) SSH session — every `pveum` call
-needs a root-capable session, and the second phase needs the acknowledgment
-recorded by the first. See
-[Migrating to the Shared PVE Identity Model](proxmox.md#migrating-to-the-shared-pve-identity-model)
-for the full two-phase mechanics, and
+See
 [SSH Agent Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/ssh-agent.md#pve-identity-and-credential-flow)
 and
 [ADR-0044](https://github.com/worried-networking/uptrakit/tree/main/docs/adr/0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)

@@ -194,14 +194,18 @@ the cluster: if the cluster already has a token for the same tenant (from
 bootstrapping another node in the same cluster) but the agent has no such
 acknowledgment yet, the token is regenerated rather than reused.
 
-> [!NOTE]
-> Deployments upgrading from an earlier release used a different identity
-> model: a separate PVE user per tenant (`uptrakit-{tenant_uuid}@pve`) with a
-> single, non-privilege-separated token, using the same custom `Uptrakit*`
-> roles described above (or the built-in `PVEAuditor` role on deployments
-> predating those roles). See
-> [Migrating to the Shared PVE Identity Model](#migrating-to-the-shared-pve-identity-model)
-> below for how upgrades move to the model described above.
+Each token created or regenerated this way carries a comment visible in
+`pveum user token list 'uptrakit@pve'`: `Uptrakit managed token (<instance
+host>, tenant <tenant uuid>)` when the controller's `oauth.canonical_host`
+setting is configured and sanitizes cleanly, or `Uptrakit managed token
+(tenant <tenant uuid>)` when it is not set (the default) or does not
+sanitize. The comment is stamped only at token creation or regeneration
+time -- changing `oauth.canonical_host` later does not update the comment
+on tokens that already exist. A canonical-host change also does not reach
+an agent until its next reconnect to the controller; for the controller's
+built-in SSH agent specifically, that means the next controller restart,
+since embedded services receive settings once at controller boot and never
+reconnect.
 
 ### How It Works
 
@@ -252,125 +256,6 @@ If matching fails, use the **Sync Host** row action in the web UI (or run
 `uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync <host-id>`)
 to populate the node name, then retry.
 
-## Migrating to the Shared PVE Identity Model
-
-Deployments upgrading from an earlier release migrate automatically from the
-legacy per-tenant-user model (`uptrakit-{tenant_uuid}@pve` plus a single
-non-privilege-separated token) to the shared-user model described in
-[Automatic Credential Provisioning](#automatic-credential-provisioning). No
-manual credential work is required -- only privileged syncs, as detailed
-below.
-
-### Privileged session requirement
-
-Credential provisioning and migration bookkeeping run on every sync of a PVE
-host, but `pveum` is never in the agent's sudo allowlist -- it can only
-succeed in an SSH session that is already root. Nothing progresses until you
-sync (or bootstrap) the PVE host using a privileged (root) SSH session;
-syncing as an unprivileged user makes no forward progress.
-
-### Sync twice
-
-Migration is a two-phase, cluster-scoped process:
-
-1. **First privileged sync** — the agent records the legacy user (without
-   touching it), creates the new per-tenant token, and proves it works by
-   presenting it to `https://localhost:8006/api2/json/version` and requiring
-   an HTTP 200 response. If the proof fails, the run reports a failure and
-   stops -- the legacy user is never deleted on an unproved token. On
-   success, the controller acknowledges the new plugin configuration back to
-   the agent.
-2. **Second privileged sync** — with that acknowledgment in hand, the agent
-   deletes the legacy `uptrakit-{tenant_uuid}@pve` user and promotes the new
-   configuration to active use.
-
-Both syncs must use a privileged session for migration to complete.
-
-### Reading the outcome
-
-Each sync's summary reports one of:
-
-- `migration pending` -- normal after the first privileged sync; migration is
-  in progress and the next privileged sync should complete it.
-- `migration STUCK after N attempts` -- legacy-user removal has failed
-  repeatedly (5 or more attempts) and needs attention; confirm the session is
-  genuinely privileged and that the legacy user hasn't been altered manually.
-- `PVE state read degraded; migration paused this run (...)` -- a transient
-  read failure. Migration bookkeeping is skipped for that run only; retry on
-  the next sync.
-
-### Aftermath
-
-Once migration completes, the cluster has: the shared `uptrakit@pve` user and
-its per-tenant token in place, and the legacy `uptrakit-{tenant_uuid}@pve`
-user gone. Nothing renames the old plugin configuration -- migration creates
-a **new** plugin configuration named `pve-{cluster_name}` (or
-`pve-{node_name}-{first 8 characters of the host ID}` for a standalone node)
-and leaves the old, legacy-named `pve-{host_id}` configuration in place,
-still enabled, holding a token that no longer works once the legacy user is
-deleted. See [Controller-side cleanup](#controller-side-cleanup) below to
-remove it.
-
-### Deployments with nothing to migrate
-
-A deployment that never synced a PVE host before this release has no legacy
-state to migrate -- its first sync provisions directly under the shared-user
-model above.
-
-### Split-agent clusters
-
-Migration is scoped to the PVE cluster, not to any single SSH agent. If
-different nodes of the same cluster are managed by different SSH agent
-instances, migration still completes per cluster: each node converges to the
-new model as its own agent instance syncs it with a privileged session.
-
-### Rollback boundary
-
-Once the legacy user has been deleted (end of the second privileged sync),
-rolling back to an older Uptrakit release is not simply reversible: an older
-agent does not recognize the shared-user/token model and expects the legacy
-user to still exist. Rolling back after migration completes means
-re-provisioning PVE credentials from scratch.
-
-### If the plugin config is deleted mid-migration
-
-Avoid deleting a `pve-*` plugin configuration while migration is still
-pending. The agent's local migration bookkeeping only tracks whether it has
-already received the controller's acknowledgment for a plugin configuration --
-it does not re-verify that the configuration still exists on the controller.
-Deleting it mid-migration can leave the agent believing migration is on track
-while the controller has no matching configuration. Wait for the aftermath
-state above before deleting or renaming a `pve-*` configuration.
-
-**If you already deleted it:** re-syncing or re-bootstrapping the same host
-does not recover on its own -- the agent's local PVE token is untouched by
-the controller-side deletion, so it keeps reusing that token and never
-re-reports a plugin configuration to the controller.
-
-The reliable recovery is to delete this tenant's token on the PVE node
-itself, as root:
-
-```bash
-pveum user token remove 'uptrakit@pve' 'tenant-{tenant_uuid}'
-```
-
-This is the same command as [Removing one tenant](#removing-one-tenant)
-below. With the token gone, the next privileged sync observes it missing and
-stops reusing the acknowledged plugin configuration id -- it takes the
-create branch instead, issuing a fresh token and reporting a new plugin
-configuration.
-
-Removing the host from Uptrakit and re-bootstrapping it
-(`uptrakit-agent-ssh host remove`, or the equivalent web UI action -- see
-[Host Management -- Removing a host](ssh-agent-host-management.md#removing-a-host))
-recovers only on a **standalone** PVE node: the re-added host gets a fresh
-host ID with no local tracking state, so the next bootstrap provisions PVE
-credentials and reports a plugin configuration from a clean slate. It does
-not work on a multi-node cluster -- the removed host's local Proxmox state
-row is not cleaned up by host removal, so it keeps the same node name and
-still matches the cluster on the next sync, feeding the same acknowledged
-configuration id right back in.
-
 ## Deprovisioning
 
 Use these steps when you stop using Uptrakit's Proxmox VE integration
@@ -412,23 +297,6 @@ pveum role delete 'UptrakitScaling'
 > still has a token on that user breaks that tenant's PVE integration --
 > always confirm the token list is empty first.
 
-### Cleaning up a never-fully-migrated legacy user
-
-If a deployment never completed the migration described in
-[Migrating to the Shared PVE Identity Model](#migrating-to-the-shared-pve-identity-model)
-(for example, PVE syncs were never run with a privileged session), a legacy
-per-tenant user may still be present:
-
-```bash
-pveum user list
-```
-
-Look for any remaining `uptrakit-*@pve` entries and remove them:
-
-```bash
-pveum user delete 'uptrakit-{tenant_uuid}@pve'
-```
-
 ### Host-side cleanup
 
 Removing a host from Uptrakit (`uptrakit-agent-ssh host remove`, or deleting
@@ -446,14 +314,6 @@ Deleting the `pve-*` plugin configuration in the web UI removes only the
 controller's record of it -- it does **not** remove anything on the PVE node.
 Use the `pveum` commands above to remove the actual PVE-side user, token, and
 roles.
-
-After a completed migration (see [Aftermath](#aftermath) above), the old,
-legacy-named `pve-{host_id}` plugin configuration is left behind alongside
-the new one -- `pve-{cluster_name}` for a cluster, or
-`pve-{node_name}-{first 8 characters of the host ID}` for a standalone node.
-It holds a token for the now-deleted legacy user and no longer works --
-delete it from the web UI once you've confirmed the new configuration is in
-place and working.
 
 ## Security Considerations
 
