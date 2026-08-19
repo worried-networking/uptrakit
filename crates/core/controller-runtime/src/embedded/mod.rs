@@ -270,9 +270,9 @@ impl EmbeddedServiceHost {
 
         // Send ServiceSettings to the embedded service. `run_embedded_service` waits
         // for this as its first message before entering the event loop.
-        let instance_host = uptrakit_web_api::settings_store::load_global_setting_raw(
+        let instance_host = uptrakit_web_api::settings_store::load_global_setting(
             state.db(),
-            uptrakit_web_api::SettingKey::OauthCanonicalHost.as_str(),
+            uptrakit_web_api::SettingKey::OauthCanonicalHost,
         )
         .await
         .unwrap_or_else(|error| {

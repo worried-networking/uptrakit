@@ -497,9 +497,9 @@ async fn send_service_settings(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
 ) -> Result<(), ()> {
-    let instance_host = crate::settings_store::load_global_setting_raw(
+    let instance_host = crate::settings_store::load_global_setting(
         state.db(),
-        crate::SettingKey::OauthCanonicalHost.as_str(),
+        crate::SettingKey::OauthCanonicalHost,
     )
     .await
     .unwrap_or_else(|error| {
