@@ -127,23 +127,33 @@ attempts"` in the summary line once the cap is passed), never silently dropped.
   (deleted out-of-band, or by a peer node's own flow), the flow reconciles state directly — promoting cluster rows
   if ack evidence exists, or simply clearing the stale marker otherwise — without attempting a redundant delete.
 
-### A distinct, never-cleared ack marker
+### A distinct, never-cleared ack marker (historical — removed by the migration cleanup)
 
-The phase-2 gate does not fire on a bare `pve_plugin_config_id` alone. `new_pve_plugin_config_id` is a **separate**
-column, written only once the controller has confirmed receipt of the new config
-(`HostLifecycle::on_plugin_config_reported` → `db_ops::set_new_plugin_config_id`), and the migration flow itself
-never clears it once set — not even `promote_cluster_rows`, which promotes the operative id but leaves the ack
-marker in place as a permanent record that this cluster has confirmed the new identity at least once. The one
-exception outside the migration flow is a deliberate tenant-rebind wipe: `db_ops::wipe_all`
-(`crates/plugins/infrastructure/proxmox/src/agent/db_ops.rs:272`), called from `HostLifecycle::on_tenant_changed`,
-deletes every `proxmox_host_state` row — ack marker included — because a rebind means the row's prior migration
-history belongs to a different tenant and must not be reused
-(`legacy_stored_without_ack_marker_never_deletes`,
-`reuse_bare_operative_id_without_ack_marker_is_not_reused` in `credential_flow.rs`'s test module). This closes a
-narrow but real failure mode: a bare `pve_plugin_config_id` can be set by paths that never round-tripped through
-the controller (for example the coalesce-fill on reuse), so gating deletion of the legacy user on it alone would
-risk deleting the only surviving identity before the replacement was durably confirmed anywhere but this one
-agent's memory.
+While the two-phase migration was live, its phase-2 delete gate did not fire on a bare `pve_plugin_config_id`
+alone. `new_pve_plugin_config_id` was a **separate** column, written only once the controller had confirmed receipt
+of the new config (`HostLifecycle::on_plugin_config_reported` → `db_ops::set_new_plugin_config_id`), and the
+migration flow itself never cleared it once set — not even `promote_cluster_rows`, which promoted the operative id
+but left the ack marker in place as a permanent record that this cluster had confirmed the new identity at least
+once. The rationale at the time: a bare `pve_plugin_config_id` could be set by paths that never round-tripped
+through the controller (for example the coalesce-fill on reuse), so gating deletion of the legacy user on it alone
+would have risked deleting the only surviving identity before the replacement was durably confirmed anywhere but
+this one agent's memory.
+
+Migration `m20260817_000001_drop_pve_migration_columns`
+(`crates/plugins/infrastructure/proxmox/src/agent/migration.rs`) dropped `new_pve_plugin_config_id` along with
+`legacy_pve_user` and `migration_attempts`, folding the ack-marker mechanism away entirely. `pve_plugin_config_id`
+is now the sole operative id, and at HEAD its only writers are `db_ops::set_plugin_config_id` (invoked from the
+controller-ack path, `HostLifecycle::on_plugin_config_reported`) and the Branch 4 reuse-persist site in
+`credential_flow::run_locked` — the never-round-tripped write path the old rationale worried about no longer
+exists, which is what makes reading `pve_plugin_config_id` bare safe now. `credential_flow.rs`'s
+`reuse_bare_operative_id_is_reused` test pins exactly this post-removal behavior: a bare, already-stored
+`pve_plugin_config_id` IS reused once `check_pve_state` also confirms the token still exists on the cluster — with
+no separate ack marker gating that decision.
+
+The still-true exception is the deliberate tenant-rebind wipe: `db_ops::wipe_all`
+(`crates/plugins/infrastructure/proxmox/src/agent/db_ops.rs:186`), called from `HostLifecycle::on_tenant_changed`,
+deletes every `proxmox_host_state` row outright — because a rebind means the row's prior identity belongs to a
+different tenant and must not be reused, independent of whichever columns that row happens to carry.
 
 ### Regenerate-on-ack-loss
 
@@ -181,9 +191,13 @@ per-tenant, independently of the user-level ones.
 `uptrakit@pve` is one identity every tenant on a cluster depends on. If its user-level ACLs are ever revoked or
 misconfigured out-of-band, every tenant's token loses effective privileges simultaneously under the intersection
 rule, regardless of what each token's own grants say. The sync path is the accepted mitigation, not a full defense:
-`on_host_synced` re-runs `ensure_pve_privileges` (both roles and ACLs) whenever this run's outcome was `Reused` or
-`MigrationPending` under a healthy (non-degraded) state read, so drift on the shared user's ceiling self-repairs on
-the next sync rather than requiring an operator to notice and re-provision by hand.
+`on_host_synced` re-runs `ensure_pve_privileges` (both roles and ACLs) only when all three of the following hold on
+this run (`plugin.rs:239-241`) — the credential-flow outcome is `Reused`, the state read is healthy (non-degraded),
+and `ctx.tenant_id` parses as a UUID — so drift on the shared user's ceiling self-repairs on the next sync that
+satisfies all three, rather than requiring an operator to notice and re-provision by hand. It is not gated on
+outcome alone: a `Reused` run under a degraded read, or a `Reused` run with no parseable tenant id, does not
+trigger repair; every other outcome (created/regenerated/failed/skipped) is left to whatever provisioning that
+outcome's own branch already performed.
 
 ### The plugin config carries the provisioning node's `api_url`
 

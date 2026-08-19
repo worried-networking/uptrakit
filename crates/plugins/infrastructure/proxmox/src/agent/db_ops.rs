@@ -271,6 +271,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upsert_with_none_node_name_preserves_existing_node_name() {
+        let db = setup_agent_db().await;
+        upsert_host_state(&db, "host-1", true, Some("node1".to_string()))
+            .await
+            .expect("seed with node name");
+        // Second upsert passes `None` for `pve_node_name` — as re-detection
+        // does when node-name detection fails on a later sync
+        // (`plugin.rs`'s `node_name` becomes `None` on a `detect_pve_node_name`
+        // error). "node1" differs from the fixture default (no row at all /
+        // `None`), so a bug that unconditionally overwrote with `None` would
+        // leave this assertion red rather than trivially passing.
+        upsert_host_state(&db, "host-1", true, None)
+            .await
+            .expect("upsert with no node name");
+        let row = find_host_state(&db, "host-1")
+            .await
+            .expect("read")
+            .expect("row exists");
+        assert_eq!(row.pve_node_name.as_deref(), Some("node1"));
+    }
+
+    #[tokio::test]
+    async fn upsert_never_clears_plugin_config_id() {
+        let db = setup_agent_db().await;
+        upsert_host_state(&db, "host-1", true, Some("node1".to_string()))
+            .await
+            .expect("seed host");
+        set_plugin_config_id(&db, "host-1", "cfg-a")
+            .await
+            .expect("stamp controller-ack config id");
+        // Exercise the upsert path again (e.g. a later sync re-detecting PVE
+        // node state) — it must never touch `pve_plugin_config_id`. "cfg-a"
+        // differs from the fixture default (`None`), so a bug that cleared
+        // the column on upsert would leave this assertion red rather than
+        // trivially passing.
+        upsert_host_state(&db, "host-1", true, Some("node1".to_string()))
+            .await
+            .expect("re-upsert");
+        let row = find_host_state(&db, "host-1")
+            .await
+            .expect("read")
+            .expect("row exists");
+        assert_eq!(row.pve_plugin_config_id.as_deref(), Some("cfg-a"));
+    }
+
+    #[tokio::test]
     async fn tenant_rebind_wipes_local_state() {
         let db = setup_agent_db().await;
         upsert_host_state(&db, "h1", true, Some("node1".to_string()))
