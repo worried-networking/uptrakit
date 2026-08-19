@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use uptrakit_command::CommandExecutor;
+use uptrakit_command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, HookShell, HostRequirements, HostRuntime, LifecycleHook,
     PluginFamily, PreUpdateHookResult, Result, UpdateLifecycleContext, UpdateOutputSender,
@@ -12,15 +12,15 @@ use crate::config::ShellHookConfig;
 
 /// Update lifecycle plugin that runs shell commands before/after updates.
 ///
+/// Commands run through the host runtime's injected [`CommandExecutor`], so a
+/// hook configured for an SSH-managed host executes on the target host (local
+/// or SSH), not the agent's own machine.
+///
 /// - **Pre-hook**: runs `pre_command` if set; non-zero exit aborts the update.
 /// - **Post-hook**: runs `post_command` if set; respects `on_failure` flag;
 ///   errors are logged but non-fatal.
 pub struct ShellHookPlugin {
     config: ShellHookConfig,
-    #[expect(
-        dead_code,
-        reason = "retained for future use; executor held to extend lifetime"
-    )]
     executor: Arc<dyn CommandExecutor>,
 }
 
@@ -33,6 +33,55 @@ impl ShellHookPlugin {
         let executor = runtime.executor();
         Ok(Self { config, executor })
     }
+
+    /// Run a shell hook command through the host runtime's injected
+    /// [`CommandExecutor`], so it targets the correct host (local **or** SSH),
+    /// never the agent's own machine.
+    ///
+    /// Returns `Ok(exit_code)` for any command that actually ran, including
+    /// non-zero exits: the executor surfaces a non-zero exit as
+    /// [`uptrakit_command::CommandError::CommandFailed`], which this method
+    /// unwraps back to the code so callers decide the semantics (pre-hook abort
+    /// vs. post-hook non-fatal warn).
+    ///
+    /// # Errors
+    /// Returns [`uptrakit_plugin_infrastructure_core::PluginError::InstallFailed`]
+    /// only on a genuine transport/spawn failure (SSH unreachable, unsupported
+    /// shell, or a `NoopCommandExecutor` `UnsupportedOperation`) — never for a
+    /// hook that merely exited non-zero. (This `# Errors` section is included as
+    /// consistent with surrounding practice, not because the coding-standards
+    /// `# Errors` rule mandates it — the method is private to the crate.)
+    async fn run_shell_command(
+        &self,
+        command: &str,
+        shell: HookShell,
+        output_tx: &UpdateOutputSender,
+    ) -> Result<i32> {
+        let spec = CommandSpec::shell_with(command, shell);
+        match self.executor.execute(&spec, output_tx).await {
+            Ok(output) => {
+                tracing::debug!(
+                    exit_code = output.exit_code,
+                    output_len = output.output.len(),
+                    "shell hook completed"
+                );
+                Ok(output.exit_code)
+            }
+            Err(e) => {
+                // A command that ran but exited non-zero comes back as
+                // CommandFailed(code); unwrap it so callers branch on the code.
+                if let uptrakit_command::CommandError::CommandFailed(code) = e.current_context() {
+                    return Ok(*code);
+                }
+                // Anything else is a real transport/spawn failure.
+                Err(rootcause::report!(
+                    uptrakit_plugin_infrastructure_core::PluginError::InstallFailed(format!(
+                        "shell hook command failed: {e}"
+                    ))
+                ))
+            }
+        }
+    }
 }
 
 declare_plugin!(ShellHookPlugin, ShellHookConfig, "hook.shell", {
@@ -43,35 +92,6 @@ declare_plugin!(ShellHookPlugin, ShellHookConfig, "hook.shell", {
     config_test: [ConfigTestKind::UpdateCommandValidation, ConfigTestKind::PreUpdateHook, ConfigTestKind::PostUpdateHook],
     roles: [LifecycleHook],
 });
-
-/// Run a shell command via the `run_command_with_shell` utility.
-///
-/// Returns `Ok(exit_code)` on success. On non-zero exit, the command crate
-/// returns `CommandError::CommandFailed(exit_code)` — we extract and return
-/// the exit code to let callers decide the semantics (abort vs. warn).
-async fn run_shell_command(
-    command: &str,
-    shell: HookShell,
-    output_tx: &UpdateOutputSender,
-) -> Result<i32> {
-    match uptrakit_command::run_command_with_shell(command, shell, output_tx).await {
-        Ok((output, exit_code)) => {
-            tracing::debug!(exit_code, output_len = output.len(), "shell hook completed");
-            Ok(exit_code)
-        }
-        Err(e) => {
-            // Extract exit code from CommandFailed if possible
-            if let uptrakit_command::CommandError::CommandFailed(code) = e.current_context() {
-                return Ok(*code);
-            }
-            Err(rootcause::report!(
-                uptrakit_plugin_infrastructure_core::PluginError::InstallFailed(format!(
-                    "shell hook command failed: {e}"
-                ))
-            ))
-        }
-    }
-}
 
 #[async_trait]
 impl LifecycleHook for ShellHookPlugin {
@@ -95,7 +115,9 @@ impl LifecycleHook for ShellHookPlugin {
             "running shell pre-update hook"
         );
 
-        let exit_code = run_shell_command(cmd, self.config.shell, output_tx).await?;
+        let exit_code = self
+            .run_shell_command(cmd, self.config.shell, output_tx)
+            .await?;
 
         if exit_code != 0 {
             return Ok(PreUpdateHookResult::abort(format!(
@@ -136,7 +158,9 @@ impl LifecycleHook for ShellHookPlugin {
             "running shell post-update hook"
         );
 
-        let exit_code = run_shell_command(cmd, self.config.shell, output_tx).await?;
+        let exit_code = self
+            .run_shell_command(cmd, self.config.shell, output_tx)
+            .await?;
 
         if exit_code != 0 {
             tracing::warn!(
@@ -157,6 +181,9 @@ mod tests {
         reason = "test assertions use assert!(result.is_ok()) pattern"
     )]
     use super::*;
+    use uptrakit_command::CommandMode;
+    use uptrakit_plugin_infrastructure_core::mpsc;
+    use uptrakit_plugin_infrastructure_core::testing::RecordingExecutor;
     use uptrakit_plugin_infrastructure_core::{
         HostCapabilities, PluginCapability, PluginMeta, StandardHostRuntime,
     };
@@ -166,6 +193,19 @@ mod tests {
         let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
         let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        ShellHookPlugin::new(config, runtime).unwrap()
+    }
+
+    /// Helper to create a ShellHookPlugin wired to a [`RecordingExecutor`]
+    /// double, so tests can assert on the recorded `CommandSpec`s.
+    fn plugin_with_double(
+        config: ShellHookConfig,
+        double: Arc<RecordingExecutor>,
+    ) -> ShellHookPlugin {
+        let runtime = Arc::new(StandardHostRuntime::new(
+            double as Arc<dyn CommandExecutor>,
+            HostCapabilities::default(),
+        )) as Arc<dyn HostRuntime>;
         ShellHookPlugin::new(config, runtime).unwrap()
     }
 
@@ -210,10 +250,14 @@ mod tests {
             on_failure: true,
             shell: HookShell::Bash,
         });
-        let (tx, _rx) = uptrakit_plugin_infrastructure_core::mpsc::channel(100);
+        let (tx, mut rx) = uptrakit_plugin_infrastructure_core::mpsc::channel(100);
         let ctx = UpdateLifecycleContext::for_pre_hook("test", "1.0", None, None);
         let result = plugin.execute_pre_hook(&ctx, &tx).await.unwrap();
         assert!(result.should_proceed);
+        assert!(
+            rx.try_recv().is_ok(),
+            "hook output must still stream to output_tx"
+        );
     }
 
     #[tokio::test]
@@ -257,5 +301,165 @@ mod tests {
         plugin.execute_post_hook(&ctx, &tx).await.unwrap();
         // Channel should be empty since the hook was skipped
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn pre_hook_routes_command_through_injected_executor() {
+        // Pre-fix the free function spawns `echo` LOCALLY and never touches the
+        // executor, so `recorded()` stays empty → this assertion fails on old code.
+        let double = RecordingExecutor::ok(0);
+        let plugin = plugin_with_double(
+            ShellHookConfig {
+                pre_command: Some("echo routed".to_string()),
+                post_command: None,
+                on_failure: true,
+                shell: HookShell::Bash,
+            },
+            double.clone(),
+        );
+        let (tx, _rx) = mpsc::channel(100);
+        let ctx = UpdateLifecycleContext::for_pre_hook("test", "1.0", None, None);
+
+        let result = plugin.execute_pre_hook(&ctx, &tx).await.unwrap();
+        assert!(result.should_proceed);
+
+        let specs = double.recorded();
+        assert_eq!(
+            specs.len(),
+            1,
+            "hook must route exactly one command through the executor"
+        );
+        assert!(
+            matches!(&specs[0].mode, CommandMode::Shell { command, shell }
+                if command == "echo routed" && *shell == HookShell::Bash),
+            "recorded spec must be Shell mode carrying the configured command + shell",
+        );
+    }
+
+    #[tokio::test]
+    async fn post_hook_routes_command_through_injected_executor() {
+        let double = RecordingExecutor::ok(0);
+        let plugin = plugin_with_double(
+            ShellHookConfig {
+                pre_command: None,
+                post_command: Some("echo routed".to_string()),
+                on_failure: true,
+                shell: HookShell::Bash,
+            },
+            double.clone(),
+        );
+        let (tx, _rx) = mpsc::channel(100);
+        // update_succeeded = true so the post-hook runs.
+        let ctx = UpdateLifecycleContext::for_post_hook("test", "1.0", None, None, true);
+
+        plugin.execute_post_hook(&ctx, &tx).await.unwrap();
+
+        let specs = double.recorded();
+        assert_eq!(specs.len(), 1, "post-hook must route through the executor");
+        assert!(
+            matches!(&specs[0].mode, CommandMode::Shell { command, shell }
+                if command == "echo routed" && *shell == HookShell::Bash),
+            "recorded spec must be Shell mode carrying the configured command + shell",
+        );
+    }
+
+    #[tokio::test]
+    async fn non_zero_exit_is_extracted_not_hard_failed() {
+        // Local `echo` exits 0 → pre-fix this asserts should_proceed==true and
+        // FAILS. Routed through the double configured failed(1), the hook
+        // extracts code 1 → graceful abort (should_proceed==false), NOT an Err.
+        let plugin = plugin_with_double(
+            ShellHookConfig {
+                pre_command: Some("echo routed".to_string()),
+                post_command: None,
+                on_failure: true,
+                shell: HookShell::Bash,
+            },
+            RecordingExecutor::failed(1),
+        );
+        let (tx, _rx) = mpsc::channel(100);
+        let ctx = UpdateLifecycleContext::for_pre_hook("test", "1.0", None, None);
+
+        let result = plugin.execute_pre_hook(&ctx, &tx).await.unwrap();
+        assert!(
+            !result.should_proceed,
+            "non-zero pre-hook exit must abort gracefully, not Err"
+        );
+    }
+
+    #[tokio::test]
+    async fn post_hook_non_zero_exit_is_non_fatal() {
+        // Post-hook: double failed(1) → non-fatal warn, still Ok(()), not Err.
+        // The recorded() assert is what makes this a genuine RED pre-fix: the
+        // old code returns Ok(()) too (local `echo` exits 0), but never touches
+        // the executor, so recorded() stays empty on old code.
+        let double = RecordingExecutor::failed(1);
+        let plugin = plugin_with_double(
+            ShellHookConfig {
+                pre_command: None,
+                post_command: Some("echo routed".to_string()),
+                on_failure: true,
+                shell: HookShell::Bash,
+            },
+            double.clone(),
+        );
+        let (tx, _rx) = mpsc::channel(100);
+        let ctx = UpdateLifecycleContext::for_post_hook("test", "1.0", None, None, true);
+
+        // Must be Ok(()) despite the non-zero exit.
+        plugin.execute_post_hook(&ctx, &tx).await.unwrap();
+        assert_eq!(
+            double.recorded().len(),
+            1,
+            "post-hook must reach the executor"
+        );
+    }
+
+    #[tokio::test]
+    async fn transport_error_surfaces_as_plugin_error() {
+        // Local `echo` exits 0 → pre-fix would return Ok(proceed). Routed through
+        // the double configured with a genuine transport error, the hook must
+        // return Err(PluginError), never a silent success. Covers UnsupportedShell
+        // (real SSH/shell failure) AND UnsupportedOperation (a NoopCommandExecutor
+        // leak — must surface loudly, not pass).
+        let cases: [fn() -> Arc<RecordingExecutor>; 2] = [
+            || {
+                RecordingExecutor::erroring(|| {
+                    Err(rootcause::report!(
+                        uptrakit_command::CommandError::UnsupportedShell(
+                            "test shell unsupported".to_string(),
+                        )
+                    ))
+                })
+            },
+            || {
+                RecordingExecutor::erroring(|| {
+                    Err(rootcause::report!(
+                        uptrakit_command::CommandError::UnsupportedOperation(
+                            "noop executor".to_string()
+                        ),
+                    ))
+                })
+            },
+        ];
+        for make_double in cases {
+            let plugin = plugin_with_double(
+                ShellHookConfig {
+                    pre_command: Some("echo routed".to_string()),
+                    post_command: None,
+                    on_failure: true,
+                    shell: HookShell::Bash,
+                },
+                make_double(),
+            );
+            let (tx, _rx) = mpsc::channel(100);
+            let ctx = UpdateLifecycleContext::for_pre_hook("test", "1.0", None, None);
+
+            let result = plugin.execute_pre_hook(&ctx, &tx).await;
+            assert!(
+                result.is_err(),
+                "genuine transport error must surface as PluginError"
+            );
+        }
     }
 }
