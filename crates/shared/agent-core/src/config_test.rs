@@ -70,6 +70,8 @@ async fn handle_config_test(
         }
         // PreUpdateHook, PostUpdateHook, Connectivity, and any future
         // variants added to ConfigTestKind are not yet implemented.
+        // NB: wiring the hook kinds up requires a real routing executor,
+        // never a Noop (see shell-hook routing spec).
         _ => {
             tracing::warn!(
                 request_id = %payload.request_id,

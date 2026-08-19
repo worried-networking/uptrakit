@@ -97,6 +97,31 @@ Commands are wrapped with fail-early settings before execution.
 - **Post-hook**: runs `post_command` if set. Respects `on_failure` flag. Errors are logged
   as warnings (non-fatal).
 
+### Execution routing
+
+Shell hook commands run through the injected `CommandExecutor` (`self.executor.execute(&CommandSpec…)`), never a
+locally spawned process — the executor is the only component that routes to the correct host (local or SSH), so a
+hook assigned to an SSH-managed host executes on that host, matching the systemd hook plugin's routing.
+
+When a hook routed to an SSH-managed host exits non-zero, `PosixSshCommandExecutor` WARN-logs the command's stderr
+(falling back to stdout) to journald via `log_failed_command_output` in `uptrakit-agent-ssh-runtime`
+(`crates/core/agent-ssh-runtime/src/ssh_executor.rs`) — this is pre-existing SSH-executor behaviour that hook
+routing newly exposes to hook output, so hook scripts should avoid printing secrets on failure (e.g. no `set -x`
+around credential use). Bounding/redacting this output is tracked in `uptrakit-lqnxz`, not this change.
+
+A shell hook currently assigned to a **RouterOS** host fails the update loudly instead of silently running on the
+agent's own machine: the RouterOS runtime's `NoopCommandExecutor` yields a transport error, which aborts the
+pre-hook. `run_pre_hook_plugins` has no `host_requirements` gate today, so this is interim behaviour — gating hook
+plugin dispatch/assignment by `host_requirements` so RouterOS hosts never reach the Noop executor is tracked in
+`uptrakit-vrzq9`. The operator-visible error wraps `NoopCommandExecutor::execute called on the controller — this is
+a bug` (`crates/shared/command/src/executor.rs`) — a misleading message for what is actually a hook/host mismatch;
+rewording it is also tracked in `uptrakit-vrzq9`.
+
+Over SSH, the shell binary is resolved from the **agent's** OS (`HookShell::local_executable()`, reached via
+`CommandSpec::resolve()` inside `build_remote_command_string`), not the target host's. This is correct for the
+POSIX targets `agent-ssh` manages today; reconciling it with `HookShell::remote_executable()` for hosts whose OS
+differs from the agent's is tracked in `uptrakit-4iata`.
+
 ### Sudo requirements
 
 None. Shell hook plugins run commands without privilege escalation. Users are responsible
