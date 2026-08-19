@@ -43,7 +43,10 @@ struct ReadinessChecks {
 /// 503 when a critical dependency is unavailable.
 #[tracing::instrument(skip_all)]
 pub async fn readyz(State(db): State<DbState>, State(cert): State<CertState>) -> impl IntoResponse {
-    let db_ok = db.db().execute_unprepared("SELECT 1").await.is_ok();
+    let select_one = sea_orm::sea_query::Query::select()
+        .expr(sea_orm::sea_query::Expr::val(1))
+        .to_owned();
+    let db_ok = db.db().query_one(&select_one).await.is_ok();
 
     let ca_ok = !cert.ca_snapshot.borrow().bundle_pem.is_empty();
 
@@ -100,6 +103,26 @@ mod tests {
         assert_eq!(
             gen_header, "0",
             "generation is 0 when UPTRAKIT_REEXEC_GENERATION is unset"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod readyz_tests {
+    use crate::test_harness::TestApp;
+
+    #[tokio::test]
+    async fn readyz_reports_database_ok_with_live_db() {
+        let app = TestApp::new().await;
+        let (_status, body) = app
+            .client()
+            .get("/readyz")
+            .send_json::<serde_json::Value>()
+            .await;
+        assert_eq!(
+            body.pointer("/checks/database").and_then(|v| v.as_str()),
+            Some("ok"),
+            "live migrated DB must report database=ok; body: {body}"
         );
     }
 }

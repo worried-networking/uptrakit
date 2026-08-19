@@ -170,16 +170,15 @@ impl Reloadable for DbPoolReloadable {
     /// Returns [`ConfigReloadError::HealthFailed`] if the query fails.
     async fn health_check(&self) -> Result<(), Report> {
         let handle = self.tx.borrow().clone();
-        handle
-            .conn()
-            .execute_unprepared("SELECT 1")
-            .await
-            .map_err(|e| {
-                report!(ConfigReloadError::HealthFailed {
-                    subsystem: "db_pool".into(),
-                    message: e.to_string(),
-                })
-            })?;
+        let select_one = sea_orm::sea_query::Query::select()
+            .expr(sea_orm::sea_query::Expr::val(1))
+            .to_owned();
+        handle.conn().query_one(&select_one).await.map_err(|e| {
+            report!(ConfigReloadError::HealthFailed {
+                subsystem: "db_pool".into(),
+                message: e.to_string(),
+            })
+        })?;
         tracing::debug!("db pool health check ok");
         Ok(())
     }
