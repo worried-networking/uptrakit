@@ -2611,6 +2611,18 @@ components:
             Empty string when the Controller has no trust domain configured.
             Agent falls back to the dialed hostname for SPIFFE SAN generation.
           type: string
+        instance_host:
+          description: |-
+            The Uptrakit instance's public host (FQDN, optionally with port).
+
+            Sourced from the controller's global `oauth.canonical_host` setting;
+            absent when that setting is unset. Consumed by agents for
+            operator-facing annotations (e.g. PVE API token comments). The wire
+            name is deliberately neutral — nothing about this field is
+            OAuth-specific.
+          type:
+          - string
+          - 'null'
         protocol_version:
           type: integer
           format: uint32

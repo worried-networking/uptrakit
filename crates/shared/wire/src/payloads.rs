@@ -275,6 +275,15 @@ pub struct ServiceSettingsPayload {
     /// Agent falls back to the dialed hostname for SPIFFE SAN generation.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub trust_domain: String,
+    /// The Uptrakit instance's public host (FQDN, optionally with port).
+    ///
+    /// Sourced from the controller's global `oauth.canonical_host` setting;
+    /// absent when that setting is unset. Consumed by agents for
+    /// operator-facing annotations (e.g. PVE API token comments). The wire
+    /// name is deliberately neutral — nothing about this field is
+    /// OAuth-specific.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_host: Option<String>,
 }
 
 impl ServiceSettingsPayload {
@@ -282,7 +291,7 @@ impl ServiceSettingsPayload {
     ///
     /// Optional fields default to: `ca_bundle_hash` = empty, `capabilities` = empty,
     /// `report_page_limits` = default, `shutdown_timeout` = `None`,
-    /// `tenant_id` = `None`, `trust_domain` = empty.
+    /// `tenant_id` = `None`, `trust_domain` = empty, `instance_host` = `None`.
     pub fn new(renewal_window_hours: u16, ping_interval: std::time::Duration) -> Self {
         Self {
             renewal_window_hours,
@@ -293,6 +302,7 @@ impl ServiceSettingsPayload {
             ping_interval,
             tenant_id: None,
             trust_domain: String::new(),
+            instance_host: None,
         }
     }
 
@@ -335,6 +345,13 @@ impl ServiceSettingsPayload {
     #[must_use]
     pub fn with_trust_domain(mut self, trust_domain: String) -> Self {
         self.trust_domain = trust_domain;
+        self
+    }
+
+    /// Sets the Uptrakit instance's public host.
+    #[must_use]
+    pub fn with_instance_host(mut self, instance_host: String) -> Self {
+        self.instance_host = Some(instance_host);
         self
     }
 }

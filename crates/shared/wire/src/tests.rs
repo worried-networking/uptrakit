@@ -715,6 +715,7 @@ fn service_settings_serialization_roundtrip() {
         ping_interval: std::time::Duration::from_secs(300),
         tenant_id: None,
         trust_domain: String::new(),
+        instance_host: None,
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert_eq!(
@@ -736,6 +737,7 @@ fn service_settings_without_shutdown_timeout() {
         ping_interval: std::time::Duration::from_secs(15),
         tenant_id: None,
         trust_domain: String::new(),
+        instance_host: None,
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"service_settings"#));
@@ -759,6 +761,7 @@ fn service_settings_serializes_non_default_report_page_limits() {
         ping_interval: std::time::Duration::from_secs(300),
         tenant_id: None,
         trust_domain: String::new(),
+        instance_host: None,
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""report_page_limits":{"report_hosts":100"#));
@@ -782,6 +785,7 @@ fn service_settings_backward_compat_extra_fields() {
             ping_interval: std::time::Duration::from_secs(300),
             tenant_id: None,
             trust_domain: String::new(),
+            instance_host: None,
         })
     );
 }
@@ -802,6 +806,7 @@ fn service_settings_backward_compat_missing_shutdown_timeout() {
             ping_interval: std::time::Duration::from_secs(300),
             tenant_id: None,
             trust_domain: String::new(),
+            instance_host: None,
         })
     );
 }
@@ -817,6 +822,7 @@ fn duration_seconds_roundtrip() {
         ping_interval: std::time::Duration::from_secs(42),
         tenant_id: None,
         trust_domain: String::new(),
+        instance_host: None,
     };
     let json = serde_json::to_value(&payload).unwrap();
     assert_eq!(json["ping_interval"], 42);
@@ -838,6 +844,7 @@ fn service_settings_payload_trust_domain_round_trips() {
         ping_interval: std::time::Duration::from_secs(300),
         tenant_id: None,
         trust_domain: String::new(),
+        instance_host: None,
     };
     payload.trust_domain = "controller.example.com".to_owned();
     let json = serde_json::to_string(&payload).expect("serialize");
@@ -866,6 +873,7 @@ fn service_settings_payload_empty_trust_domain_skipped_on_serialize() {
         ping_interval: std::time::Duration::from_secs(300),
         tenant_id: None,
         trust_domain: String::new(),
+        instance_host: None,
     };
     let json = serde_json::to_string(&payload).expect("serialize");
     assert!(
@@ -2956,6 +2964,7 @@ fn make_all_controller_message_variants() -> Vec<ControllerMessage> {
             ping_interval: std::time::Duration::from_secs(300),
             tenant_id: None,
             trust_domain: String::new(),
+            instance_host: None,
         }),
         ControllerMessage::CaBundleUpdated(CaBundleUpdatedPayload {
             ca_bundle_pem: String::new(),

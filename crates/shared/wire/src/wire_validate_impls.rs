@@ -993,6 +993,7 @@ impl WireValidate for ErrorPayload {
 impl WireValidate for ServiceSettingsPayload {
     fn wire_validate(&self) -> Result<(), WireValidationError> {
         check_string_len(&self.ca_bundle_hash, MAX_SHORT_STRING_LEN, "ca_bundle_hash")?;
+        check_opt_string_len(&self.instance_host, MAX_SHORT_STRING_LEN, "instance_host")?;
         self.report_page_limits.wire_validate()?;
         Ok(())
     }
@@ -2297,6 +2298,7 @@ mod tests {
             ping_interval: std::time::Duration::from_secs(30),
             tenant_id: None,
             trust_domain: String::new(),
+            instance_host: None,
         });
 
         assert!(msg.wire_validate().is_ok());
@@ -2316,10 +2318,24 @@ mod tests {
             ping_interval: std::time::Duration::from_secs(30),
             tenant_id: None,
             trust_domain: String::new(),
+            instance_host: None,
         });
 
         let err = msg.wire_validate().unwrap_err();
         assert_eq!(err.field, "report_page_limits.report_hosts");
+    }
+
+    #[test]
+    fn service_settings_rejects_overlong_instance_host() {
+        let payload = ServiceSettingsPayload::new(24, std::time::Duration::from_secs(30))
+            .with_instance_host("a".repeat(MAX_SHORT_STRING_LEN + 1));
+        assert!(payload.wire_validate().is_err());
+    }
+
+    #[test]
+    fn service_settings_accepts_absent_instance_host() {
+        let payload = ServiceSettingsPayload::new(24, std::time::Duration::from_secs(30));
+        assert!(payload.wire_validate().is_ok());
     }
 
     #[test]
