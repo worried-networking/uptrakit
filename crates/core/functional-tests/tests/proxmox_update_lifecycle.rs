@@ -6,6 +6,7 @@
 
 mod support;
 
+use sea_orm::sea_query::{Alias, Query};
 use sea_orm::{ConnectionTrait, EntityTrait};
 use uuid::Uuid;
 
@@ -28,10 +29,20 @@ async fn setup_test_db_runs_core_and_proxmox_migrations() {
     // proxmox_host_mapping is a proxmox-side table; existence proves the
     // plugin migration ran. tenant is core-side; existence proves the core
     // migration ran. Both in one pass.
-    db.execute_unprepared("SELECT id FROM proxmox_host_mappings LIMIT 1")
+    let proxmox_host_mappings_probe = Query::select()
+        .column(Alias::new("id"))
+        .from(Alias::new("proxmox_host_mappings"))
+        .limit(1)
+        .to_owned();
+    db.query_one(&proxmox_host_mappings_probe)
         .await
         .expect("proxmox_host_mappings table must exist");
-    db.execute_unprepared("SELECT id FROM tenants LIMIT 1")
+    let tenants_probe = Query::select()
+        .column(Alias::new("id"))
+        .from(Alias::new("tenants"))
+        .limit(1)
+        .to_owned();
+    db.query_one(&tenants_probe)
         .await
         .expect("tenants table must exist");
 }

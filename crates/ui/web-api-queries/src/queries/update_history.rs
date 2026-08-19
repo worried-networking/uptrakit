@@ -1204,15 +1204,19 @@ mod tests {
 
     #[tokio::test]
     async fn active_indexes_match_enum_sets() {
-        use sea_orm::{ConnectionTrait, Statement};
+        use sea_orm::ConnectionTrait;
+        use sea_orm::sea_query::Alias;
         let db = setup_test_db().await;
 
         async fn index_sql(db: &sea_orm::DatabaseConnection, name: &str) -> String {
+            let select = Query::select()
+                .column(Alias::new("sql"))
+                .from(Alias::new("sqlite_master"))
+                .and_where(Expr::col(Alias::new("type")).eq("index"))
+                .and_where(Expr::col(Alias::new("name")).eq(name))
+                .to_owned();
             let row = db
-                .query_one_raw(Statement::from_string(
-                    db.get_database_backend(),
-                    format!("SELECT sql FROM sqlite_master WHERE type='index' AND name='{name}'"),
-                ))
+                .query_one(&select)
                 .await
                 .unwrap()
                 .expect("index must exist");

@@ -469,7 +469,8 @@ mod tests {
 
     use crate::{RuntimeSessionState, SshAgentRuntimeSupport};
     use async_trait::async_trait;
-    use sea_orm::{ConnectionTrait, Database, EntityTrait, PaginatorTrait, Statement};
+    use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
+    use sea_orm::{ConnectionTrait, Database, EntityTrait, PaginatorTrait};
     use uptrakit_wire::{
         ControllerMessage, ReportPluginConfigResponsePayload, ServiceMessage, ServiceTransport,
         TransportClosePolicy, TransportError,
@@ -657,15 +658,20 @@ mod tests {
         // `uptrakit-plugin-infrastructure-registry`, not on
         // `uptrakit-plugin-infrastructure-proxmox` directly, and the registry
         // does not re-export `proxmox_host_state`; its `ActiveModel` is
-        // unnameable from this crate. execute_raw with a Statement is the
-        // approved exception for raw SQL.
-        db.execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Sqlite,
-            "INSERT INTO proxmox_host_state (host_id, created_at, updated_at) VALUES ($1, $2, $2)",
-            [host_id.to_string().into(), now.into()],
-        ))
-        .await
-        .expect("seed proxmox_host_state row");
+        // unnameable from this crate, so the seed row is addressed via
+        // `Alias` rather than `Entity::insert`.
+        let insert = Query::insert()
+            .into_table(Alias::new("proxmox_host_state"))
+            .columns([
+                Alias::new("host_id"),
+                Alias::new("created_at"),
+                Alias::new("updated_at"),
+            ])
+            .values_panic([host_id.to_string().into(), now.into(), now.into()])
+            .to_owned();
+        db.execute(&insert)
+            .await
+            .expect("insert proxmox_host_state");
 
         let support = AgentSshRuntimeSupport::new(
             db.clone(),
@@ -695,17 +701,17 @@ mod tests {
             .await;
 
         // Same crate-boundary limitation as the seed insert above:
-        // `proxmox_host_state` is unreachable from this crate, so the
-        // row is read back via raw SQL too. query_one_raw with a Statement
-        // is the approved exception for raw SQL.
+        // `proxmox_host_state` is unreachable from this crate, so the row is
+        // read back via `Alias` rather than `Entity::find`.
+        let select = Query::select()
+            .column(Alias::new("pve_plugin_config_id"))
+            .from(Alias::new("proxmox_host_state"))
+            .and_where(Expr::col(Alias::new("host_id")).eq(host_id.to_string()))
+            .to_owned();
         let row = db
-            .query_one_raw(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT pve_plugin_config_id FROM proxmox_host_state WHERE host_id = $1",
-                [host_id.to_string().into()],
-            ))
+            .query_one(&select)
             .await
-            .expect("query seeded row")
+            .expect("query proxmox_host_state")
             .expect("seeded row must still exist");
         let pve_plugin_config_id: Option<String> = row
             .try_get_by_index(0)
@@ -730,15 +736,19 @@ mod tests {
         // Same crate-boundary limitation as
         // `mismatched_plugin_type_ack_does_not_write_proxmox_state`:
         // `proxmox_host_state` is unreachable from this crate, so the seed
-        // row is written via raw SQL. execute_raw with a Statement is the
-        // approved exception for raw SQL.
-        db.execute_raw(Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Sqlite,
-            "INSERT INTO proxmox_host_state (host_id, created_at, updated_at) VALUES ($1, $2, $2)",
-            [host_id.to_string().into(), now.into()],
-        ))
-        .await
-        .expect("seed proxmox_host_state row");
+        // row is addressed via `Alias` rather than `Entity::insert`.
+        let insert = Query::insert()
+            .into_table(Alias::new("proxmox_host_state"))
+            .columns([
+                Alias::new("host_id"),
+                Alias::new("created_at"),
+                Alias::new("updated_at"),
+            ])
+            .values_panic([host_id.to_string().into(), now.into(), now.into()])
+            .to_owned();
+        db.execute(&insert)
+            .await
+            .expect("insert proxmox_host_state");
 
         // `ssh_hosts` is nameable from this crate, so seed it via the
         // ordinary `host_ops::add_host` insert path instead of raw SQL.
@@ -791,12 +801,13 @@ mod tests {
                 "ResetData should report success when the feature is enabled"
             );
 
+            let select = Query::select()
+                .column(Alias::new("host_id"))
+                .from(Alias::new("proxmox_host_state"))
+                .and_where(Expr::col(Alias::new("host_id")).eq(host_id.to_string()))
+                .to_owned();
             let proxmox_row = db
-                .query_one_raw(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "SELECT host_id FROM proxmox_host_state WHERE host_id = $1",
-                    [host_id.to_string().into()],
-                ))
+                .query_one(&select)
                 .await
                 .expect("query proxmox_host_state");
             assert!(

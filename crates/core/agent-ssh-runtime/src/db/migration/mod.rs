@@ -62,16 +62,17 @@ mod tests {
     use super::*;
 
     async fn table_names(db: &DatabaseConnection) -> Vec<String> {
-        use sea_orm::{ConnectionTrait, Statement};
-        let rows = db
-            .query_all_raw(Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                // Raw introspection query: sqlite_master has no SeaORM entity —
-                // approved read-only exception, mirrors db-migrate's coverage test.
-                "SELECT name FROM sqlite_master WHERE type = 'table'".to_string(),
-            ))
-            .await
-            .expect("query sqlite_master");
+        use sea_orm::ConnectionTrait;
+        use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
+        // `sqlite_master` has no SeaORM entity to build against, so it is
+        // addressed via `Alias` rather than `Entity::find`, mirroring
+        // db-migrate's coverage test.
+        let select = Query::select()
+            .column(Alias::new("name"))
+            .from(Alias::new("sqlite_master"))
+            .and_where(Expr::col(Alias::new("type")).eq("table"))
+            .to_owned();
+        let rows = db.query_all(&select).await.expect("query sqlite_master");
         rows.iter()
             .map(|r| r.try_get_by_index::<String>(0).expect("table name"))
             .collect()

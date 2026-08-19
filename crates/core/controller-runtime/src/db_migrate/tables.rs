@@ -68,9 +68,8 @@ mod tests {
     ///   dropped table.
     #[tokio::test]
     async fn migration_coverage_complete() {
-        use sea_orm::{
-            ConnectOptions, ConnectionTrait, Database, DbBackend, Statement, TryGetable as _,
-        };
+        use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
+        use sea_orm::{ConnectOptions, ConnectionTrait, Database, TryGetable as _};
         use std::collections::HashSet;
 
         /// Tables created by migrations but intentionally excluded from db-migrate.
@@ -96,17 +95,17 @@ mod tests {
             .await
             .expect("source migrations");
 
-        // Raw SQL exception: schema introspection over `sqlite_master` has no
-        // SeaORM entity to build against, so `sea_query` cannot express it.
+        // `sqlite_master` has no SeaORM entity to build against, so it is
+        // addressed via `Alias` rather than `Entity::find`.
+        let select = Query::select()
+            .column(Alias::new("name"))
+            .from(Alias::new("sqlite_master"))
+            .and_where(Expr::col(Alias::new("type")).eq("table"))
+            .and_where(Expr::col(Alias::new("name")).not_like("sqlite_%"))
+            .and_where(Expr::col(Alias::new("name")).ne("seaql_migrations"))
+            .to_owned();
         let live: HashSet<String> = db
-            .query_all_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                "SELECT name FROM sqlite_master \
-                 WHERE type='table' \
-                   AND name NOT LIKE 'sqlite_%' \
-                   AND name != 'seaql_migrations'"
-                    .to_owned(),
-            ))
+            .query_all(&select)
             .await
             .expect("query live tables")
             .into_iter()
