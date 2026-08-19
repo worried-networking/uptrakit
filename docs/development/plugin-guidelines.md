@@ -175,6 +175,11 @@ pub struct UpdateLifecycleContext {
 }
 ```
 
+- Lifecycle hook plugins execute commands via the injected `CommandExecutor`
+  (`self.executor.execute(&CommandSpec…)`) -- never by spawning a process
+  locally, since the executor is the only component that routes to the correct
+  host (local or SSH).
+
 ### Pre-update hook
 
 `execute_pre_hook()` is called before the update. It returns `PreUpdateHookResult`:
@@ -188,11 +193,6 @@ If a pre-update hook returns abort, no further pre-hooks or the update itself ar
 
 `execute_post_hook()` is called after the update completes. It is non-fatal: any error is logged as a warning but does not mark the update as failed.
 The `update_succeeded` field indicates whether the update succeeded.
-
-- Lifecycle hook plugins execute commands via the injected `CommandExecutor`
-  (`self.executor.execute(&CommandSpec…)`) -- never by spawning a process
-  locally, since the executor is the only component that routes to the correct
-  host (local or SSH).
 
 For full details on the built-in hook plugins (`hook.systemd`, `hook.shell`), see [Update Lifecycle Plugins](update-hooks.md).
 
