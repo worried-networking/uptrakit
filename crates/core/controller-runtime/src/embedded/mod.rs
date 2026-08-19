@@ -118,6 +118,10 @@ fn controller_capabilities_for_embedded() -> std::collections::BTreeSet<Capabili
     .collect()
 }
 
+/// Build the [`ServiceSettingsPayload`] for an embedded service.
+///
+/// `instance_host` is the controller's `oauth.canonical_host` global setting;
+/// an empty or absent value leaves the wire field absent.
 fn embedded_service_settings(
     tenant_id: Option<Uuid>,
     instance_host: Option<String>,
@@ -607,6 +611,31 @@ mod tests {
     use crate::service_host::yielding::matches_yield_policy;
     use uptrakit_service_platform::YieldPolicy;
     use uptrakit_web_api::service_connections::ServiceConnectionRegistry;
+
+    // -----------------------------------------------------------------------
+    // embedded_service_settings — instance_host filter
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn embedded_service_settings_sets_instance_host_when_present() {
+        let settings = embedded_service_settings(None, Some("uptrakit.example.com".to_string()));
+        assert_eq!(
+            settings.instance_host.as_deref(),
+            Some("uptrakit.example.com")
+        );
+    }
+
+    #[test]
+    fn embedded_service_settings_omits_empty_instance_host() {
+        let settings = embedded_service_settings(None, Some(String::new()));
+        assert_eq!(settings.instance_host, None);
+    }
+
+    #[test]
+    fn embedded_service_settings_omits_instance_host_when_none() {
+        let settings = embedded_service_settings(None, None);
+        assert_eq!(settings.instance_host, None);
+    }
 
     fn make_scheduler_handle() -> EmbeddedServiceHandle {
         EmbeddedServiceHandle {

@@ -453,6 +453,8 @@ async fn record_activity_and_update_cert(
 /// tenant services carry `Some(their tenant)`, system services carry `None`.
 /// There is no per-app override — MQTT used to be pinned to the default
 /// tenant here, which is what made its settings surface tenant-bound.
+/// `instance_host` is the controller's `oauth.canonical_host` global setting;
+/// an empty or absent value leaves the wire field absent.
 fn build_service_settings(
     service_status: &ServiceStatus,
     renewal_window_hours: u16,
