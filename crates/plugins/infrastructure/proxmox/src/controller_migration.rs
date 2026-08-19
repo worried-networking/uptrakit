@@ -2517,11 +2517,29 @@ mod tests {
         let cid = "00000000-0000-0000-0000-000000000002";
         let id = "00000000-0000-0000-0000-000000000003";
         let result = db
-            .execute_unprepared(&format!(
-                "INSERT INTO proxmox_scaling_defaults \
-                 (id, tenant_id, plugin_config_id, scaling_mode, absolute_cores, created_at, updated_at) \
-                 VALUES ('{id}', '{tid}', '{cid}', 'absolute', 0, '2026-01-01', '2026-01-01')"
-            ))
+            .execute(
+                &Query::insert()
+                    .into_table(Alias::new("proxmox_scaling_defaults"))
+                    .columns([
+                        Alias::new("id"),
+                        Alias::new("tenant_id"),
+                        Alias::new("plugin_config_id"),
+                        Alias::new("scaling_mode"),
+                        Alias::new("absolute_cores"),
+                        Alias::new("created_at"),
+                        Alias::new("updated_at"),
+                    ])
+                    .values_panic([
+                        id.into(),
+                        tid.into(),
+                        cid.into(),
+                        "absolute".into(),
+                        0.into(),
+                        "2026-01-01".into(),
+                        "2026-01-01".into(),
+                    ])
+                    .to_owned(),
+            )
             .await;
         assert!(
             result.is_err(),
@@ -2565,16 +2583,36 @@ mod tests {
     /// migrations through A/B. Seeds no rows.
     async fn scaling_migration_test_db() -> sea_orm::DatabaseConnection {
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        db.execute_unprepared("CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY)")
-            .await
-            .unwrap();
-        db.execute_unprepared("CREATE TABLE IF NOT EXISTS software_items (id TEXT PRIMARY KEY)")
-            .await
-            .unwrap();
-        db.execute_unprepared(
-            "CREATE TABLE IF NOT EXISTS plugin_configs \
-             (id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, plugin_type TEXT, \
-              config TEXT, created_at TEXT, updated_at TEXT)",
+        db.execute(
+            &Table::create()
+                .table(Alias::new("tenants"))
+                .if_not_exists()
+                .col(ColumnDef::new(Alias::new("id")).text().primary_key())
+                .to_owned(),
+        )
+        .await
+        .unwrap();
+        db.execute(
+            &Table::create()
+                .table(Alias::new("software_items"))
+                .if_not_exists()
+                .col(ColumnDef::new(Alias::new("id")).text().primary_key())
+                .to_owned(),
+        )
+        .await
+        .unwrap();
+        db.execute(
+            &Table::create()
+                .table(Alias::new("plugin_configs"))
+                .if_not_exists()
+                .col(ColumnDef::new(Alias::new("id")).text().primary_key())
+                .col(ColumnDef::new(Alias::new("tenant_id")).text())
+                .col(ColumnDef::new(Alias::new("name")).text())
+                .col(ColumnDef::new(Alias::new("plugin_type")).text())
+                .col(ColumnDef::new(Alias::new("config")).text())
+                .col(ColumnDef::new(Alias::new("created_at")).text())
+                .col(ColumnDef::new(Alias::new("updated_at")).text())
+                .to_owned(),
         )
         .await
         .unwrap();
@@ -2714,16 +2752,21 @@ mod tests {
         );
 
         // C.3 nulled the source columns (count non-null, no uuid comparison).
+        let count = Query::select()
+            .expr(Expr::col(Asterisk).count())
+            .from(Alias::new("proxmox_protection_defaults"))
+            .and_where(
+                Expr::col(Alias::new("update_cores"))
+                    .is_not_null()
+                    .or(Expr::col(Alias::new("update_memory_mb")).is_not_null()),
+            )
+            .to_owned();
         let remaining: i64 = db
-            .query_one_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                "SELECT COUNT(*) AS c FROM proxmox_protection_defaults \
-                 WHERE update_cores IS NOT NULL OR update_memory_mb IS NOT NULL",
-            ))
+            .query_one(&count)
             .await
             .unwrap()
             .unwrap()
-            .try_get("", "c")
+            .try_get_by_index(0)
             .unwrap();
         assert_eq!(remaining, 0, "source scaling columns must be NULL'd by C.3");
     }
@@ -2919,10 +2962,18 @@ mod tests {
         let manager = SchemaManager::new(&db);
 
         // Create plugin_configs stub before protection tables (they have FK to plugin_configs)
-        db.execute_unprepared(
-            "CREATE TABLE IF NOT EXISTS plugin_configs \
-             (id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT, plugin_type TEXT, \
-              config TEXT, created_at TEXT, updated_at TEXT)",
+        db.execute(
+            &Table::create()
+                .table(Alias::new("plugin_configs"))
+                .if_not_exists()
+                .col(ColumnDef::new(Alias::new("id")).text().primary_key())
+                .col(ColumnDef::new(Alias::new("tenant_id")).text())
+                .col(ColumnDef::new(Alias::new("name")).text())
+                .col(ColumnDef::new(Alias::new("plugin_type")).text())
+                .col(ColumnDef::new(Alias::new("config")).text())
+                .col(ColumnDef::new(Alias::new("created_at")).text())
+                .col(ColumnDef::new(Alias::new("updated_at")).text())
+                .to_owned(),
         )
         .await
         .unwrap();
@@ -2994,23 +3045,59 @@ mod tests {
             "scaling_mode_used must exist"
         );
 
-        db.execute_unprepared(
-            "INSERT INTO proxmox_resource_scaling_records \
-             (update_history_id, tenant_id, host_id, software_item_id, plugin_config_id, \
-              mapping_id, vm_type, original_cores, original_memory_mb, scaled_cores, \
-              scaled_memory_mb, scale_status, restore_status, created_at, updated_at) \
-             VALUES ('h1', 't1', 'h2', 's1', 'p1', 'm1', 'qemu', 4, 4096, 8, 8192, \
-                     'scaled', 'pending', '2026-01-01', '2026-01-01')",
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("proxmox_resource_scaling_records"))
+                .columns([
+                    Alias::new("update_history_id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("host_id"),
+                    Alias::new("software_item_id"),
+                    Alias::new("plugin_config_id"),
+                    Alias::new("mapping_id"),
+                    Alias::new("vm_type"),
+                    Alias::new("original_cores"),
+                    Alias::new("original_memory_mb"),
+                    Alias::new("scaled_cores"),
+                    Alias::new("scaled_memory_mb"),
+                    Alias::new("scale_status"),
+                    Alias::new("restore_status"),
+                    Alias::new("created_at"),
+                    Alias::new("updated_at"),
+                ])
+                .values_panic([
+                    "h1".into(),
+                    "t1".into(),
+                    "h2".into(),
+                    "s1".into(),
+                    "p1".into(),
+                    "m1".into(),
+                    "qemu".into(),
+                    4.into(),
+                    4096.into(),
+                    8.into(),
+                    8192.into(),
+                    "scaled".into(),
+                    "pending".into(),
+                    "2026-01-01".into(),
+                    "2026-01-01".into(),
+                ])
+                .to_owned(),
         )
         .await
         .unwrap();
+        let select_mode = Query::select()
+            .column(Alias::new("scaling_mode_used"))
+            .from(Alias::new("proxmox_resource_scaling_records"))
+            .and_where(Expr::col(Alias::new("update_history_id")).eq("h1"))
+            .to_owned();
         let mode: String = db
-            .query_one_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                "SELECT scaling_mode_used FROM proxmox_resource_scaling_records WHERE update_history_id = 'h1'",
-            ))
-            .await.unwrap().unwrap()
-            .try_get("", "scaling_mode_used").unwrap();
+            .query_one(&select_mode)
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get("", "scaling_mode_used")
+            .unwrap();
         assert_eq!(mode, "absolute");
     }
 
