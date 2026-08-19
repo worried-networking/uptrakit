@@ -606,7 +606,7 @@ mod tests {
     use super::*;
     use crate::test_harness::TestApp;
     use crate::test_harness::fixtures;
-    use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
     use uptrakit_shared_db::entity::audit_log;
 
     async fn tenant_audit_row_for_action(
@@ -761,10 +761,7 @@ mod tests {
             .plugin_ops
             .type_settings_sample(&plugin_type_id);
 
-        app.db
-            .execute_unprepared("DROP TABLE plugin_type_settings")
-            .await
-            .expect("drop plugin_type_settings table");
+        fixtures::drop_table(&app.db, "plugin_type_settings").await;
 
         let status = client
             .put_json(

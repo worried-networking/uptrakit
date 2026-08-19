@@ -592,10 +592,7 @@ mod tests {
         let client = app.client();
         let token = register_and_get_token(&client).await;
 
-        app.db
-            .execute_unprepared("DROP TABLE software_ignores")
-            .await
-            .expect("drop software_ignores table");
+        crate::test_harness::fixtures::drop_table(&app.db, "software_ignores").await;
 
         let status = client
             .post_json(
@@ -663,10 +660,7 @@ mod tests {
         let client = app.client();
         let token = register_and_get_token(&client).await;
 
-        app.db
-            .execute_unprepared("DROP TABLE software_ignores")
-            .await
-            .expect("drop software_ignores table");
+        crate::test_harness::fixtures::drop_table(&app.db, "software_ignores").await;
 
         let status = client
             .delete(&format!(
@@ -785,10 +779,7 @@ mod tests {
         let client = app.client();
         let token = register_and_get_token(&client).await;
 
-        app.db
-            .execute_unprepared("DROP TABLE software_ignores")
-            .await
-            .expect("drop software_ignores table");
+        crate::test_harness::fixtures::drop_table(&app.db, "software_ignores").await;
 
         let status = client
             .post_json(

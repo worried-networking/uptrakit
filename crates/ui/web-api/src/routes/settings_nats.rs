@@ -363,8 +363,8 @@ mod tests {
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
     use sea_orm::{
-        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
-        EntityTrait, PaginatorTrait, QueryOrder, Set,
+        ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
+        PaginatorTrait, QueryOrder, Set,
     };
     use uptrakit_shared_db::entity::{system_audit_log, tenant, user};
 
@@ -895,9 +895,7 @@ mod tests {
         .await
         .expect("insert user");
 
-        db.execute_unprepared("DROP TABLE global_settings")
-            .await
-            .expect("drop global_settings table");
+        crate::test_harness::fixtures::drop_table(&db, "global_settings").await;
 
         let response = update_nats_settings(
             State(state),
@@ -956,9 +954,7 @@ mod tests {
         .await
         .expect("insert user");
 
-        db.execute_unprepared("DROP TABLE global_settings")
-            .await
-            .expect("drop global_settings table");
+        crate::test_harness::fixtures::drop_table(&db, "global_settings").await;
 
         let response = update_nats_settings(
             State(state),

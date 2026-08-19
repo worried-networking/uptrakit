@@ -13,7 +13,10 @@
     reason = "test fixture: panics on setup failure are acceptable"
 )]
 
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set,
+};
 use uptrakit_shared_db::access_grants::{GrantSubject, delete_grant, load_grants_for_principal};
 use uptrakit_shared_db::entity::{host, oauth_client, role, service, service_host, user_role};
 use uptrakit_web_api_types::SecretString;
@@ -32,6 +35,14 @@ pub(crate) async fn default_tenant_id(db: &DatabaseConnection) -> uuid::Uuid {
         .expect("query tenant")
         .expect("seeded default tenant")
         .id
+}
+
+/// Drop a table by name, builder-based (no raw SQL — AGENTS.md rule 10).
+pub(crate) async fn drop_table(db: &DatabaseConnection, table: &str) {
+    use sea_orm::sea_query::{Alias, Table};
+    db.execute(&Table::drop().table(Alias::new(table)).to_owned())
+        .await
+        .expect("drop table");
 }
 
 // ── HTTP helpers ────────────────────────────────────────────────────────

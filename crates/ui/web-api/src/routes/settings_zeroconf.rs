@@ -412,9 +412,7 @@ mod tests {
     use crate::auth::AuthMethod;
     use crate::middleware::action::CanManageSystemSettings;
     use crate::middleware::require_auth::AuthenticatedUser;
-    use sea_orm::{
-        ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    };
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
     use uptrakit_shared_db::entity::system_audit_log;
 
     async fn latest_system_audit_row(
@@ -458,9 +456,7 @@ mod tests {
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
 
-        db.execute_unprepared("DROP TABLE global_settings")
-            .await
-            .expect("drop global_settings table");
+        crate::test_harness::fixtures::drop_table(&db, "global_settings").await;
 
         let user_id = uuid::Uuid::now_v7();
         let response = update_zeroconf_settings(

@@ -2464,12 +2464,6 @@ mod audit_tests {
         user_id
     }
 
-    async fn drop_table(db: &sea_orm::DatabaseConnection, table: &str) {
-        db.execute_unprepared(&format!("DROP TABLE {table};"))
-            .await
-            .expect("drop table");
-    }
-
     async fn insert_active_oidc_provider(
         db: &sea_orm::DatabaseConnection,
         tenant_id: uuid::Uuid,
@@ -2878,7 +2872,7 @@ mod audit_tests {
         let app = TestApp::new().await;
         let client = app.client();
 
-        drop_table(&app.db, "pending_oidc_token_exchanges").await;
+        crate::test_harness::fixtures::drop_table(&app.db, "pending_oidc_token_exchanges").await;
 
         let (status, _body): (http::StatusCode, serde_json::Value) = client
             .post_json(
@@ -2917,7 +2911,7 @@ mod audit_tests {
             .await
             .expect("store exchange code");
 
-        drop_table(&app.db, "sessions").await;
+        crate::test_harness::fixtures::drop_table(&app.db, "sessions").await;
 
         let (status, _body): (http::StatusCode, serde_json::Value) = client
             .post_json(
@@ -3170,7 +3164,7 @@ mod audit_tests {
             .await
             .expect("store pending link");
 
-        drop_table(&app.db, "user_oidc_links").await;
+        crate::test_harness::fixtures::drop_table(&app.db, "user_oidc_links").await;
 
         let (status, _body): (http::StatusCode, serde_json::Value) = client
             .post_json(

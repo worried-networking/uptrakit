@@ -1343,9 +1343,7 @@ mod tests {
         let state = test_state(db.clone()).await;
         let user_id = User::find().one(&db).await.unwrap().unwrap().id;
 
-        db.execute_unprepared("DROP TABLE sessions")
-            .await
-            .expect("drop session table");
+        crate::test_harness::fixtures::drop_table(&db, "sessions").await;
 
         let auth_user = AuthenticatedUser::new(user_id, AuthMethod::Password, None);
 
@@ -1809,12 +1807,6 @@ mod tests {
         db
     }
 
-    async fn drop_table(db: &DatabaseConnection, table: &str) {
-        db.execute_unprepared(&format!("DROP TABLE {table}"))
-            .await
-            .expect("drop table");
-    }
-
     /// Sorted role names assigned to a user. Mirrors assign_owner_roles' list on
     /// purpose — drift in that list must fail these tests loudly.
     fn owner_role_names() -> Vec<String> {
@@ -2165,7 +2157,7 @@ mod tests {
         let state = test_state(db.clone()).await;
         let mode_before = state.settings.registration().mode;
 
-        drop_table(&db, "audit_logs").await;
+        crate::test_harness::fixtures::drop_table(&db, "audit_logs").await;
 
         let response = match register(
             State(state.clone()),

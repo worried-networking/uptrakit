@@ -976,9 +976,7 @@ async fn delete_plugin_config_load_db_failure_writes_failed_audit_event() {
     let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
     let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
 
-    db.execute_unprepared("DROP TABLE plugin_configs")
-        .await
-        .expect("drop plugin_config table");
+    crate::test_harness::fixtures::drop_table(&db, "plugin_configs").await;
 
     let actor_user_id = uuid::Uuid::now_v7();
     let response = delete_plugin_config(
@@ -1130,9 +1128,7 @@ async fn batch_plugin_configs_delete_backend_failure_writes_failed_audit_event()
     let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
     let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
 
-    db.execute_unprepared("DROP TABLE plugin_configs")
-        .await
-        .expect("drop plugin_config table");
+    crate::test_harness::fixtures::drop_table(&db, "plugin_configs").await;
 
     let actor_user_id = uuid::Uuid::now_v7();
     let response = batch_plugin_configs(

@@ -9,9 +9,7 @@ use super::discovery::enrich_discovered_items;
 use super::version_check::{DisplayOverride, apply_version_update_to_db};
 use super::*;
 use crate::AppState;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
@@ -1030,9 +1028,7 @@ async fn handle_report_plugin_config_db_failure_emits_failed_tenant_audit_row() 
     let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
     let svc = insert_service(&db, tenant_id).await;
 
-    db.execute_unprepared("DROP TABLE plugin_configs")
-        .await
-        .expect("drop plugin_configs table");
+    crate::test_harness::fixtures::drop_table(&db, "plugin_configs").await;
 
     let payload = report_plugin_config_payload(
         "req-plugin-config-db-failure",

@@ -1461,9 +1461,7 @@ mod tests {
     use super::*;
 
     use crate::test_harness::TestApp;
-    use sea_orm::{
-        ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-    };
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
     use uptrakit_shared_db::entity::{
         audit_log, notification_channel, notification_log, notification_rule,
     };
@@ -1750,10 +1748,7 @@ mod tests {
         let (channel_id, _log_id, action_token) =
             insert_telegram_callback_fixture(&app, webhook_secret).await;
 
-        app.db
-            .execute_unprepared("DROP TABLE notification_log")
-            .await
-            .expect("drop notification_log table");
+        crate::test_harness::fixtures::drop_table(&app.db, "notification_log").await;
 
         let status = client
             .post_json(

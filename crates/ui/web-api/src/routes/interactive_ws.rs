@@ -942,9 +942,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[cfg(feature = "db-sqlite")]
-    use sea_orm::{
-        ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-    };
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
     #[cfg(feature = "db-sqlite")]
     use tokio::net::TcpListener;
     #[cfg(feature = "db-sqlite")]
@@ -1379,10 +1377,7 @@ mod tests {
         let token = crate::test_harness::fixtures::register_and_get_token(&app.client()).await;
         let update_id = Uuid::now_v7();
 
-        app.db
-            .execute_unprepared("DROP TABLE update_history")
-            .await
-            .expect("drop update_history table");
+        crate::test_harness::fixtures::drop_table(&app.db, "update_history").await;
 
         let err = tokio_tungstenite::connect_async(format!(
             "{base_url}/api/v1/update-history/{update_id}/interactive?token={token}"
@@ -1960,10 +1955,7 @@ mod tests {
         // warms the engine's authority cache for this `(tenant, user)` key.  The
         // dropped table alone would therefore inject nothing — invalidate so the
         // WS request's own `context()` call has to hit the missing table.
-        app.db
-            .execute_unprepared("DROP TABLE user_roles")
-            .await
-            .expect("drop user_roles table");
+        crate::test_harness::fixtures::drop_table(&app.db, "user_roles").await;
         app.state
             .access_engine
             .invalidate_subjects(&[auth.user.id], &[]);

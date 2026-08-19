@@ -5,10 +5,8 @@
 #![expect(clippy::panic, reason = "test code: panics on failure are acceptable")]
 
 use crate::test_harness::TestApp;
-use crate::test_harness::fixtures::register_and_get_token;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-};
+use crate::test_harness::fixtures::{drop_table, register_and_get_token};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use uptrakit_shared_db::entity::audit_log;
 
 async fn tenant_audit_row_for_action(
@@ -383,10 +381,7 @@ async fn delete_rule_db_failure_writes_failed_audit_event() {
         .send_json()
         .await;
 
-    app.db
-        .execute_unprepared("DROP TABLE notification_rules;")
-        .await
-        .expect("drop notification_rules table");
+    drop_table(&app.db, "notification_rules").await;
 
     let rule_id = rule["id"].as_str().expect("rule id");
     let status = client
