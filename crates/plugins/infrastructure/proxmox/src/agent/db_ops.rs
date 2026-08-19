@@ -26,7 +26,6 @@ pub async fn upsert_host_state(
     db: &DatabaseConnection,
     host_id: &str,
     is_pve_node: bool,
-    pve_plugin_config_id: Option<String>,
     pve_node_name: Option<String>,
 ) -> Result<()> {
     let now = time::OffsetDateTime::now_utc()
@@ -38,15 +37,9 @@ pub async fn upsert_host_state(
     if let Some(row) = existing {
         let mut model: proxmox_host_state::ActiveModel = row.into();
         model.is_pve_node = Set(is_pve_node);
-        // Preserve-on-None: a caller with no config id / node name to report
-        // (e.g. a re-bootstrap hook that runs before the credential flow)
-        // must not wipe an already-migrated row's operative config id or
-        // drop the row out of the cluster set on a transient detection miss.
-        // Targeted setters (`set_new_plugin_config_id`, `promote_cluster_rows`)
-        // own explicit clearing.
-        if let Some(config_id) = pve_plugin_config_id {
-            model.pve_plugin_config_id = Set(Some(config_id));
-        }
+        // This function never touches `pve_plugin_config_id` — the
+        // controller-ack path (`set_plugin_config_id`) is its sole owner, so
+        // a detection pass or re-bootstrap hook can never wipe it.
         if let Some(node_name) = pve_node_name {
             model.pve_node_name = Set(Some(node_name));
         }
@@ -56,7 +49,7 @@ pub async fn upsert_host_state(
         let model = proxmox_host_state::ActiveModel {
             host_id: Set(host_id.to_string()),
             is_pve_node: Set(is_pve_node),
-            pve_plugin_config_id: Set(pve_plugin_config_id),
+            pve_plugin_config_id: Set(None),
             pve_node_name: Set(pve_node_name),
             created_at: Set(now.clone()),
             updated_at: Set(now),
@@ -79,100 +72,25 @@ pub async fn find_pve_hosts(db: &DatabaseConnection) -> Result<Vec<proxmox_host_
         .context_to::<ProxmoxError>()
 }
 
-/// Stamp (or clear) the legacy PVE user marker on a set of cluster rows.
-pub async fn set_legacy_pve_user(
-    db: &DatabaseConnection,
-    host_ids: &[String],
-    legacy: Option<String>,
-) -> Result<()> {
-    use sea_orm::sea_query::Expr;
-
-    proxmox_host_state::Entity::update_many()
-        .col_expr(
-            proxmox_host_state::Column::LegacyPveUser,
-            Expr::value(legacy),
-        )
-        .filter(proxmox_host_state::Column::HostId.is_in(host_ids.iter().map(String::as_str)))
-        .exec(db)
-        .await
-        .context_to::<ProxmoxError>()?;
-    Ok(())
-}
-
-/// Stamp the ack-confirmed new plugin config id on a host, and promote it to
-/// the operative `pve_plugin_config_id` only when the latter is currently
-/// NULL (a fresh bootstrap gets its operative id immediately; a
-/// migration-window row keeps its legacy operative id until phase-2
-/// promotion). The ack marker itself is never cleared elsewhere.
-pub async fn set_new_plugin_config_id(
+/// Stamp the controller-acknowledged plugin config id on a host.
+///
+/// Plain single-column write: the controller-ack path
+/// (`on_plugin_config_reported`) and the Branch 4 reuse-persist site are the
+/// only writers of `pve_plugin_config_id`, so a stored value always means
+/// "controller-acknowledged".
+pub async fn set_plugin_config_id(
     db: &DatabaseConnection,
     host_id: &str,
     config_id: &str,
 ) -> Result<()> {
-    use sea_orm::sea_query::{Expr, Func};
-
-    proxmox_host_state::Entity::update_many()
-        .col_expr(
-            proxmox_host_state::Column::NewPvePluginConfigId,
-            Expr::value(config_id),
-        )
-        .col_expr(
-            proxmox_host_state::Column::PvePluginConfigId,
-            Expr::expr(Func::coalesce([
-                Expr::col(proxmox_host_state::Column::PvePluginConfigId),
-                Expr::value(config_id),
-            ])),
-        )
-        .filter(proxmox_host_state::Column::HostId.eq(host_id))
-        .exec(db)
-        .await
-        .context_to::<ProxmoxError>()?;
-    Ok(())
-}
-
-/// Phase-2 promotion: point the given cluster rows at the new operative
-/// config id, clear the legacy-user marker, and reset the attempt counter.
-/// Never touches `new_pve_plugin_config_id` — the ack marker is never
-/// cleared once set.
-pub async fn promote_cluster_rows(
-    db: &DatabaseConnection,
-    host_ids: &[String],
-    new_config_id: &str,
-) -> Result<()> {
     use sea_orm::sea_query::Expr;
 
     proxmox_host_state::Entity::update_many()
         .col_expr(
             proxmox_host_state::Column::PvePluginConfigId,
-            Expr::value(new_config_id),
+            Expr::value(config_id),
         )
-        .col_expr(
-            proxmox_host_state::Column::LegacyPveUser,
-            Expr::value(Option::<String>::None),
-        )
-        .col_expr(
-            proxmox_host_state::Column::MigrationAttempts,
-            Expr::value(0),
-        )
-        .filter(proxmox_host_state::Column::HostId.is_in(host_ids.iter().map(String::as_str)))
-        .exec(db)
-        .await
-        .context_to::<ProxmoxError>()?;
-    Ok(())
-}
-
-/// Increment the phase-2 migration attempt counter on a set of cluster rows.
-pub async fn increment_migration_attempts(
-    db: &DatabaseConnection,
-    host_ids: &[String],
-) -> Result<()> {
-    use sea_orm::{ExprTrait, sea_query::Expr};
-    proxmox_host_state::Entity::update_many()
-        .col_expr(
-            proxmox_host_state::Column::MigrationAttempts,
-            Expr::col(proxmox_host_state::Column::MigrationAttempts).add(1),
-        )
-        .filter(proxmox_host_state::Column::HostId.is_in(host_ids.iter().map(String::as_str)))
+        .filter(proxmox_host_state::Column::HostId.eq(host_id))
         .exec(db)
         .await
         .context_to::<ProxmoxError>()?;
@@ -262,9 +180,8 @@ pub async fn increment_match_attempts(db: &DatabaseConnection, id: i32) -> Resul
 /// Wipe all agent-local Proxmox state: every `proxmox_host_state` row and
 /// every `proxmox_pending_matches` row. Called when the agent's tenant
 /// binding changes — stale rows from the previous tenant (including
-/// `new_pve_plugin_config_id` ack markers pointing at a foreign tenant's
-/// plugin config) must not satisfy reuse/migration checks under the new
-/// tenant.
+/// `pve_plugin_config_id` values pointing at a foreign tenant's plugin
+/// config) must not satisfy reuse checks under the new tenant.
 ///
 /// Both deletes run inside a single `begin_immediate()` transaction so a
 /// failure partway through never leaves one table wiped and the other
@@ -323,145 +240,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migration_setters_roundtrip_and_promotion_retains_ack_marker() {
+    async fn set_plugin_config_id_roundtrip_overwrites_existing_value() {
         let db = setup_agent_db().await;
-        upsert_host_state(
-            &db,
-            "h1",
-            true,
-            Some("legacy-cfg".to_string()),
-            Some("node1".to_string()),
-        )
-        .await
-        .expect("seed h1");
-        upsert_host_state(
-            &db,
-            "h2",
-            true,
-            Some("legacy-cfg".to_string()),
-            Some("node2".to_string()),
-        )
-        .await
-        .expect("seed h2");
-        let ids = vec!["h1".to_string(), "h2".to_string()];
-
-        set_legacy_pve_user(&db, &ids, Some("uptrakit-t@pve".to_string()))
+        upsert_host_state(&db, "host-1", true, Some("node1".to_string()))
             .await
-            .expect("set legacy");
-        set_new_plugin_config_id(&db, "h1", "new-cfg")
+            .expect("upsert");
+        set_plugin_config_id(&db, "host-1", "cfg-a")
             .await
-            .expect("set new id");
-        // Legacy operative id survives the ack marker (promotion is phase 2's job) —
-        // red-checkable: unconditional overwrite fails this.
-        let h1_pre = find_host_state(&db, "h1")
+            .expect("first write");
+        // Intermediate state, before the overwrite below — red-checkable: a
+        // no-op first write (e.g. an accidental early-return) would leave
+        // this None instead of "cfg-a".
+        let row_after_first_write = find_host_state(&db, "host-1")
             .await
-            .expect("query")
-            .expect("h1 exists");
-        assert_eq!(h1_pre.pve_plugin_config_id.as_deref(), Some("legacy-cfg"));
-
-        // Fresh row (NULL operative id) is promoted immediately on ack — nothing else
-        // writes pve_plugin_config_id on a clean cluster; red-checkable: writing only
-        // the marker breaks guest bootstrap on fresh clusters.
-        upsert_host_state(&db, "h3", true, None, Some("node3".to_string()))
+            .expect("read")
+            .expect("row exists");
+        assert_eq!(
+            row_after_first_write.pve_plugin_config_id.as_deref(),
+            Some("cfg-a")
+        );
+        set_plugin_config_id(&db, "host-1", "cfg-b")
             .await
-            .expect("seed h3");
-        set_new_plugin_config_id(&db, "h3", "new-cfg")
+            .expect("overwrite");
+        let row = find_host_state(&db, "host-1")
             .await
-            .expect("set h3");
-        let h3 = find_host_state(&db, "h3")
-            .await
-            .expect("query")
-            .expect("h3 exists");
-        assert_eq!(h3.pve_plugin_config_id.as_deref(), Some("new-cfg"));
-        assert_eq!(h3.new_pve_plugin_config_id.as_deref(), Some("new-cfg"));
-
-        increment_migration_attempts(&db, &ids)
-            .await
-            .expect("bump attempts");
-
-        // Intermediate state before promotion — red-checkable: a no-op
-        // set_legacy_pve_user leaves legacy_pve_user unset, and skipping the
-        // .add(1) leaves migration_attempts at 0, either of which fails here.
-        let h1_mid = find_host_state(&db, "h1")
-            .await
-            .expect("query")
-            .expect("h1 exists");
-        let h2_mid = find_host_state(&db, "h2")
-            .await
-            .expect("query")
-            .expect("h2 exists");
-        for row in [&h1_mid, &h2_mid] {
-            assert_eq!(
-                row.legacy_pve_user.as_deref(),
-                Some("uptrakit-t@pve"),
-                "legacy marker set pre-promotion"
-            );
-            assert_eq!(row.migration_attempts, 1, "attempt counter bumped once");
-        }
-
-        promote_cluster_rows(&db, &ids, "new-cfg")
-            .await
-            .expect("promote");
-
-        let h1 = find_host_state(&db, "h1")
-            .await
-            .expect("query")
-            .expect("h1 exists");
-        let h2 = find_host_state(&db, "h2")
-            .await
-            .expect("query")
-            .expect("h2 exists");
-        for row in [&h1, &h2] {
-            assert_eq!(row.pve_plugin_config_id.as_deref(), Some("new-cfg"));
-            assert_eq!(
-                row.legacy_pve_user, None,
-                "promotion clears the legacy marker"
-            );
-            assert_eq!(row.migration_attempts, 0, "promotion resets attempts");
-        }
-        // The ack marker is NEVER cleared (spec § 4) — red-checkable: clearing it in
-        // promote_cluster_rows fails this.
-        assert_eq!(h1.new_pve_plugin_config_id.as_deref(), Some("new-cfg"));
-
-        // Update-arm preserve-on-None: re-upserting with no config id / node name
-        // (the hooks-before-flow shape from a later task) must not wipe either column.
-        upsert_host_state(&db, "h1", true, None, None)
-            .await
-            .expect("re-upsert h1");
-        let h1_post = find_host_state(&db, "h1")
-            .await
-            .expect("query")
-            .expect("h1 exists");
-        assert_eq!(h1_post.pve_plugin_config_id.as_deref(), Some("new-cfg"));
-        assert_eq!(h1_post.pve_node_name.as_deref(), Some("node1"));
+            .expect("read")
+            .expect("row exists");
+        // "cfg-b" differs from both the fixture default (None) and the first
+        // write's value ("cfg-a") — a no-op second write would leave this at
+        // "cfg-a", not "cfg-b", so this assertion is non-vacuous against a
+        // no-op'd setter.
+        assert_eq!(row.pve_plugin_config_id.as_deref(), Some("cfg-b"));
     }
 
     #[tokio::test]
     async fn tenant_rebind_wipes_local_state() {
         let db = setup_agent_db().await;
-        upsert_host_state(
-            &db,
-            "h1",
-            true,
-            Some("legacy-cfg".to_string()),
-            Some("node1".to_string()),
-        )
-        .await
-        .expect("seed h1");
-        upsert_host_state(
-            &db,
-            "h2",
-            true,
-            Some("legacy-cfg".to_string()),
-            Some("node2".to_string()),
-        )
-        .await
-        .expect("seed h2");
+        upsert_host_state(&db, "h1", true, Some("node1".to_string()))
+            .await
+            .expect("seed h1");
+        upsert_host_state(&db, "h2", true, Some("node2".to_string()))
+            .await
+            .expect("seed h2");
         // Non-PVE row: `upsert_host_state` also writes these (e.g. a host that
         // was probed and found not to be a PVE node), and `find_pve_hosts`
         // filters them out — a wipe scoped to `is_pve_node = true` would leave
         // this row behind undetected without an unfiltered assertion.
-        upsert_host_state(&db, "h-non-pve", false, None, None)
+        upsert_host_state(&db, "h-non-pve", false, None)
             .await
             .expect("seed non-pve host");
         insert_pending_match(&db, "h1", "mapping-1")

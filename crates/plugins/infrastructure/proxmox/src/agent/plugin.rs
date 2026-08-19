@@ -145,7 +145,7 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         // the flow's own DB reads (cluster row set) must see this host's row.
         let host_id_str = host_id.to_string();
         if let Err(e) =
-            db_ops::upsert_host_state(ctx.db, &host_id_str, true, None, pve_node_name.clone()).await
+            db_ops::upsert_host_state(ctx.db, &host_id_str, true, pve_node_name.clone()).await
         {
             tracing::warn!(error = %e, "failed to persist PVE state for host");
         }
@@ -217,7 +217,7 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         };
 
         if let Err(e) =
-            db_ops::upsert_host_state(ctx.db, &host_id_str, true, None, node_name.clone()).await
+            db_ops::upsert_host_state(ctx.db, &host_id_str, true, node_name.clone()).await
         {
             tracing::warn!(error = %e, "failed to persist PVE node name during sync");
         }
@@ -278,7 +278,7 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         plugin_config_id: uuid::Uuid,
         host_id: uuid::Uuid,
     ) -> Result<()> {
-        db_ops::set_new_plugin_config_id(db, &host_id.to_string(), &plugin_config_id.to_string())
+        db_ops::set_plugin_config_id(db, &host_id.to_string(), &plugin_config_id.to_string())
             .await
             .context_to::<PluginError>()
     }
@@ -1028,35 +1028,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn config_ack_writes_marker_on_correlated_row() {
+    async fn config_ack_writes_id_on_correlated_row() {
         let db = setup_agent_db().await;
 
         let host_a_id = uuid::Uuid::now_v7();
         let host_b_id = uuid::Uuid::now_v7();
 
-        // Two migration-window rows, both already carrying a legacy
-        // `pve_plugin_config_id` — the old positional scan would find
-        // neither (both have `Some(..)`) and silently write nothing; this
-        // ack must land on host B specifically, by id, regardless of scan
-        // order.
+        // Two rows, both already carrying a stored `pve_plugin_config_id` —
+        // the positional scan must land the ack on host B specifically, by
+        // id, regardless of scan order.
         db_ops::upsert_host_state(
             &db,
             &host_a_id.to_string(),
             true,
-            Some("legacy-cfg-a".to_string()),
             Some("node-a".to_string()),
         )
         .await
         .expect("seed host-a");
+        db_ops::set_plugin_config_id(&db, &host_a_id.to_string(), "existing-cfg-a")
+            .await
+            .expect("seed host-a config id");
         db_ops::upsert_host_state(
             &db,
             &host_b_id.to_string(),
             true,
-            Some("legacy-cfg-b".to_string()),
             Some("node-b".to_string()),
         )
         .await
         .expect("seed host-b");
+        db_ops::set_plugin_config_id(&db, &host_b_id.to_string(), "existing-cfg-b")
+            .await
+            .expect("seed host-b config id");
 
         let config_id = uuid::Uuid::now_v7();
 
@@ -1072,12 +1074,8 @@ mod tests {
             .expect("host-a exists");
         assert_eq!(
             host_a.pve_plugin_config_id.as_deref(),
-            Some("legacy-cfg-a"),
-            "host-a's operative config id must be untouched by an ack targeting host-b"
-        );
-        assert_eq!(
-            host_a.new_pve_plugin_config_id, None,
-            "host-a's ack marker must stay unset — an ack for host-b must not fan out"
+            Some("existing-cfg-a"),
+            "host-a's config id must be untouched by an ack targeting host-b"
         );
 
         let host_b = db_ops::find_host_state(&db, &host_b_id.to_string())
@@ -1085,31 +1083,20 @@ mod tests {
             .expect("find host-b")
             .expect("host-b exists");
         assert_eq!(
-            host_b.new_pve_plugin_config_id.as_deref(),
-            Some(config_id.to_string()).as_deref(),
-            "host-b's ack marker must be set to the reported config id"
-        );
-        assert_eq!(
             host_b.pve_plugin_config_id.as_deref(),
-            Some("legacy-cfg-b"),
-            "host-b's legacy operative id survives the ack (promotion is phase 2's job)"
+            Some(config_id.to_string()).as_deref(),
+            "host-b's config id must be overwritten with the reported config id"
         );
     }
 
     #[tokio::test]
-    async fn config_ack_promotes_operative_id_on_fresh_row() {
+    async fn config_ack_writes_id_on_fresh_row() {
         let db = setup_agent_db().await;
 
         let host_id = uuid::Uuid::now_v7();
-        db_ops::upsert_host_state(
-            &db,
-            &host_id.to_string(),
-            true,
-            None,
-            Some("node-c".to_string()),
-        )
-        .await
-        .expect("seed fresh host with no existing config id");
+        db_ops::upsert_host_state(&db, &host_id.to_string(), true, Some("node-c".to_string()))
+            .await
+            .expect("seed fresh host with no existing config id");
 
         let config_id = uuid::Uuid::now_v7();
         let plugin = crate::ProxmoxPlugin::new_agent();
@@ -1123,14 +1110,9 @@ mod tests {
             .expect("find host")
             .expect("host exists");
         assert_eq!(
-            host.new_pve_plugin_config_id.as_deref(),
-            Some(config_id.to_string()).as_deref(),
-            "fresh-cluster promote-on-ack must set the ack marker"
-        );
-        assert_eq!(
             host.pve_plugin_config_id.as_deref(),
             Some(config_id.to_string()).as_deref(),
-            "fresh-cluster promote-on-ack must also set the operative id (NULL -> config id)"
+            "ack on a fresh row must set the operative id (NULL -> config id)"
         );
     }
 }

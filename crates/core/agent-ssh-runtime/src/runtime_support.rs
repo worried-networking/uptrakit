@@ -698,7 +698,7 @@ mod tests {
         let row = db
             .query_one_raw(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Sqlite,
-                "SELECT new_pve_plugin_config_id FROM proxmox_host_state WHERE host_id = $1",
+                "SELECT pve_plugin_config_id FROM proxmox_host_state WHERE host_id = $1",
                 [host_id.to_string().into()],
             ))
             .await
@@ -706,7 +706,7 @@ mod tests {
             .expect("seeded row must still exist");
         let new_config_id: Option<String> = row
             .try_get_by_index(0)
-            .expect("new_pve_plugin_config_id column");
+            .expect("pve_plugin_config_id column");
         assert_eq!(
             new_config_id, None,
             "a mismatched plugin_type ack must never write proxmox host state"

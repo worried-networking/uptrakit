@@ -65,7 +65,7 @@ pub(crate) struct CredentialFlowOutput {
     pub degraded: bool,
 }
 
-/// Run the cluster-scoped credential/migration flow for `host_id`.
+/// Run the cluster-scoped credential flow for `host_id`.
 ///
 /// Infallible by contract: every internal failure maps to
 /// [`PveCredentialOutcome::Failed`] (or a narrower outcome) plus a
@@ -131,7 +131,7 @@ fn skipped_no_tenant() -> CredentialFlowOutput {
     }
 }
 
-/// The credential/migration section proper — everything from
+/// The credential-flow section proper — everything from
 /// `check_pve_state` on, run under the per-cluster lock.
 async fn run_locked(
     ctx: &InfraPluginContext<'_>,
@@ -183,12 +183,13 @@ async fn run_locked(
         })
         .collect();
 
-    // Branch 4 evidence: new_pve_plugin_config_id ack marker across the
-    // cluster row set. A bare pve_plugin_config_id never satisfies reuse.
+    // Branch 4 evidence: pve_plugin_config_id across the cluster row set.
+    // Its only writers are the controller-ack path and a prior confirmed
+    // reuse, so a stored value is reuse evidence.
     let evidence_id: Option<String> = {
         let mut ids: Vec<String> = cluster_rows
             .iter()
-            .filter_map(|h| h.new_pve_plugin_config_id.clone())
+            .filter_map(|h| h.pve_plugin_config_id.clone())
             .collect();
         ids.sort_unstable();
         ids.dedup();
@@ -198,8 +199,9 @@ async fn run_locked(
             _ => {
                 tracing::warn!(
                     candidates = ?ids,
-                    "cluster peers disagree on new_pve_plugin_config_id (likely duplicate \
-                     configs from a failed bootstrap dedup); using newest"
+                    "cluster peers disagree on pve_plugin_config_id (likely duplicate \
+                     configs from a failed bootstrap dedup); picking the lexicographic \
+                     max as an arbitrary-but-deterministic tie-break"
                 );
                 ids.into_iter().max()
             }
@@ -216,12 +218,10 @@ async fn run_locked(
 
     if let Some(id) = evidence_id.clone().filter(|_| !confirmed_token_absent) {
         // Branch 4: reuse. Persist the resolved id onto THIS flow host's own
-        // row via the coalesce-based setter — it fills a NULL operative
-        // column (a fresh peer picking up a cluster-mate's marker) while
-        // leaving a legacy row's operative id untouched until phase 2
-        // promotes it. A bare `upsert_host_state` would clobber that legacy
-        // id mid-migration, so it must not be used here.
-        if let Err(e) = db_ops::set_new_plugin_config_id(ctx.db, &host_id_str, &id).await {
+        // row — a fresh peer picking up a cluster-mate's id, or a
+        // peers-disagree tie-break converging the local row onto the
+        // resolved value.
+        if let Err(e) = db_ops::set_plugin_config_id(ctx.db, &host_id_str, &id).await {
             tracing::warn!(error = %e, "failed to persist reused PVE plugin config id");
             lines.push(
                 "PVE API credentials: reused existing plugin config, but failed to \
@@ -235,7 +235,7 @@ async fn run_locked(
         existing_config_id = Some(id);
     } else if state.our_token_exists {
         // Branch 6: token confirmed present but no reusable evidence anywhere
-        // (ack marker lost) — regenerate.
+        // (no stored config id on any cluster row) — regenerate.
         //
         // NOTE: `regenerate_pve_api_token` calls `ensure_pve_acls` but not
         // `ensure_pve_roles` (see pve_setup.rs). This is the spec-mandated
@@ -364,10 +364,6 @@ mod tests {
         ok("[]")
     }
 
-    fn user_list_empty() -> RemoteCommandResult {
-        ok("[]")
-    }
-
     fn token_add_ok(secret: &str) -> RemoteCommandResult {
         ok(format!(
             r#"{{"full-tokenid":"uptrakit@pve!x","info":{{"privsep":"1"}},"value":"{secret}"}}"#
@@ -463,15 +459,9 @@ mod tests {
         // Variant A: multi-node cluster -> cfg name "pve-{cluster}".
         let db = setup_agent_db().await;
         let host_id = uuid::Uuid::from_u128(1);
-        db_ops::upsert_host_state(
-            &db,
-            &host_id.to_string(),
-            true,
-            None,
-            Some("pve1".to_string()),
-        )
-        .await
-        .expect("seed host");
+        db_ops::upsert_host_state(&db, &host_id.to_string(), true, Some("pve1".to_string()))
+            .await
+            .expect("seed host");
         let tid = tenant(1);
         let invoker = RecordingActionInvoker::new();
         let guest = UnusedGuestBootstrap;
@@ -481,7 +471,6 @@ mod tests {
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             ("pveum user token list", token_list_empty()),
-            ("pveum user list", user_list_empty()),
             ("pveum role add", ok("")),
             ("pveum user add", ok("")),
             ("pveum user token add", token_add_ok("secret-a")),
@@ -517,15 +506,9 @@ mod tests {
         // Variant B: standalone (no cluster) -> cfg name "pve-{node}-{short id}".
         let db2 = setup_agent_db().await;
         let host_id2 = uuid::Uuid::from_u128(2);
-        db_ops::upsert_host_state(
-            &db2,
-            &host_id2.to_string(),
-            true,
-            None,
-            Some("solo1".to_string()),
-        )
-        .await
-        .expect("seed host");
+        db_ops::upsert_host_state(&db2, &host_id2.to_string(), true, Some("solo1".to_string()))
+            .await
+            .expect("seed host");
         let tid2 = tenant(2);
         let invoker2 = RecordingActionInvoker::new();
         let guest2 = UnusedGuestBootstrap;
@@ -535,7 +518,6 @@ mod tests {
         let executor2 = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json2)),
             ("pveum user token list", token_list_empty()),
-            ("pveum user list", user_list_empty()),
             ("pveum role add", ok("")),
             ("pveum user add", ok("")),
             ("pveum user token add", token_add_ok("secret-b")),
@@ -555,15 +537,9 @@ mod tests {
     async fn coexisting_tenant_tokens_untouched() {
         let db = setup_agent_db().await;
         let host_id = uuid::Uuid::from_u128(3);
-        db_ops::upsert_host_state(
-            &db,
-            &host_id.to_string(),
-            true,
-            None,
-            Some("pve1".to_string()),
-        )
-        .await
-        .expect("seed host");
+        db_ops::upsert_host_state(&db, &host_id.to_string(), true, Some("pve1".to_string()))
+            .await
+            .expect("seed host");
         let tid = tenant(3);
         let other_tid = tenant(30);
         let invoker = RecordingActionInvoker::new();
@@ -575,7 +551,6 @@ mod tests {
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             ("pveum user token list", token_list),
-            ("pveum user list", user_list_empty()),
             ("pveum role add", ok("")),
             ("pveum user add", ok("")),
             ("pveum user token add", token_add_ok("secret-c")),
@@ -602,73 +577,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reuse_bare_operative_id_without_ack_marker_is_not_reused() {
+    async fn reuse_bare_operative_id_is_reused() {
         let db = setup_agent_db().await;
         let host_id = uuid::Uuid::from_u128(10);
         let host_id_str = host_id.to_string();
-        db_ops::upsert_host_state(
-            &db,
-            &host_id_str,
-            true,
-            Some("legacy-cfg".to_string()),
-            Some("pve1".to_string()),
-        )
-        .await
-        .expect("seed host with bare operative id");
+        db_ops::upsert_host_state(&db, &host_id_str, true, Some("pve1".to_string()))
+            .await
+            .expect("seed host");
+        db_ops::set_plugin_config_id(&db, &host_id_str, "legacy-cfg")
+            .await
+            .expect("seed host with bare operative id");
         let tid = tenant(10);
         let invoker = RecordingActionInvoker::new();
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
         let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
         let cluster_json = cluster_status(Some("BAREOPCLUSTER"), &["pve1"]);
-        // The token IS present (branch 6, regenerate) — a bare operative id
-        // with no ack marker must fall through to regenerate, not create.
-        // Scripting an empty token list would land on branch 5 (create)
-        // instead, which does not exercise the claimed branch.
+        // The token IS present — a stored pve_plugin_config_id plus a
+        // confirmed-present token must satisfy reuse; scripting a
+        // create/regenerate shape here would fail if reuse were not
+        // actually taken (no other script entries match).
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             (
                 "pveum user token list",
                 ok(format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#)),
             ),
-            ("pveum user list", user_list_empty()),
-            ("pveum user token remove", ok("")),
-            ("pveum user token add", token_add_ok("secret-d")),
-            ("pveum acl modify", ok("")),
-            ("hostname -f", ok("pve.example.com")),
-            ("curl", ok("200")),
         ]);
 
         let out = run_credential_flow(&ctx, &executor, host_id, Some("pve1")).await;
-        assert_ne!(
-            out.outcome,
-            PveCredentialOutcome::Reused,
-            "a bare pve_plugin_config_id with no ack marker must never satisfy reuse"
-        );
         assert_eq!(
             out.outcome,
-            PveCredentialOutcome::Regenerated,
-            "confirmed-present token with no ack marker must regenerate, not create"
+            PveCredentialOutcome::Reused,
+            "a bare pve_plugin_config_id with a confirmed-present token must satisfy reuse"
         );
+        assert_eq!(out.existing_config_id.as_deref(), Some("legacy-cfg"));
         let calls = executor.recorded_calls();
         assert!(
-            calls.iter().any(|c| c.contains("pveum user token remove")),
-            "expected the regenerate shape to run, not the create shape: {calls:?}"
+            !calls.iter().any(|c| c.contains("pveum user token add")),
+            "reuse must not create/regenerate: {calls:?}"
         );
-        assert!(out.existing_config_id.is_none());
     }
 
     #[tokio::test]
-    async fn reuse_with_ack_marker_and_confirmed_token_reuses() {
+    async fn reuse_with_stored_id_and_confirmed_token_reuses() {
         let db = setup_agent_db().await;
         let host_id = uuid::Uuid::from_u128(11);
         let host_id_str = host_id.to_string();
-        db_ops::upsert_host_state(&db, &host_id_str, true, None, Some("pve1".to_string()))
+        db_ops::upsert_host_state(&db, &host_id_str, true, Some("pve1".to_string()))
             .await
             .expect("seed host");
-        db_ops::set_new_plugin_config_id(&db, &host_id_str, "ack-cfg")
+        db_ops::set_plugin_config_id(&db, &host_id_str, "ack-cfg")
             .await
-            .expect("ack marker");
+            .expect("stored id");
         let tid = tenant(11);
         let invoker = RecordingActionInvoker::new();
         let guest = UnusedGuestBootstrap;
@@ -681,7 +642,6 @@ mod tests {
                 "pveum user token list",
                 ok(format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#)),
             ),
-            ("pveum user list", user_list_empty()),
         ]);
 
         let out = run_credential_flow(&ctx, &executor, host_id, Some("pve1")).await;
@@ -695,24 +655,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reuse_multiple_ack_markers_uses_max() {
+    async fn reuse_peers_disagree_converges_local_row_on_max() {
         let db = setup_agent_db().await;
         let host_a = uuid::Uuid::from_u128(12);
         let host_b = uuid::Uuid::from_u128(13);
         let host_a_str = host_a.to_string();
         let host_b_str = host_b.to_string();
-        db_ops::upsert_host_state(&db, &host_a_str, true, None, Some("pve1".to_string()))
+        db_ops::upsert_host_state(&db, &host_a_str, true, Some("pve1".to_string()))
             .await
             .expect("seed a");
-        db_ops::upsert_host_state(&db, &host_b_str, true, None, Some("pve2".to_string()))
+        db_ops::upsert_host_state(&db, &host_b_str, true, Some("pve2".to_string()))
             .await
             .expect("seed b");
-        db_ops::set_new_plugin_config_id(&db, &host_a_str, "cfg-a")
+        // The flow host (host_a) carries its OWN pre-existing, differing
+        // stored id — distinct from both peer values below. This is the
+        // overwrite-pin: proving the reuse persist actually replaces a
+        // non-NULL local value, not just fills a NULL one.
+        db_ops::set_plugin_config_id(&db, &host_a_str, "cfg-a-own")
             .await
-            .expect("ack a");
-        db_ops::set_new_plugin_config_id(&db, &host_b_str, "cfg-b")
+            .expect("seed flow host's own pre-existing id");
+        db_ops::set_plugin_config_id(&db, &host_a_str, "cfg-a")
             .await
-            .expect("ack b");
+            .expect("stored id a");
+        db_ops::set_plugin_config_id(&db, &host_b_str, "cfg-b")
+            .await
+            .expect("stored id b");
         let tid = tenant(12);
         let invoker = RecordingActionInvoker::new();
         let guest = UnusedGuestBootstrap;
@@ -725,7 +692,6 @@ mod tests {
                 "pveum user token list",
                 ok(format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#)),
             ),
-            ("pveum user list", user_list_empty()),
         ]);
 
         let out = run_credential_flow(&ctx, &executor, host_a, Some("pve1")).await;
@@ -733,7 +699,24 @@ mod tests {
         assert_eq!(
             out.existing_config_id.as_deref(),
             Some("cfg-b"),
-            "must pick the lexicographic max of disagreeing peer ack markers"
+            "must pick the lexicographic max of disagreeing peer stored ids"
+        );
+
+        // Non-vacuous overwrite pin: re-read the flow host's OWN row from
+        // the DB. Its pre-existing value was "cfg-a" (itself overwritten
+        // from "cfg-a-own" above), which differs from the resolved max
+        // "cfg-b" — a persist that only fills NULLs (or a no-op'd persist)
+        // would leave this at "cfg-a", not "cfg-b". Do not weaken this to
+        // "row unchanged".
+        let row = db_ops::find_host_state(&db, &host_a_str)
+            .await
+            .expect("query")
+            .expect("flow host row exists");
+        assert_eq!(
+            row.pve_plugin_config_id.as_deref(),
+            Some("cfg-b"),
+            "a peers-disagree tie-break must overwrite the flow host's own differing \
+             pre-existing stored id with the resolved max"
         );
     }
 
@@ -744,21 +727,21 @@ mod tests {
         // it onto the flow host's own row, silently dropping a peer-reusing
         // cluster node out of the guest-bootstrap surface (which filters on
         // `h.pve_plugin_config_id.is_some()`). The flow host's row starts
-        // completely NULL; only the peer carries the ack marker.
+        // completely NULL; only the peer carries a stored id.
         let db = setup_agent_db().await;
         let flow_host = uuid::Uuid::from_u128(16);
         let flow_host_str = flow_host.to_string();
         let peer_host = uuid::Uuid::from_u128(17);
         let peer_host_str = peer_host.to_string();
-        db_ops::upsert_host_state(&db, &flow_host_str, true, None, Some("pve1".to_string()))
+        db_ops::upsert_host_state(&db, &flow_host_str, true, Some("pve1".to_string()))
             .await
-            .expect("seed flow host with NULL operative id and no ack marker");
-        db_ops::upsert_host_state(&db, &peer_host_str, true, None, Some("pve2".to_string()))
+            .expect("seed flow host with NULL operative id");
+        db_ops::upsert_host_state(&db, &peer_host_str, true, Some("pve2".to_string()))
             .await
             .expect("seed peer host");
-        db_ops::set_new_plugin_config_id(&db, &peer_host_str, "peer-cfg")
+        db_ops::set_plugin_config_id(&db, &peer_host_str, "peer-cfg")
             .await
-            .expect("seed peer ack marker");
+            .expect("seed peer stored id");
 
         let tid = tenant(16);
         let invoker = RecordingActionInvoker::new();
@@ -772,32 +755,24 @@ mod tests {
                 "pveum user token list",
                 ok(format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#)),
             ),
-            ("pveum user list", user_list_empty()),
         ]);
 
         let out = run_credential_flow(&ctx, &executor, flow_host, Some("pve1")).await;
         assert_eq!(out.outcome, PveCredentialOutcome::Reused);
         assert_eq!(out.existing_config_id.as_deref(), Some("peer-cfg"));
 
-        // The load-bearing assertion: deleting the B-1 fix's
-        // `set_new_plugin_config_id` call on the reuse branch would leave
-        // both of these columns NULL, since nothing else writes to the flow
-        // host's own row on this path.
+        // The load-bearing assertion: deleting the Branch 4 persist call
+        // would leave this column NULL, since nothing else writes to the
+        // flow host's own row on this path.
         let row = db_ops::find_host_state(&db, &flow_host_str)
             .await
             .expect("query")
             .expect("flow host row exists");
         assert_eq!(
-            row.new_pve_plugin_config_id.as_deref(),
-            Some("peer-cfg"),
-            "the ack marker must be persisted onto the flow host's own row, not just returned \
-             in the in-memory report"
-        );
-        assert_eq!(
             row.pve_plugin_config_id.as_deref(),
             Some("peer-cfg"),
-            "the coalesce fill must also promote the flow host's own NULL operative column so \
-             the guest-bootstrap surface's `pve_plugin_config_id.is_some()` filter picks it up"
+            "the resolved id must be persisted onto the flow host's own row so the \
+             guest-bootstrap surface's `pve_plugin_config_id.is_some()` filter picks it up"
         );
     }
 
@@ -806,12 +781,12 @@ mod tests {
         let db = setup_agent_db().await;
         let host_id = uuid::Uuid::from_u128(14);
         let host_id_str = host_id.to_string();
-        db_ops::upsert_host_state(&db, &host_id_str, true, None, Some("pve1".to_string()))
+        db_ops::upsert_host_state(&db, &host_id_str, true, Some("pve1".to_string()))
             .await
             .expect("seed host");
-        db_ops::set_new_plugin_config_id(&db, &host_id_str, "stale-cfg")
+        db_ops::set_plugin_config_id(&db, &host_id_str, "stale-cfg")
             .await
-            .expect("ack marker");
+            .expect("stored id");
         let tid = tenant(14);
         let invoker = RecordingActionInvoker::new();
         let guest = UnusedGuestBootstrap;
@@ -821,7 +796,6 @@ mod tests {
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             ("pveum user token list", token_list_empty()),
-            ("pveum user list", user_list_empty()),
             ("pveum role add", ok("")),
             ("pveum user add", ok("")),
             ("pveum user token add", token_add_ok("secret-e")),
@@ -834,7 +808,7 @@ mod tests {
         assert_ne!(
             out.outcome,
             PveCredentialOutcome::Reused,
-            "an ack marker with THIS run's read confirming token absence must not be reused"
+            "a stored id with THIS run's read confirming token absence must not be reused"
         );
         assert_eq!(out.outcome, PveCredentialOutcome::Provisioned);
         let report = out
@@ -852,15 +826,15 @@ mod tests {
     async fn reuse_standalone_peer_isolation() {
         let db = setup_agent_db().await;
         // A stray row for a DIFFERENT host that happens to share the node
-        // name, carrying an ack marker that must never leak into a
+        // name, carrying a stored id that must never leak into a
         // standalone run.
         let stray_id = "stray-host";
-        db_ops::upsert_host_state(&db, stray_id, true, None, Some("pve1".to_string()))
+        db_ops::upsert_host_state(&db, stray_id, true, Some("pve1".to_string()))
             .await
             .expect("seed stray");
-        db_ops::set_new_plugin_config_id(&db, stray_id, "stray-cfg")
+        db_ops::set_plugin_config_id(&db, stray_id, "stray-cfg")
             .await
-            .expect("stray ack");
+            .expect("stray stored id");
 
         let host_id = uuid::Uuid::from_u128(15);
         let tid = tenant(15);
@@ -873,7 +847,6 @@ mod tests {
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
             ("pveum user token list", token_list_empty()),
-            ("pveum user list", user_list_empty()),
             ("pveum role add", ok("")),
             ("pveum user add", ok("")),
             ("pveum user token add", token_add_ok("secret-f")),
@@ -886,7 +859,7 @@ mod tests {
         assert_ne!(
             out.outcome,
             PveCredentialOutcome::Reused,
-            "standalone flow must not inherit a stray host's ack marker even with a matching node name"
+            "standalone flow must not inherit a stray host's stored id even with a matching node name"
         );
         assert!(out.existing_config_id.is_none());
     }
@@ -896,7 +869,7 @@ mod tests {
         let db = setup_agent_db().await;
         let host_id = uuid::Uuid::from_u128(30);
         let host_id_str = host_id.to_string();
-        db_ops::upsert_host_state(&db, &host_id_str, true, None, Some("pve1".to_string()))
+        db_ops::upsert_host_state(&db, &host_id_str, true, Some("pve1".to_string()))
             .await
             .expect("seed host");
         let tid = tenant(30);
@@ -943,7 +916,7 @@ mod tests {
         let db = setup_agent_db().await;
         let host_id = uuid::Uuid::from_u128(32);
         let host_id_str = host_id.to_string();
-        db_ops::upsert_host_state(&db, &host_id_str, true, None, Some("pve1".to_string()))
+        db_ops::upsert_host_state(&db, &host_id_str, true, Some("pve1".to_string()))
             .await
             .expect("seed host");
         let tid = tenant(32);
@@ -958,7 +931,6 @@ mod tests {
                 "pveum user token list",
                 ok(format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#)),
             ),
-            ("pveum user list", user_list_empty()),
             ("pveum user token remove", ok("")),
             ("pveum user token add", token_add_ok("secret-k")),
             ("pveum acl modify", ok("")),
@@ -1076,7 +1048,7 @@ mod tests {
         let db = setup_agent_db().await;
         let host_id = uuid::Uuid::from_u128(51);
         let host_id_str = host_id.to_string();
-        db_ops::upsert_host_state(&db, &host_id_str, true, None, Some("pve1".to_string()))
+        db_ops::upsert_host_state(&db, &host_id_str, true, Some("pve1".to_string()))
             .await
             .expect("seed host");
         let tid = tenant(51);
