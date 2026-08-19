@@ -21,9 +21,6 @@ pub mod proxmox_host_state {
         pub pve_plugin_config_id: Option<String>,
         pub created_at: String,
         pub updated_at: String,
-        pub legacy_pve_user: Option<String>,
-        pub new_pve_plugin_config_id: Option<String>,
-        pub migration_attempts: i32,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

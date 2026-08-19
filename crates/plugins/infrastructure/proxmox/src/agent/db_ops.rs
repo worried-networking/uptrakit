@@ -53,9 +53,6 @@ pub async fn upsert_host_state(
             pve_node_name: Set(pve_node_name),
             created_at: Set(now.clone()),
             updated_at: Set(now),
-            legacy_pve_user: Set(None),
-            new_pve_plugin_config_id: Set(None),
-            migration_attempts: Set(0),
         };
         model.insert(db).await.context_to::<ProxmoxError>()?;
     }

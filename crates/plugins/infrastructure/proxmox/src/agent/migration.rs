@@ -327,6 +327,118 @@ impl MigrationTrait for AddPveMigrationColumns {
     }
 }
 
+// ── Migration: drop PVE identity-migration bookkeeping columns ──────────────
+
+/// Removes the completed legacy-user migration bookkeeping
+/// (ADR-0044 § Migration, executed to completion): folds the
+/// `new_pve_plugin_config_id` ack marker into the operative
+/// `pve_plugin_config_id`, then drops the three bookkeeping columns.
+///
+/// The unconditional fold makes "stored operative id ⇒ ack-derived" true of
+/// all pre-existing data: every legitimate post-ADR-0044 operative write also
+/// set the ack column, while a pre-ADR-0044 operative value (the
+/// `m20260308_000001` backfill) can be the legacy plugin-config id. On a
+/// skewed install a legacy-only operative id is cleared and the credential
+/// flow falls through to create/regenerate — the safe direction.
+pub struct DropPveMigrationColumns;
+
+impl MigrationName for DropPveMigrationColumns {
+    fn name(&self) -> &str {
+        "m20260817_000001_drop_pve_migration_columns"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for DropPveMigrationColumns {
+    async fn up(&self, manager: &SchemaManager) -> std::result::Result<(), DbErr> {
+        // Ledger/schema-skew guard, per column: a store that skipped
+        // m20260816_000001, or a partially applied run of THIS migration
+        // (the three ALTER TABLEs are separate statements — an interrupt
+        // between them leaves a subset dropped), must no-op per column
+        // instead of failing the whole agent migration run on re-entry.
+        if manager
+            .has_column("proxmox_host_state", "new_pve_plugin_config_id")
+            .await?
+        {
+            manager
+                .exec_stmt(
+                    Query::update()
+                        .table(ProxmoxHostState::Table)
+                        .value(
+                            ProxmoxHostState::PvePluginConfigId,
+                            Expr::col(ProxmoxHostState::NewPvePluginConfigId),
+                        )
+                        .to_owned(),
+                )
+                .await?;
+        }
+        // SQLite allows one alteration per ALTER TABLE.
+        for (col, name) in [
+            (ProxmoxHostState::MigrationAttempts, "migration_attempts"),
+            (
+                ProxmoxHostState::NewPvePluginConfigId,
+                "new_pve_plugin_config_id",
+            ),
+            (ProxmoxHostState::LegacyPveUser, "legacy_pve_user"),
+        ] {
+            if !manager.has_column("proxmox_host_state", name).await? {
+                continue;
+            }
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(ProxmoxHostState::Table)
+                        .drop_column(col)
+                        .to_owned(),
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> std::result::Result<(), DbErr> {
+        // Columns re-added empty — data not restored, same forward-only
+        // posture as the other agent-local down() bodies.
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxHostState::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxHostState::LegacyPveUser)
+                            .string()
+                            .null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxHostState::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxHostState::NewPvePluginConfigId)
+                            .string()
+                            .null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxHostState::Table)
+                    .add_column(
+                        ColumnDef::new(ProxmoxHostState::MigrationAttempts)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
 /// All agent-local migrations for this plugin, in application order.
 pub fn agent_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
     vec![
@@ -334,5 +446,6 @@ pub fn agent_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(CreateProxmoxPendingMatches),
         Box::new(AddPendingMatchAttempts),
         Box::new(AddPveMigrationColumns),
+        Box::new(DropPveMigrationColumns),
     ]
 }
