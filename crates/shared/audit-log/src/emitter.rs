@@ -335,6 +335,7 @@ mod db_tests {
 
     use std::sync::Arc;
 
+    use sea_orm::sea_query::{Alias, ColumnDef, Table};
     use sea_orm::{
         ConnectOptions, ConnectionTrait as _, Database, DatabaseConnection, EntityTrait as _,
     };
@@ -368,51 +369,61 @@ mod db_tests {
         let db = Database::connect(ConnectOptions::new("sqlite::memory:"))
             .await
             .expect("test db should open");
-        db.execute_unprepared(
-            "CREATE TABLE audit_logs (
-                id BLOB PRIMARY KEY NOT NULL,
-                tenant_id BLOB NOT NULL,
-                actor_type TEXT NOT NULL,
-                actor_id BLOB NULL,
-                actor_display TEXT NULL,
-                action_type TEXT NOT NULL,
-                action_kind TEXT NOT NULL,
-                target_type TEXT NULL,
-                target_id TEXT NULL,
-                target_display TEXT NULL,
-                outcome TEXT NOT NULL,
-                details_json TEXT NULL,
-                before_snapshot TEXT NULL,
-                after_snapshot TEXT NULL,
-                correlation_id BLOB NULL,
-                request_id TEXT NULL,
-                occurred_at TEXT NOT NULL
-            )",
-        )
-        .await
-        .expect("audit_logs table should be created");
-        db.execute_unprepared(
-            "CREATE TABLE system_audit_logs (
-                id BLOB PRIMARY KEY NOT NULL,
-                actor_type TEXT NOT NULL,
-                actor_id BLOB NULL,
-                actor_display TEXT NULL,
-                action_type TEXT NOT NULL,
-                action_kind TEXT NOT NULL,
-                target_type TEXT NULL,
-                target_id TEXT NULL,
-                target_display TEXT NULL,
-                outcome TEXT NOT NULL,
-                details_json TEXT NULL,
-                before_snapshot TEXT NULL,
-                after_snapshot TEXT NULL,
-                correlation_id BLOB NULL,
-                request_id TEXT NULL,
-                occurred_at TEXT NOT NULL
-            )",
-        )
-        .await
-        .expect("system_audit_logs table should be created");
+        let create_audit_logs = Table::create()
+            .table(Alias::new("audit_logs"))
+            .col(
+                ColumnDef::new(Alias::new("id"))
+                    .blob()
+                    .not_null()
+                    .primary_key(),
+            )
+            .col(ColumnDef::new(Alias::new("tenant_id")).blob().not_null())
+            .col(ColumnDef::new(Alias::new("actor_type")).text().not_null())
+            .col(ColumnDef::new(Alias::new("actor_id")).blob())
+            .col(ColumnDef::new(Alias::new("actor_display")).text())
+            .col(ColumnDef::new(Alias::new("action_type")).text().not_null())
+            .col(ColumnDef::new(Alias::new("action_kind")).text().not_null())
+            .col(ColumnDef::new(Alias::new("target_type")).text())
+            .col(ColumnDef::new(Alias::new("target_id")).text())
+            .col(ColumnDef::new(Alias::new("target_display")).text())
+            .col(ColumnDef::new(Alias::new("outcome")).text().not_null())
+            .col(ColumnDef::new(Alias::new("details_json")).text())
+            .col(ColumnDef::new(Alias::new("before_snapshot")).text())
+            .col(ColumnDef::new(Alias::new("after_snapshot")).text())
+            .col(ColumnDef::new(Alias::new("correlation_id")).blob())
+            .col(ColumnDef::new(Alias::new("request_id")).text())
+            .col(ColumnDef::new(Alias::new("occurred_at")).text().not_null())
+            .to_owned();
+        db.execute(&create_audit_logs)
+            .await
+            .expect("audit_logs table should be created");
+        let create_system_audit_logs = Table::create()
+            .table(Alias::new("system_audit_logs"))
+            .col(
+                ColumnDef::new(Alias::new("id"))
+                    .blob()
+                    .not_null()
+                    .primary_key(),
+            )
+            .col(ColumnDef::new(Alias::new("actor_type")).text().not_null())
+            .col(ColumnDef::new(Alias::new("actor_id")).blob())
+            .col(ColumnDef::new(Alias::new("actor_display")).text())
+            .col(ColumnDef::new(Alias::new("action_type")).text().not_null())
+            .col(ColumnDef::new(Alias::new("action_kind")).text().not_null())
+            .col(ColumnDef::new(Alias::new("target_type")).text())
+            .col(ColumnDef::new(Alias::new("target_id")).text())
+            .col(ColumnDef::new(Alias::new("target_display")).text())
+            .col(ColumnDef::new(Alias::new("outcome")).text().not_null())
+            .col(ColumnDef::new(Alias::new("details_json")).text())
+            .col(ColumnDef::new(Alias::new("before_snapshot")).text())
+            .col(ColumnDef::new(Alias::new("after_snapshot")).text())
+            .col(ColumnDef::new(Alias::new("correlation_id")).blob())
+            .col(ColumnDef::new(Alias::new("request_id")).text())
+            .col(ColumnDef::new(Alias::new("occurred_at")).text().not_null())
+            .to_owned();
+        db.execute(&create_system_audit_logs)
+            .await
+            .expect("system_audit_logs table should be created");
         db
     }
 
