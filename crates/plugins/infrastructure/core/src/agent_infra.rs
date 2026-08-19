@@ -235,6 +235,9 @@ pub struct InfraPluginContext<'a> {
     /// Tenant ID (available after the agent has connected to the controller at
     /// least once).
     pub tenant_id: Option<&'a str>,
+    /// The Uptrakit instance's public host as configured on the controller;
+    /// unvalidated operator input — sanitize before use.
+    pub instance_host: Option<&'a str>,
     /// Service UUID of this SSH agent instance.
     pub service_id: Option<uuid::Uuid>,
     /// Agent state directory (for DB init in spawned tasks).

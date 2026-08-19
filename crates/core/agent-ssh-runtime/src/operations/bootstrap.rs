@@ -138,6 +138,9 @@ pub(crate) struct BootstrapParams {
     /// Tenant UUID for PVE API credential naming.  `None` when the tenant
     /// ID has not yet been received from the controller.
     pub tenant_id: Option<uuid::Uuid>,
+    /// The Uptrakit instance's public host for operator-facing annotations
+    /// (PVE token comments). Controller session fact — never a request param.
+    pub instance_host: Option<String>,
     /// Remove existing Uptrakit-managed keys from `authorized_keys` before
     /// writing the new entry.
     pub remove_stale_keys: bool,
@@ -395,6 +398,7 @@ async fn detect_infra_plugins(
     let infra_ctx = InfraPluginContext {
         db,
         tenant_id: tenant_id_str.as_deref(),
+        instance_host: params.instance_host.as_deref(),
         service_id: params.service_id,
         state_dir,
         private_key_der: None,
@@ -1279,6 +1283,7 @@ async fn collect_infra_results(
     let infra_ctx = InfraPluginContext {
         db,
         tenant_id: tenant_id_str.as_deref(),
+        instance_host: params.instance_host.as_deref(),
         service_id: params.service_id,
         state_dir,
         private_key_der: None,
@@ -1859,6 +1864,7 @@ mod tests {
             // exercised directly by the proxmox crate's
             // `skip_pve_skips_only_credentials`.
             tenant_id: None,
+            instance_host: None,
             remove_stale_keys: false,
             allow_reboot: false,
         }

@@ -404,6 +404,7 @@ mod tests {
         InfraPluginContext {
             db,
             tenant_id,
+            instance_host: None,
             service_id: None,
             state_dir: std::path::Path::new("."),
             private_key_der: None,

@@ -761,6 +761,7 @@ mod tests {
         let ctx = InfraPluginContext {
             db: &db,
             tenant_id: Some("0193aaaa-bbbb-cccc-dddd-eeeeffff0000"),
+            instance_host: None,
             service_id: None,
             state_dir: std::path::Path::new("."),
             private_key_der: None,
@@ -808,6 +809,7 @@ mod tests {
         let ctx = InfraPluginContext {
             db: &db,
             tenant_id: None,
+            instance_host: None,
             service_id: None,
             state_dir: std::path::Path::new("."),
             private_key_der: None,
@@ -860,6 +862,7 @@ mod tests {
         let ctx = InfraPluginContext {
             db: &db,
             tenant_id: None,
+            instance_host: None,
             service_id: None,
             state_dir: std::path::Path::new("."),
             private_key_der: None,
@@ -891,6 +894,7 @@ mod tests {
         let ctx = InfraPluginContext {
             db: &db,
             tenant_id: Some("0193aaaa-bbbb-cccc-dddd-eeeeffff0000"),
+            instance_host: None,
             service_id: None,
             state_dir: std::path::Path::new("."),
             private_key_der: None,
@@ -960,6 +964,7 @@ mod tests {
         let ctx = InfraPluginContext {
             db: &db,
             tenant_id: None,
+            instance_host: None,
             service_id: None,
             state_dir: std::path::Path::new("."),
             private_key_der: None,
@@ -1003,6 +1008,7 @@ mod tests {
         let ctx = InfraPluginContext {
             db: &db,
             tenant_id: None,
+            instance_host: None,
             service_id: None,
             state_dir: std::path::Path::new("."),
             private_key_der: None,

@@ -113,6 +113,7 @@ impl ServiceHandler for AgentSshHandler {
                 SshAgentSettings {
                     tenant_id: settings.tenant_id,
                     ui_surfaces_enabled: agreed_capabilities.contains(&Capability::UiSurfaces),
+                    instance_host: settings.instance_host.clone(),
                 },
                 conn,
             )

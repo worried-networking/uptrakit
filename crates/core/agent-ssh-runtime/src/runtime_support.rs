@@ -154,6 +154,7 @@ impl AgentSshRuntimeSupport {
             let ctx = InfraPluginContext {
                 db: &db,
                 tenant_id: tenant_id.as_deref(),
+                instance_host: session_state.instance_host.as_deref(),
                 service_id: session_state.service_id,
                 state_dir: &state_dir,
                 private_key_der: session_state.private_key_der.as_deref(),
@@ -389,6 +390,7 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
             private_key_der: session_state.private_key_der.as_deref(),
             service_id: session_state.service_id,
             tenant_id: session_state.tenant_id,
+            instance_host: session_state.instance_host.as_deref(),
             bg_tx,
             surface_proxy: &self.surface_proxy,
             infra_bundles: Arc::clone(&self.infra_bundles),
@@ -545,6 +547,7 @@ mod tests {
             service_id: Some(uuid::Uuid::now_v7()),
             tenant_id: Some(uuid::Uuid::now_v7()),
             private_key_der: None,
+            instance_host: None,
         };
         let mut transport = TestTransport {
             send_log: Vec::new(),

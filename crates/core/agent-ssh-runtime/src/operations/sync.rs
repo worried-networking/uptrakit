@@ -424,6 +424,7 @@ pub(crate) async fn sync_execute(
     host_id: &str,
     db: &DatabaseConnection,
     tenant_id: Option<uuid::Uuid>,
+    instance_host: Option<&str>,
     auth_override: Option<&SyncAuthOverride>,
     allow_all: bool,
     skip_actions: &HashSet<String>,
@@ -547,6 +548,7 @@ pub(crate) async fn sync_execute(
             let infra_ctx = InfraPluginContext {
                 db,
                 tenant_id: tenant_id_str.as_deref(),
+                instance_host,
                 service_id: None,
                 state_dir: std::path::Path::new("."),
                 private_key_der: None,

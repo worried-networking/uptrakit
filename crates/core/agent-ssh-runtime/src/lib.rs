@@ -314,10 +314,11 @@ pub struct SshAgentIdentity {
     pub encryption_public_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SshAgentSettings {
     pub tenant_id: Option<uuid::Uuid>,
     pub ui_surfaces_enabled: bool,
+    pub instance_host: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -325,6 +326,7 @@ pub struct RuntimeSessionState {
     pub service_id: Option<uuid::Uuid>,
     pub tenant_id: Option<uuid::Uuid>,
     pub private_key_der: Option<Vec<u8>>,
+    pub instance_host: Option<String>,
 }
 
 pub struct SshAgentRuntimeConfig<S> {
@@ -547,6 +549,9 @@ where
         settings: SshAgentSettings,
         transport: &mut dyn ServiceTransport,
     ) -> Result<(), TransportError> {
+        // Session-scoped: refreshed (or cleared) on every ServiceSettings.
+        self.session_state.instance_host = settings.instance_host.clone();
+
         if let Some(tenant_id) = settings.tenant_id {
             // Fall back to the persisted tenant id when the in-memory field is
             // still None: RuntimeSessionState::default() re-initializes
@@ -1378,6 +1383,7 @@ mod tests {
         fail_register_surfaces: bool,
         surface_request_tenant_ids: Vec<Option<uuid::Uuid>>,
         persisted_tenant_id: Option<uuid::Uuid>,
+        register_surfaces_instance_hosts: Vec<Option<String>>,
     }
 
     #[derive(Default, Clone)]
@@ -1407,6 +1413,14 @@ mod tests {
         fn last_surface_request_tenant_id(&self) -> Option<Option<uuid::Uuid>> {
             self.state.lock().surface_request_tenant_ids.last().copied()
         }
+
+        fn last_register_surfaces_instance_host(&self) -> Option<Option<String>> {
+            self.state
+                .lock()
+                .register_surfaces_instance_hosts
+                .last()
+                .cloned()
+        }
     }
 
     #[async_trait]
@@ -1422,12 +1436,15 @@ mod tests {
         async fn register_surfaces(
             &self,
             _encryption_public_key: Option<String>,
-            _session_state: &RuntimeSessionState,
+            session_state: &RuntimeSessionState,
             transport: &mut dyn ServiceTransport,
         ) -> Result<(), TransportError> {
             let fail_register_surfaces = {
                 let mut state = self.state.lock();
                 state.calls.push("register_surfaces");
+                state
+                    .register_surfaces_instance_hosts
+                    .push(session_state.instance_host.clone());
                 state.fail_register_surfaces
             };
             if fail_register_surfaces {
@@ -1681,6 +1698,61 @@ mod tests {
         assert_eq!(support_clone.call_count("report_enrolled_hosts"), 1);
         assert_eq!(support_clone.call_count("register_surfaces"), 2);
         assert_eq!(support_clone.call_count("list_host_snapshots"), 1);
+    }
+
+    #[tokio::test]
+    async fn apply_settings_stores_then_clears_instance_host() {
+        let support = FakeSupport::default();
+        let support_clone = support.clone();
+        let mut runtime = SshAgentRuntime::new(runtime_config(
+            support,
+            tempfile::tempdir()
+                .expect("tempdir")
+                .path()
+                .join("update-freeze"),
+            RuntimeAuditEmitter::new(),
+        ));
+        let mut transport = MockTransport::new();
+
+        runtime
+            .on_connected(&mut transport, SshAgentIdentity::default())
+            .await
+            .expect("connect");
+
+        runtime
+            .apply_settings(
+                SshAgentSettings {
+                    ui_surfaces_enabled: true,
+                    instance_host: Some("uptrakit.example.com".to_string()),
+                    ..SshAgentSettings::default()
+                },
+                &mut transport,
+            )
+            .await
+            .expect("settings");
+
+        assert_eq!(
+            support_clone.last_register_surfaces_instance_host(),
+            Some(Some("uptrakit.example.com".to_string())),
+            "instance_host must be set on the session state after ServiceSettings carries it"
+        );
+
+        runtime
+            .apply_settings(
+                SshAgentSettings {
+                    ui_surfaces_enabled: true,
+                    ..SshAgentSettings::default()
+                },
+                &mut transport,
+            )
+            .await
+            .expect("settings");
+
+        assert_eq!(
+            support_clone.last_register_surfaces_instance_host(),
+            Some(None),
+            "a later ServiceSettings without instance_host must clear the stale value"
+        );
     }
 
     #[tokio::test]
@@ -1944,6 +2016,7 @@ mod tests {
                 SshAgentSettings {
                     tenant_id: Some(tenant_id),
                     ui_surfaces_enabled: false,
+                    instance_host: None,
                 },
                 &mut transport,
             )

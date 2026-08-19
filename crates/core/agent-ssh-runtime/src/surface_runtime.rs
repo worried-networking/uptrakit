@@ -1017,6 +1017,7 @@ pub struct SurfaceRuntimeContext<'a> {
     pub private_key_der: Option<&'a [u8]>,
     pub service_id: Option<uuid::Uuid>,
     pub tenant_id: Option<uuid::Uuid>,
+    pub instance_host: Option<&'a str>,
     pub bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
     pub surface_proxy: &'a Arc<uptrakit_service_sdk::ServiceSurfaceProxy>,
     pub infra_bundles: Arc<Vec<InfraBundle>>,
@@ -1083,6 +1084,7 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntime
     let infra_bundles = std::sync::Arc::clone(&ctx.infra_bundles);
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
+    let instance_host = ctx.instance_host.map(str::to_string);
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
     let db = ctx.db.clone();
 
@@ -1093,6 +1095,7 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntime
         let plugin_ctx = InfraPluginContext {
             db: &guest_bootstrap.db,
             tenant_id: tenant_id_str.as_deref(),
+            instance_host: instance_host.as_deref(),
             service_id,
             state_dir: &state_dir,
             private_key_der: private_key_der.as_deref(),
@@ -1318,6 +1321,7 @@ fn spawn_bootstrap_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
     let bg_tx = ctx.bg_tx.clone();
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
+    let instance_host = ctx.instance_host.map(str::to_string);
     let db = ctx.db.clone();
     let request_id = request.request_id;
     let params = serde_json::Value::Object(request.params);
@@ -1338,6 +1342,7 @@ fn spawn_bootstrap_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
                     private_key_der: private_key_der.as_deref(),
                     service_id,
                     tenant_id,
+                    instance_host: instance_host.as_deref(),
                     state_dir: &state_dir,
                     db,
                 })
@@ -1359,6 +1364,7 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
     let bg_tx = ctx.bg_tx.clone();
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
+    let instance_host = ctx.instance_host.map(str::to_string);
     let db = ctx.db.clone();
     let pending_config_reports = ctx.pending_config_reports.clone();
     let request_id = request.request_id;
@@ -1380,6 +1386,7 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
                     private_key_der: private_key_der.as_deref(),
                     service_id,
                     tenant_id,
+                    instance_host: instance_host.as_deref(),
                     state_dir: &state_dir,
                     bg_tx: &bg_tx,
                     db,
@@ -1469,6 +1476,7 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
     let db = ctx.db.clone();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
+    let instance_host = ctx.instance_host.map(str::to_string);
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
     let pending_config_reports = ctx.pending_config_reports.clone();
     let request_id = request.request_id;
@@ -1499,6 +1507,7 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
                 &host_id,
                 &db,
                 tenant_id,
+                instance_host.as_deref(),
                 auth_override.as_ref(),
                 allow_all,
                 &skip_actions,
@@ -1647,6 +1656,7 @@ fn parse_bootstrap_params(
     sensitive: Option<&SensitiveAuthParams>,
     service_id: Option<uuid::Uuid>,
     tenant_id: Option<uuid::Uuid>,
+    instance_host: Option<&str>,
 ) -> Result<BootstrapParams, String> {
     let target_str = params
         .get("target")
@@ -1730,6 +1740,7 @@ fn parse_bootstrap_params(
         host_id,
         service_id,
         tenant_id,
+        instance_host: instance_host.map(str::to_string),
         remove_stale_keys,
         allow_reboot,
     })
@@ -1753,6 +1764,7 @@ async fn run_bootstrap_connect(args: BootstrapConnectArgs<'_>) -> SurfaceActionR
         sensitive.as_ref(),
         args.service_id,
         args.tenant_id,
+        args.instance_host,
     ) {
         Ok(p) => p,
         Err(msg) => return make_surface_error_response(request_id, &msg),
@@ -1780,6 +1792,7 @@ struct BootstrapConnectArgs<'a> {
     private_key_der: Option<&'a [u8]>,
     service_id: Option<uuid::Uuid>,
     tenant_id: Option<uuid::Uuid>,
+    instance_host: Option<&'a str>,
     state_dir: &'a Path,
     db: sea_orm::DatabaseConnection,
 }
@@ -1792,6 +1805,7 @@ struct BootstrapExecuteArgs<'a> {
     private_key_der: Option<&'a [u8]>,
     service_id: Option<uuid::Uuid>,
     tenant_id: Option<uuid::Uuid>,
+    instance_host: Option<&'a str>,
     state_dir: &'a Path,
     bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
     db: sea_orm::DatabaseConnection,
@@ -1817,6 +1831,7 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> SurfaceActionR
         sensitive.as_ref(),
         args.service_id,
         args.tenant_id,
+        args.instance_host,
     ) {
         Ok(p) => p,
         Err(msg) => return make_surface_error_response(request_id, &msg),
@@ -2531,7 +2546,7 @@ mod tests {
         });
         let sealed = sensitive_with(Some("stale-password"), Some("-----BEGIN PRIVATE KEY-----"));
 
-        let parsed = parse_bootstrap_params(&params, Some(&sealed), None, None)
+        let parsed = parse_bootstrap_params(&params, Some(&sealed), None, None, None)
             .expect("private_key + stale password must parse");
 
         assert!(
@@ -2549,7 +2564,7 @@ mod tests {
         });
         let sealed = sensitive_with(Some("secret"), Some("-----BEGIN PRIVATE KEY-----"));
 
-        let parsed = parse_bootstrap_params(&params, Some(&sealed), None, None)
+        let parsed = parse_bootstrap_params(&params, Some(&sealed), None, None, None)
             .expect("password + stale private key must parse");
 
         assert!(parsed.auth_password.is_some());
@@ -2567,7 +2582,7 @@ mod tests {
         });
         let sealed = sensitive_with(Some("secret"), None);
 
-        let err = parse_bootstrap_params(&params, Some(&sealed), None, None)
+        let err = parse_bootstrap_params(&params, Some(&sealed), None, None, None)
             .expect_err("unknown auth_method must reject");
         assert!(
             err.contains("unknown auth_method") && err.contains("kerberos"),
@@ -2943,6 +2958,7 @@ mod tests {
             private_key_der: None,
             service_id: None,
             tenant_id: None,
+            instance_host: None,
             bg_tx: &bg_tx,
             surface_proxy: &surface_proxy,
             infra_bundles,
@@ -3047,6 +3063,7 @@ mod tests {
             private_key_der: None,
             service_id: None,
             tenant_id: Some(tenant_id),
+            instance_host: None,
             bg_tx: &bg_tx,
             surface_proxy: &surface_proxy,
             infra_bundles,
@@ -3107,6 +3124,7 @@ mod tests {
             private_key_der: None,
             service_id: None,
             tenant_id: Some(tenant_id),
+            instance_host: None,
             bg_tx: &bg_tx,
             surface_proxy: &surface_proxy,
             infra_bundles,
@@ -3161,6 +3179,7 @@ mod tests {
             private_key_der: None,
             service_id: None,
             tenant_id: None,
+            instance_host: None,
             bg_tx: &bg_tx,
             surface_proxy: &surface_proxy,
             infra_bundles,
