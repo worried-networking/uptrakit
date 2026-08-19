@@ -48,9 +48,7 @@ impl ShellHookPlugin {
     /// Returns [`uptrakit_plugin_infrastructure_core::PluginError::InstallFailed`]
     /// only on a genuine transport/spawn failure (SSH unreachable, unsupported
     /// shell, or a `NoopCommandExecutor` `UnsupportedOperation`) — never for a
-    /// hook that merely exited non-zero. (This `# Errors` section is included as
-    /// consistent with surrounding practice, not because the coding-standards
-    /// `# Errors` rule mandates it — the method is private to the crate.)
+    /// hook that merely exited non-zero.
     async fn run_shell_command(
         &self,
         command: &str,
