@@ -925,14 +925,6 @@ mod tests {
                     exit_code: 0,
                 },
             ),
-            (
-                "pveum user list",
-                RemoteCommandResult {
-                    stdout: "[]".to_string(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                },
-            ),
         ]);
         let host_id = uuid::Uuid::now_v7();
 
@@ -954,7 +946,6 @@ mod tests {
                 "command -v pveversion",
                 "hostname -s",
                 "pveum user token list 'uptrakit@pve' --output-format json 2>&1",
-                "pveum user list --output-format json 2>&1",
             ],
             "the probe must issue only read-only detection/state-check commands \
              (no useradd, no token creation, no write of any kind)"

@@ -5,10 +5,7 @@
 //! to use the Proxmox plugin.
 //!
 //! Identity model: a single cluster-wide user ([`PVE_USER`]) owns one
-//! `privsep=1` API token per tenant (id `tenant-{tenant_uuid}`). This
-//! replaces the earlier one-user-per-tenant (`uptrakit-{tenant}@pve`) model;
-//! [`check_pve_state`] detects a leftover legacy user so callers can migrate
-//! it away.
+//! `privsep=1` API token per tenant (id `tenant-{tenant_uuid}`).
 
 use rootcause::prelude::*;
 use uptrakit_command::RemoteExecutor;
@@ -31,10 +28,6 @@ pub const PVE_USER: &str = "uptrakit@pve";
 /// Prefix for per-tenant token ids on [`PVE_USER`].
 const PVE_TOKEN_PREFIX: &str = "tenant-";
 
-/// Prefix of the LEGACY per-tenant usernames (`uptrakit-{tenant}@pve`) — kept
-/// only for migration detection; new code never creates these.
-const LEGACY_PVE_USERNAME_PREFIX: &str = "uptrakit-";
-
 /// Per-tenant token id (`tenant-{tenant_uuid}`; PVE token-id grammar
 /// `[A-Za-z][A-Za-z0-9.\-_]+` — verified against pve-access-control source).
 pub fn pve_token_id(tenant_id: &uuid::Uuid) -> String {
@@ -54,10 +47,6 @@ pub struct PveCredentialState {
     pub user_exists: bool,
     /// Whether this tenant's token (`tenant-{tenant_id}`) exists on [`PVE_USER`].
     pub our_token_exists: bool,
-    /// The full legacy per-tenant user id (`uptrakit-{tenant_id}@pve`) if it
-    /// still exists on the cluster — set only for THIS tenant, never a
-    /// cross-tenant scan.
-    pub legacy_user: Option<String>,
 }
 
 /// Detect the short Proxmox VE node name via `hostname -s`.
@@ -295,45 +284,9 @@ pub async fn check_pve_state(
         )));
     };
 
-    // 2. Legacy per-tenant user for OUR tenant only (no cross-tenant scanning).
-    let user_list = executor
-        .exec_command("pveum user list --output-format json 2>&1")
-        .await
-        .context_to::<ProxmoxError>()?;
-    if user_list.exit_code != 0 {
-        bail!(ProxmoxError::Plugin(format!(
-            "pveum user list failed (exit {}): {}",
-            user_list.exit_code,
-            short_output(&user_list.stdout, &user_list.stderr)
-        )));
-    }
-    let raw_users = user_list.stdout.trim();
-    let users_start = raw_users.find('[').ok_or_else(|| {
-        report!(ProxmoxError::ParseResponse(
-            "pveum user list output contains no JSON array".to_string()
-        ))
-    })?;
-    let users_slice = raw_users.get(users_start..).ok_or_else(|| {
-        report!(ProxmoxError::ParseResponse(
-            "pveum user list output truncated at JSON array start".to_string()
-        ))
-    })?;
-    let users: Vec<serde_json::Value> = serde_json::from_str(users_slice).map_err(|e| {
-        report!(ProxmoxError::ParseResponse(format!(
-            "failed to parse pveum user list output: {e}"
-        )))
-    })?;
-    let legacy_name = format!("{LEGACY_PVE_USERNAME_PREFIX}{tenant_id}@pve");
-    let legacy_user = users
-        .iter()
-        .filter_map(|u| u.get("userid").and_then(|v| v.as_str()))
-        .find(|id| *id == legacy_name)
-        .map(str::to_string);
-
     Ok(PveCredentialState {
         user_exists,
         our_token_exists,
-        legacy_user,
     })
 }
 
@@ -581,24 +534,6 @@ pub async fn prove_token_on_node(executor: &dyn RemoteExecutor, api_token: &str)
     Ok(())
 }
 
-/// Delete a PVE user (migration phase 2 / legacy cleanup). PVE prunes the
-/// user's tokens and ACL entries on delete (verified in pve-access-control
-/// `delete_user_acl`).
-pub async fn delete_pve_user(executor: &dyn RemoteExecutor, user_realm: &str) -> Result<()> {
-    let result = executor
-        .exec_command(&format!("pveum user delete '{user_realm}' 2>&1"))
-        .await
-        .context_to::<ProxmoxError>()?;
-    if result.exit_code != 0 {
-        bail!(ProxmoxError::Plugin(format!(
-            "pveum user delete '{user_realm}' failed (exit {}): {}",
-            result.exit_code,
-            short_output(&result.stdout, &result.stderr)
-        )));
-    }
-    Ok(())
-}
-
 /// Parse the token value from `pveum user token add --output-format json` output.
 ///
 /// Expected format: `{"full-tokenid":"user@pve!uptrakit","info":{"privsep":"0"},"value":"SECRET"}`
@@ -708,20 +643,16 @@ mod tests {
     #[tokio::test]
     async fn check_pve_state_fresh_cluster() {
         let tid = tenant();
-        let executor = ScriptedRemoteExecutor::with_matcher(vec![
-            (
-                "pveum user token list",
-                err(255, "no such user ('uptrakit@pve')"),
-            ),
-            ("pveum user list", ok("[]")),
-        ]);
+        let executor = ScriptedRemoteExecutor::with_matcher(vec![(
+            "pveum user token list",
+            err(255, "no such user ('uptrakit@pve')"),
+        )]);
         let state = check_pve_state(&executor, &tid).await.expect("state read");
         assert_eq!(
             state,
             PveCredentialState {
                 user_exists: false,
                 our_token_exists: false,
-                legacy_user: None,
             }
         );
     }
@@ -729,33 +660,13 @@ mod tests {
     #[tokio::test]
     async fn check_pve_state_user_no_token() {
         let tid = tenant();
-        let executor = ScriptedRemoteExecutor::with_matcher(vec![
-            ("pveum user token list", ok("[]")),
-            ("pveum user list", ok("[]")),
-        ]);
+        let executor =
+            ScriptedRemoteExecutor::with_matcher(vec![("pveum user token list", ok("[]"))]);
         let state = check_pve_state(&executor, &tid).await.expect("state read");
         assert!(state.user_exists, "user must be reported as existing");
         assert!(
             !state.our_token_exists,
             "no token was scripted, so our_token_exists must be false"
-        );
-    }
-
-    #[tokio::test]
-    async fn check_pve_state_token_and_legacy_coexist() {
-        let tid = tenant();
-        let token_json = format!(r#"[{{"tokenid":"tenant-{tid}"}}]"#);
-        let user_json = format!(r#"[{{"userid":"uptrakit-{tid}@pve"}}]"#);
-        let executor = ScriptedRemoteExecutor::with_matcher(vec![
-            ("pveum user token list", ok(token_json)),
-            ("pveum user list", ok(user_json)),
-        ]);
-        let state = check_pve_state(&executor, &tid).await.expect("state read");
-        assert!(state.our_token_exists, "our token must be detected");
-        assert_eq!(
-            state.legacy_user,
-            Some(format!("uptrakit-{tid}@pve")),
-            "coexisting legacy user must be reported — this is why the type is a struct"
         );
     }
 
@@ -779,26 +690,14 @@ mod tests {
     async fn check_pve_state_tolerates_stderr_noise_before_json() {
         let tid = tenant();
         // Noise ahead of the JSON array on the TOKEN list.
-        let executor = ScriptedRemoteExecutor::with_matcher(vec![
-            (
-                "pveum user token list",
-                ok("WARNING: some pveum notice\n[]"),
-            ),
-            ("pveum user list", ok("[]")),
-        ]);
+        let executor = ScriptedRemoteExecutor::with_matcher(vec![(
+            "pveum user token list",
+            ok("WARNING: some pveum notice\n[]"),
+        )]);
         let state = check_pve_state(&executor, &tid)
             .await
             .expect("noise-before-JSON on token list must still parse");
         assert!(!state.our_token_exists);
-
-        // Noise ahead of the JSON array on the USER list (symmetric guard).
-        let executor2 = ScriptedRemoteExecutor::with_matcher(vec![
-            ("pveum user token list", ok("[]")),
-            ("pveum user list", ok("WARNING: some pveum notice\n[]")),
-        ]);
-        check_pve_state(&executor2, &tid)
-            .await
-            .expect("noise-before-JSON on user list must still parse");
     }
 
     #[tokio::test]
@@ -982,24 +881,5 @@ mod tests {
             ok(r#"[{"type":"node","name":"pve1"}]"#),
         )]);
         assert_eq!(detect_pve_cluster_name(&executor_standalone).await, None);
-    }
-
-    #[tokio::test]
-    async fn delete_pve_user_nonzero_is_err() {
-        // The real command runs with `2>&1`, so the diagnostic lands in
-        // stdout with stderr EMPTY — script it that way to catch a
-        // regression to `result.stderr.trim()` (which would yield an empty
-        // diagnostic here).
-        let executor = ScriptedRemoteExecutor::with_matcher(vec![(
-            "pveum user delete",
-            err(1, "totally distinctive delete failure text"),
-        )]);
-        let result = delete_pve_user(&executor, "uptrakit-x@pve").await;
-        let error = result.expect_err("a non-zero delete must be an error");
-        let message = format!("{error}");
-        assert!(
-            message.contains("totally distinctive delete failure text"),
-            "error message must contain the captured stdout diagnostic: {message}"
-        );
     }
 }
