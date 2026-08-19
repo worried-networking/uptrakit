@@ -650,13 +650,30 @@ mod tests {
             .expect("migrations should run");
 
         let res = db
-            .execute_unprepared(
-                "INSERT INTO audit_logs \
-                 (id, tenant_id, occurred_at, actor_type, action_type, action_kind, outcome, before_snapshot) \
-                 VALUES \
-                 ('00000000-0000-0000-0000-000000000001', \
-                  '00000000-0000-0000-0000-000000000002', \
-                  CURRENT_TIMESTAMP, 'system', 'auth.login', 'event', 'success', '{}')",
+            .execute(
+                &Query::insert()
+                    .into_table(Alias::new("audit_logs"))
+                    .columns([
+                        Alias::new("id"),
+                        Alias::new("tenant_id"),
+                        Alias::new("occurred_at"),
+                        Alias::new("actor_type"),
+                        Alias::new("action_type"),
+                        Alias::new("action_kind"),
+                        Alias::new("outcome"),
+                        Alias::new("before_snapshot"),
+                    ])
+                    .values_panic([
+                        "00000000-0000-0000-0000-000000000001".into(),
+                        "00000000-0000-0000-0000-000000000002".into(),
+                        Expr::current_timestamp(),
+                        "system".into(),
+                        "auth.login".into(),
+                        "event".into(),
+                        "success".into(),
+                        "{}".into(),
+                    ])
+                    .to_owned(),
             )
             .await;
         assert!(
@@ -676,27 +693,59 @@ mod tests {
             .expect("migrations should run");
 
         // Valid event row: no snapshots.
-        db.execute_unprepared(
-            "INSERT INTO audit_logs \
-             (id, tenant_id, occurred_at, actor_type, action_type, action_kind, outcome) \
-             VALUES \
-             ('00000000-0000-0000-0000-000000000010', \
-              '00000000-0000-0000-0000-000000000002', \
-              CURRENT_TIMESTAMP, 'system', 'auth.login', 'event', 'success')",
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("audit_logs"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("occurred_at"),
+                    Alias::new("actor_type"),
+                    Alias::new("action_type"),
+                    Alias::new("action_kind"),
+                    Alias::new("outcome"),
+                ])
+                .values_panic([
+                    "00000000-0000-0000-0000-000000000010".into(),
+                    "00000000-0000-0000-0000-000000000002".into(),
+                    Expr::current_timestamp(),
+                    "system".into(),
+                    "auth.login".into(),
+                    "event".into(),
+                    "success".into(),
+                ])
+                .to_owned(),
         )
         .await
         .expect("valid event row must be accepted");
 
         // Valid stateful row: both snapshots present.
-        db.execute_unprepared(
-            "INSERT INTO audit_logs \
-             (id, tenant_id, occurred_at, actor_type, action_type, action_kind, outcome, \
-              before_snapshot, after_snapshot) \
-             VALUES \
-             ('00000000-0000-0000-0000-000000000011', \
-              '00000000-0000-0000-0000-000000000002', \
-              CURRENT_TIMESTAMP, 'system', 'host.update', 'stateful', 'success', \
-              '{}', '{}')",
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("audit_logs"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("occurred_at"),
+                    Alias::new("actor_type"),
+                    Alias::new("action_type"),
+                    Alias::new("action_kind"),
+                    Alias::new("outcome"),
+                    Alias::new("before_snapshot"),
+                    Alias::new("after_snapshot"),
+                ])
+                .values_panic([
+                    "00000000-0000-0000-0000-000000000011".into(),
+                    "00000000-0000-0000-0000-000000000002".into(),
+                    Expr::current_timestamp(),
+                    "system".into(),
+                    "host.update".into(),
+                    "stateful".into(),
+                    "success".into(),
+                    "{}".into(),
+                    "{}".into(),
+                ])
+                .to_owned(),
         )
         .await
         .expect("valid stateful row must be accepted");
@@ -1364,18 +1413,37 @@ mod tests {
         db.execute_unprepared("PRAGMA foreign_keys = OFF")
             .await
             .expect("fk off");
-        db.execute_unprepared("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
-            .await
-            .expect("parent table");
-        db.execute_unprepared(
-            "CREATE TABLE child (id INTEGER PRIMARY KEY, \
-             parent_id INTEGER NOT NULL REFERENCES parent(id))",
+        db.execute(
+            &Table::create()
+                .table(Alias::new("parent"))
+                .col(ColumnDef::new(Alias::new("id")).integer().primary_key())
+                .to_owned(),
+        )
+        .await
+        .expect("parent table");
+        db.execute(
+            &Table::create()
+                .table(Alias::new("child"))
+                .col(ColumnDef::new(Alias::new("id")).integer().primary_key())
+                .col(ColumnDef::new(Alias::new("parent_id")).integer().not_null())
+                .foreign_key(
+                    ForeignKey::create()
+                        .from(Alias::new("child"), Alias::new("parent_id"))
+                        .to(Alias::new("parent"), Alias::new("id")),
+                )
+                .to_owned(),
         )
         .await
         .expect("child table");
-        db.execute_unprepared("INSERT INTO child (id, parent_id) VALUES (1, 999)")
-            .await
-            .expect("orphan insert");
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("child"))
+                .columns([Alias::new("id"), Alias::new("parent_id")])
+                .values_panic([1.into(), 999.into()])
+                .to_owned(),
+        )
+        .await
+        .expect("orphan insert");
 
         let err = sqlite_foreign_key_check(&db)
             .await
@@ -1440,16 +1508,35 @@ mod repair_migration_tests {
     async fn repair_migration_converts_monolithic_row_to_individual_rows() {
         let db = open_test_db().await;
 
-        db.execute_unprepared(
-            "CREATE TABLE IF NOT EXISTS seaql_migrations \
-             (version TEXT NOT NULL PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        db.execute(
+            &Table::create()
+                .table(Alias::new("seaql_migrations"))
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(Alias::new("version"))
+                        .text()
+                        .not_null()
+                        .primary_key(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("applied_at"))
+                        .integer()
+                        .not_null(),
+                )
+                .to_owned(),
         )
         .await
         .expect("create table");
 
-        db.execute_unprepared(
-            "INSERT INTO seaql_migrations (version, applied_at) \
-             VALUES ('m20260331_000001_ssh_agent_tables', 1711929600)",
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("seaql_migrations"))
+                .columns([Alias::new("version"), Alias::new("applied_at")])
+                .values_panic([
+                    "m20260331_000001_ssh_agent_tables".into(),
+                    1711929600.into(),
+                ])
+                .to_owned(),
         )
         .await
         .expect("insert old row");
@@ -1459,20 +1546,27 @@ mod repair_migration_tests {
         migration.up(&schema_manager).await.expect("repair up");
 
         let old_row = db
-            .query_one_raw(sea_orm::Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT 1 FROM seaql_migrations \
-                 WHERE version = 'm20260331_000001_ssh_agent_tables'",
-            ))
+            .query_one(
+                &Query::select()
+                    .expr(Expr::val(1))
+                    .from(Alias::new("seaql_migrations"))
+                    .and_where(
+                        Expr::col(Alias::new("version")).eq("m20260331_000001_ssh_agent_tables"),
+                    )
+                    .to_owned(),
+            )
             .await
             .expect("query");
         assert!(old_row.is_none(), "old monolithic row must be deleted");
 
         let rows: Vec<sea_orm::QueryResult> = db
-            .query_all_raw(sea_orm::Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT version FROM seaql_migrations ORDER BY version",
-            ))
+            .query_all(
+                &Query::select()
+                    .column(Alias::new("version"))
+                    .from(Alias::new("seaql_migrations"))
+                    .order_by(Alias::new("version"), sea_orm::sea_query::Order::Asc)
+                    .to_owned(),
+            )
             .await
             .expect("query all");
         assert_eq!(rows.len(), 13, "must have exactly 13 individual rows");
@@ -1481,9 +1575,22 @@ mod repair_migration_tests {
     #[tokio::test]
     async fn repair_migration_is_noop_on_fresh_install() {
         let db = open_test_db().await;
-        db.execute_unprepared(
-            "CREATE TABLE IF NOT EXISTS seaql_migrations \
-             (version TEXT NOT NULL PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        db.execute(
+            &Table::create()
+                .table(Alias::new("seaql_migrations"))
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(Alias::new("version"))
+                        .text()
+                        .not_null()
+                        .primary_key(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("applied_at"))
+                        .integer()
+                        .not_null(),
+                )
+                .to_owned(),
         )
         .await
         .expect("create table");
@@ -1496,10 +1603,12 @@ mod repair_migration_tests {
             .expect("repair up no-op");
 
         let rows: Vec<sea_orm::QueryResult> = db
-            .query_all_raw(sea_orm::Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT 1 FROM seaql_migrations",
-            ))
+            .query_all(
+                &Query::select()
+                    .expr(Expr::val(1))
+                    .from(Alias::new("seaql_migrations"))
+                    .to_owned(),
+            )
             .await
             .expect("query");
         assert!(

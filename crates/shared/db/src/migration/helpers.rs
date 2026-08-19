@@ -220,18 +220,35 @@ mod tests {
     #[tokio::test]
     async fn crash_recovery_state_a() {
         let db = setup_db().await;
-        db.execute_unprepared("CREATE TABLE test_table (id INTEGER PRIMARY KEY)")
-            .await
-            .unwrap();
+        db.execute(
+            &Table::create()
+                .table(Alias::new("test_table"))
+                .col(ColumnDef::new(Alias::new("id")).integer().primary_key())
+                .to_owned(),
+        )
+        .await
+        .unwrap();
 
         let has_orig = db
-            .execute_unprepared("SELECT 1 FROM test_table LIMIT 0")
+            .execute(
+                &Query::select()
+                    .expr(Expr::val(1))
+                    .from(Alias::new("test_table"))
+                    .limit(0)
+                    .to_owned(),
+            )
             .await
             .is_ok();
         assert!(has_orig, "original table should exist");
 
         let has_temp = db
-            .execute_unprepared("SELECT 1 FROM test_table_new LIMIT 0")
+            .execute(
+                &Query::select()
+                    .expr(Expr::val(1))
+                    .from(Alias::new("test_table_new"))
+                    .limit(0)
+                    .to_owned(),
+            )
             .await
             .is_ok();
         assert!(!has_temp, "temp table should not exist");
