@@ -194,6 +194,37 @@ the cluster: if the cluster already has a token for the same tenant (from
 bootstrapping another node in the same cluster) but the agent has no such
 acknowledgment yet, the token is regenerated rather than reused.
 
+#### Recovering from a deleted plugin config
+
+That ack-gating is a permanent hazard, not just a startup edge case: deleting
+a `pve-*` plugin configuration in the controller does not clear the
+corresponding acknowledgment on the agent. The agent keeps taking the reuse
+branch against a plugin configuration the controller no longer has, and never
+re-reports one on its own -- re-syncing or re-bootstrapping the same host does
+not recover automatically.
+
+The reliable recovery is to delete this tenant's token on the PVE node
+itself, as root:
+
+```bash
+pveum user token remove 'uptrakit@pve' 'tenant-{tenant_uuid}'
+```
+
+This is the same command as [Removing one tenant](#removing-one-tenant)
+below. With the token gone, the next sync observes it missing and stops
+reusing the acknowledged plugin configuration id -- it takes the create
+branch instead, issuing a fresh token and reporting a new plugin
+configuration.
+
+Removing the host from Uptrakit and re-bootstrapping it recovers only on a
+**standalone** PVE node: the re-added host gets a fresh host ID with no
+local tracking state, so the next bootstrap provisions PVE credentials and
+reports a plugin configuration from a clean slate. It does not work on a
+multi-node cluster -- removing a host only deletes its `ssh_hosts` entry,
+not the underlying Proxmox host-tracking row, so that row keeps the same
+node name and still matches the cluster on the next sync, feeding the same
+stale plugin configuration id right back in.
+
 Each token created or regenerated this way carries a comment visible in
 `pveum user token list 'uptrakit@pve'`: `Uptrakit managed token (<instance
 host>, tenant <tenant uuid>)` when the controller's `oauth.canonical_host`
@@ -202,10 +233,31 @@ setting is configured and sanitizes cleanly, or `Uptrakit managed token
 sanitize. The comment is stamped only at token creation or regeneration
 time -- changing `oauth.canonical_host` later does not update the comment
 on tokens that already exist. A canonical-host change also does not reach
-an agent until its next reconnect to the controller; for the controller's
-built-in SSH agent specifically, that means the next controller restart,
-since embedded services receive settings once at controller boot and never
-reconnect.
+an agent until its next reconnect to the controller; for the embedded SSH
+agent specifically, that means the next controller restart, since embedded
+services receive settings once at controller boot and never reconnect. See
+[oauth.canonical_host](https://github.com/worried-networking/uptrakit/tree/main/docs/admin/oauth-clients.md)
+for where this setting is configured.
+
+#### Privileged session requirement
+
+Credential provisioning issues `pveum` commands (`pveum user add`, `pveum
+user token add`, and related role/ACL commands) directly against the PVE
+node, with no sudo wrapping. `pveum` is never included in the agent's
+generated sudoers file -- no plugin declares it as a required sudo command --
+so provisioning only succeeds when the SSH session used for bootstrap or
+sync is already a privileged (root) session. Syncing or bootstrapping as an
+unprivileged user is not blocked ahead of time; the sync still runs, it just
+fails once it reaches a `pveum` command.
+
+When that happens, the bootstrap or sync summary reports:
+
+```text
+PVE credential setup failed (see agent logs)
+```
+
+Check the agent logs for the underlying `pveum` error, and re-run bootstrap
+or sync using a privileged (root) SSH session.
 
 ### How It Works
 
