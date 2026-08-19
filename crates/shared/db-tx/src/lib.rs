@@ -159,10 +159,8 @@ mod tests {
 
 #[cfg(test)]
 mod busy_snapshot_tests {
-    // Every statement below is sea_query-built (no string concatenation,
-    // no injection surface). execute_unprepared is used only because this
-    // entity-less crate has no SeaORM Statement/backend plumbing to send a
-    // built query through any other way.
+    // Every statement below is sea_query-built and sent directly via
+    // ConnectionTrait::execute (StatementBuilder impls) — no raw SQL.
     //
     // No #![expect(clippy::expect_used)] here (deviation from the brief's
     // verbatim snippet): clippy.toml's `allow-expect-in-tests = true`
@@ -175,7 +173,7 @@ mod busy_snapshot_tests {
 
     use std::time::Duration;
 
-    use sea_orm::sea_query::{Alias, ColumnDef, Expr, ExprTrait, Query, SqliteQueryBuilder, Table};
+    use sea_orm::sea_query::{Alias, ColumnDef, Expr, ExprTrait, Query, Table};
     use sea_orm::{ConnectionTrait, DatabaseConnection, SqlxSqliteConnector, TransactionTrait};
 
     use crate::begin_immediate;
@@ -206,27 +204,23 @@ mod busy_snapshot_tests {
             .table(Alias::new("t"))
             .col(ColumnDef::new(Alias::new("v")).integer().not_null())
             .to_owned();
-        a.execute_unprepared(&create.to_string(SqliteQueryBuilder))
-            .await
-            .expect("create table");
+        a.execute(&create).await.expect("create table");
         (a, b)
     }
 
-    fn insert_stmt() -> String {
+    fn insert_stmt() -> sea_orm::sea_query::InsertStatement {
         Query::insert()
             .into_table(Alias::new("t"))
             .columns([Alias::new("v")])
             .values_panic([1.into()])
             .to_owned()
-            .to_string(SqliteQueryBuilder)
     }
 
-    fn count_stmt() -> String {
+    fn count_stmt() -> sea_orm::sea_query::SelectStatement {
         Query::select()
             .expr(Expr::col(Alias::new("v")).count())
             .from(Alias::new("t"))
             .to_owned()
-            .to_string(SqliteQueryBuilder)
     }
 
     /// The bug class this crate exists to prevent: a DEFERRED read-then-write
@@ -242,14 +236,14 @@ mod busy_snapshot_tests {
             reason = "negative control: reproduces the DEFERRED failure the helper prevents"
         )]
         let txa = a.begin().await.expect("deferred begin");
-        txa.execute_unprepared(&count_stmt())
+        txa.execute(&count_stmt())
             .await
             .expect("read establishes the snapshot");
-        b.execute_unprepared(&insert_stmt())
+        b.execute(&insert_stmt())
             .await
             .expect("concurrent commit invalidates the snapshot");
         let err = txa
-            .execute_unprepared(&insert_stmt())
+            .execute(&insert_stmt())
             .await
             .expect_err("upgrade write must fail with SQLITE_BUSY_SNAPSHOT");
         let msg = err.to_string();
@@ -270,11 +264,11 @@ mod busy_snapshot_tests {
         let (a, b) = setup(&dir.path().join("t.db")).await;
 
         let txa = begin_immediate(&a).await.expect("immediate begin");
-        txa.execute_unprepared(&count_stmt())
+        txa.execute(&count_stmt())
             .await
             .expect("read under the write lock");
         let busy = b
-            .execute_unprepared(&insert_stmt())
+            .execute(&insert_stmt())
             .await
             .expect_err("competing writer must wait (and here exhaust busy_timeout)");
         let busy_msg = busy.to_string();
@@ -284,11 +278,11 @@ mod busy_snapshot_tests {
             busy_msg.contains("(code: 5)"),
             "unexpected error: {busy_msg}"
         );
-        txa.execute_unprepared(&insert_stmt())
+        txa.execute(&insert_stmt())
             .await
             .expect("write after read succeeds — snapshot cannot be stale");
         txa.commit().await.expect("commit");
-        b.execute_unprepared(&insert_stmt())
+        b.execute(&insert_stmt())
             .await
             .expect("competing writer succeeds once the lock is released");
     }
