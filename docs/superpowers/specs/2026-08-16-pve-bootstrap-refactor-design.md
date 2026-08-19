@@ -1,7 +1,7 @@
 # Proxmox Host Bootstrapping Refactor — Design
 
 **Date:** 2026-08-16
-**Status:** Design (pending plan)
+**Status:** Implemented; migration machinery since removed — see 2026-08-17-pve-migration-removal-design.md
 **Supersedes:** `docs/superpowers/specs/2026-07-12-proxmox-verify-tls-key-fix-design.md` (its plan retired
 into bead epic `uptrakit-spec-2026-07-12-proxmox-verify-tls-key-fix-design` at the beads migration
 2026-08-16; full text at `pre-beads-archive`) — both PVE config emit sites are rewritten
