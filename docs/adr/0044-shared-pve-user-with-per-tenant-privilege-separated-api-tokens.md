@@ -141,14 +141,23 @@ this one agent's memory.
 
 Migration `m20260817_000001_drop_pve_migration_columns`
 (`crates/plugins/infrastructure/proxmox/src/agent/migration.rs`) dropped `new_pve_plugin_config_id` along with
-`legacy_pve_user` and `migration_attempts`, folding the ack-marker mechanism away entirely. `pve_plugin_config_id`
-is now the sole operative id, and at HEAD its only writers are `db_ops::set_plugin_config_id` (invoked from the
-controller-ack path, `HostLifecycle::on_plugin_config_reported`) and the Branch 4 reuse-persist site in
-`credential_flow::run_locked` — the never-round-tripped write path the old rationale worried about no longer
-exists, which is what makes reading `pve_plugin_config_id` bare safe now. `credential_flow.rs`'s
-`reuse_bare_operative_id_is_reused` test pins exactly this post-removal behavior: a bare, already-stored
-`pve_plugin_config_id` IS reused once `check_pve_state` also confirms the token still exists on the cluster — with
-no separate ack marker gating that decision.
+`legacy_pve_user` and `migration_attempts`, folding the ack-marker mechanism away entirely. The fold is what
+retires the old rationale rather than merely dropping its column: it overwrites `pve_plugin_config_id` from the
+ack marker unconditionally, so a row that carried an operative id but never acked — a `promote_cluster_rows` peer,
+or a value backfilled from `ssh_hosts` by `m20260308_000001` — is deliberately cleared to `NULL` instead of being
+inherited as trusted (`drop_pve_migration_columns_folds_ack_and_clears_unacked_rows` in `migration.rs`'s test
+module pins exactly those row shapes). Every id that survives the fold is therefore ack-derived by construction,
+which is what makes reading `pve_plugin_config_id` bare safe now; a cleared row simply re-derives or regenerates on
+its next credential-flow run.
+
+At HEAD the column's only writers are `db_ops::set_plugin_config_id` — invoked from the controller-ack path
+(`HostLifecycle::on_plugin_config_reported`), and from the Branch 4 reuse-persist site in
+`credential_flow::run_locked`, which propagates an id already resolved from cluster evidence rather than minting a
+local one. `credential_flow.rs`'s `reuse_bare_operative_id_is_reused` test covers the post-removal behavior: a
+bare, already-stored `pve_plugin_config_id` is reused, with no separate ack marker gating that decision. Note the
+reuse branch's own guard is negative — it declines to reuse only when `check_pve_state` positively confirms the
+token is **absent**, so a degraded or failed state read still reuses; the test exercises the
+confirmed-token-present case specifically.
 
 The still-true exception is the deliberate tenant-rebind wipe: `db_ops::wipe_all`
 (`crates/plugins/infrastructure/proxmox/src/agent/db_ops.rs:186`), called from `HostLifecycle::on_tenant_changed`,
