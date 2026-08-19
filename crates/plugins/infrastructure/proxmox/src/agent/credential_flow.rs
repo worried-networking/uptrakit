@@ -931,7 +931,8 @@ mod tests {
         let invoker = RecordingActionInvoker::new();
         let guest = UnusedGuestBootstrap;
         let tid_str = tid.to_string();
-        let ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
+        let mut ctx = make_ctx(&db, Some(&tid_str), &invoker, &guest);
+        ctx.instance_host = Some("uptrakit.example.com");
         let cluster_json = cluster_status(Some("ACKLOSSCLUSTER"), &["pve1"]);
         let executor = ScriptedRemoteExecutor::with_matcher(vec![
             ("pvesh get /cluster/status", ok(cluster_json)),
@@ -962,6 +963,16 @@ mod tests {
         assert!(
             !calls.iter().any(|c| c.contains("pveum role add")),
             "regenerate must not re-ensure roles: {calls:?}"
+        );
+        let add_call = calls
+            .iter()
+            .find(|c| c.contains("pveum user token add"))
+            .expect("token add recorded");
+        assert!(
+            add_call.contains(&format!(
+                "--comment 'Uptrakit managed token (uptrakit.example.com, tenant {tid})'"
+            )),
+            "ctx.instance_host must reach the Branch 6 regenerate call's token comment: {add_call}"
         );
     }
 

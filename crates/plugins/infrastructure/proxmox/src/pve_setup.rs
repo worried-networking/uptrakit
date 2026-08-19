@@ -383,7 +383,11 @@ pub async fn ensure_pve_privileges(
     Ok(())
 }
 
-/// Maximum accepted instance-host length (DNS name length limit).
+/// Maximum accepted length for the sanitized instance-host string.
+///
+/// The accepted value is a `host[:port]` or bracketed-IPv6 literal, not a
+/// bare DNS name, so this is a chosen ceiling rather than the DNS name
+/// length limit itself — sized after that limit for headroom.
 const MAX_INSTANCE_HOST_LEN: usize = 253;
 
 /// Sanitize the controller-supplied instance host for shell interpolation.
@@ -417,7 +421,7 @@ fn token_comment(instance_host: Option<&str>, tenant_id: &uuid::Uuid) -> String 
                 // "host rejected" are indistinguishable. The host is
                 // operator-entered public data, not a secret.
                 tracing::debug!(
-                    host = raw,
+                    host = %raw.escape_debug(),
                     "instance host rejected by sanitizer; using tenant-only token comment"
                 );
             }
