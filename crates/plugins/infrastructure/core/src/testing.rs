@@ -185,6 +185,96 @@ impl CommandExecutor for RoutedOutputExecutor {
     }
 }
 
+/// Outcome closure for [`RecordingExecutor`] — aliased so the field type stays
+/// below `clippy::type_complexity` (denied via `clippy::all`).
+type OutcomeFn = Box<dyn Fn() -> uptrakit_command::Result<CommandOutput> + Send + Sync>;
+
+/// Records every [`CommandSpec`] it is handed, then yields a caller-supplied
+/// outcome — the double for tests that must assert *which* command reached the
+/// executor (routing regressions), or drive the executor's `Err(CommandFailed)`
+/// contract that [`FixedOutputExecutor`]/[`RoutedOutputExecutor`] cannot express
+/// on their `execute` path.
+///
+/// Both [`execute`] and [`execute_quiet`] record the spec and return the
+/// configured outcome. The outcome is a boxed closure (not a stored `Result`)
+/// because [`uptrakit_command::CommandError`] is not `Clone`, so it is rebuilt
+/// fresh on each call.
+///
+/// - [`ok`]: `Ok(CommandOutput { exit_code, .. })` — the command ran.
+/// - [`failed`]: `Err(CommandError::CommandFailed(code))` — the real contract a
+///   `LocalCommandExecutor`/SSH executor returns for a non-zero exit.
+/// - [`erroring`]: any caller-supplied `Err` (e.g. `UnsupportedShell`,
+///   `UnsupportedOperation`) for transport/spawn-failure cases.
+///
+/// [`execute`]: CommandExecutor::execute
+/// [`execute_quiet`]: CommandExecutor::execute_quiet
+/// [`ok`]: RecordingExecutor::ok
+/// [`failed`]: RecordingExecutor::failed
+/// [`erroring`]: RecordingExecutor::erroring
+pub struct RecordingExecutor {
+    recorded: parking_lot::Mutex<Vec<CommandSpec>>,
+    outcome: OutcomeFn,
+}
+
+impl RecordingExecutor {
+    /// Records every spec, always returning `Ok(CommandOutput { exit_code, .. })`.
+    pub fn ok(exit_code: i32) -> Arc<Self> {
+        Arc::new(Self {
+            recorded: parking_lot::Mutex::new(Vec::new()),
+            outcome: Box::new(move || {
+                Ok(CommandOutput {
+                    output: String::new(),
+                    exit_code,
+                })
+            }),
+        })
+    }
+
+    /// Records every spec, always returning `Err(CommandError::CommandFailed(code))`.
+    pub fn failed(code: i32) -> Arc<Self> {
+        Arc::new(Self {
+            recorded: parking_lot::Mutex::new(Vec::new()),
+            outcome: Box::new(move || {
+                use rootcause::prelude::*;
+                bail!(uptrakit_command::CommandError::CommandFailed(code))
+            }),
+        })
+    }
+
+    /// Records every spec, returning whatever `f` produces on each call.
+    pub fn erroring<F>(f: F) -> Arc<Self>
+    where
+        F: Fn() -> uptrakit_command::Result<CommandOutput> + Send + Sync + 'static,
+    {
+        Arc::new(Self {
+            recorded: parking_lot::Mutex::new(Vec::new()),
+            outcome: Box::new(f),
+        })
+    }
+
+    /// Snapshot of every [`CommandSpec`] recorded so far, in call order.
+    pub fn recorded(&self) -> Vec<CommandSpec> {
+        self.recorded.lock().clone()
+    }
+}
+
+#[async_trait]
+impl CommandExecutor for RecordingExecutor {
+    async fn execute(
+        &self,
+        spec: &CommandSpec,
+        _output_tx: &tokio::sync::mpsc::Sender<UpdateOutputLine>,
+    ) -> uptrakit_command::Result<CommandOutput> {
+        self.recorded.lock().push(spec.clone());
+        (self.outcome)()
+    }
+
+    async fn execute_quiet(&self, spec: &CommandSpec) -> uptrakit_command::Result<CommandOutput> {
+        self.recorded.lock().push(spec.clone());
+        (self.outcome)()
+    }
+}
+
 /// Build a [`HostRuntime`] backed by [`LocalCommandExecutor`] for unit tests.
 ///
 /// Use this when the test needs a real executor (e.g., tests that test
