@@ -135,10 +135,14 @@ A site may opt out only with
 `#[expect(clippy::disallowed_methods, reason = "<category>: <concrete limitation>")]`
 (`clippy::disallowed_macros` for `raw_sql!`), where `<category>` is exactly one of:
 
-1. **builder limitation** — SQL genuinely inexpressible in sea_query, wherever it occurs:
-   SQLite `ALTER TABLE`/`PRAGMA` shapes (including `PRAGMA foreign_keys` toggles in test setup),
-   `CREATE DATABASE`, window functions, functional indexes, `typeof()`, the SQLite
-   table-recreation pattern. Detail: [database-migrations.md](database-migrations.md#no-raw-sql--use-sea_query-builders-for-dml).
+1. **builder limitation** — SQL genuinely inexpressible in sea_query, wherever it occurs: a
+   partial index's `WHERE` clause, `ALTER COLUMN TYPE ... USING`, bare `PRAGMA <name>`
+   statements (`table_info`, `foreign_keys`, `database_list`, `foreign_key_check` — the
+   `pragma_table_info(...)` table-valued-function form is expressible via
+   `SelectStatement::from_function`, so only the bare-statement form qualifies),
+   `ALTER TABLE ADD CONSTRAINT` (`CHECK` or `UNIQUE`), `ALTER TABLE DROP CONSTRAINT IF EXISTS`
+   (`drop_constraint` exists but has no `IF EXISTS` variant), `typeof()`, `ROLLBACK`, and
+   `CREATE DATABASE`. Detail: [database-migrations.md](database-migrations.md#no-raw-sql--use-sea_query-builders-for-dml).
 2. **connectivity probe** — only where no builder query can be issued at all (the builder
    `SELECT 1` works over any `ConnectionTrait`, so this category is currently empty — prefer
    the builder form; the category exists for genuinely builder-less handles).
@@ -150,12 +154,13 @@ A site may opt out only with
    risks live-vs-fresh-install divergence. Migration files' `#[cfg(test)]` halves are ordinary
    test code — rewrite-by-default. The frozen set is bounded by the union of category 1 and
    category 4 annotations inside migration `up()`/`down()` bodies (the shape rule routes
-   `ALTER`/`PRAGMA`/window/functional-index SQL to category 1 even when frozen); the taxonomy
-   gate (`ci/verify_raw_sql_expect_taxonomy.sh`) pins the category-4 count so it can only
-   shrink without owner sign-off.
+   `ALTER`/`PRAGMA` and the other genuinely inexpressible shapes to category 1 even when
+   frozen); the taxonomy gate (`ci/verify_raw_sql_expect_taxonomy.sh`) pins the category-4 count
+   so it can only shrink without owner sign-off.
 
-The reason must name the real limitation — never an unverified claim about a dependency's API;
-reviewers verify the stated rationale independently. Granularity: statement-level by default;
+The reason must name the real limitation — never an unverified claim about a dependency's API,
+checked against the pinned dependency version's source before it is written; reviewers verify
+the stated rationale independently, against that same source. Granularity: statement-level by default;
 fn-level only on free or plain-impl single-rationale migration helper fns that open no
 transaction — never on an `#[async_trait]` trait method like `up()`/`down()` itself, where the
 body moves into a generated `Box::pin` and `#[expect]` fulfillment is unverified
