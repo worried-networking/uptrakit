@@ -143,8 +143,11 @@ A site may opt out only with
    pragmas do not qualify: SQLite exposes them as the read-only `pragma_*` table-valued
    functions (`pragma_database_list`, `pragma_foreign_key_check`, `pragma_table_info(?)`), and
    `SelectStatement::from_function` + `Func::cust` selects over one, binding the pragma argument
-   as a parameter rather than interpolating it — every read pragma in the tree uses that builder
-   form. Only the setter form qualifies, precisely because the `pragma_*` functions are
+   as a parameter rather than interpolating it. Every read pragma outside a frozen merged
+   migration uses that builder form; the two frozen `pragma_table_info(...)` reads
+   (`crates/core/agent-ssh-runtime/src/db/migration/m20260313_000001_drop_ssh_host_is_pve_node.rs`,
+   `crates/plugins/infrastructure/proxmox/src/agent/migration.rs`) stay raw under category 4.
+   Only the setter form qualifies for category 1, precisely because the `pragma_*` functions are
    read-only and have no setter counterpart. Also expressible: a partial index's `WHERE`
    (`impl ConditionalStatement for IndexCreateStatement`), `ALTER COLUMN TYPE ... USING`
    (`ColumnDef::using()`), `ADD UNIQUE (col)` (`ColumnDef::unique_key()`), functional indexes,
@@ -160,9 +163,10 @@ A site may opt out only with
    regardless of expressibility: merged migrations are treated as applied, and rewriting one
    risks live-vs-fresh-install divergence. Migration files' `#[cfg(test)]` halves are ordinary
    test code — rewrite-by-default. The frozen set is bounded by the union of category 1 and
-   category 4 annotations inside migration `up()`/`down()` bodies (the shape rule routes
-   `ALTER`/`PRAGMA` and the other genuinely inexpressible shapes to category 1 even when
-   frozen); the taxonomy gate (`ci/verify_raw_sql_expect_taxonomy.sh`) pins the category-4 count
+   category 4 annotations inside migration `up()`/`down()` bodies (a genuinely inexpressible
+   construct takes category 1 wherever it appears; everything else inside a merged
+   `up()`/`down()` takes category 4, including the frozen `ALTER … USING` casts and the frozen
+   `pragma_table_info` reads); the taxonomy gate (`ci/verify_raw_sql_expect_taxonomy.sh`) pins the category-4 count
    so it can only shrink without owner sign-off.
 
 The reason must name the real limitation — never an unverified claim about a dependency's API,

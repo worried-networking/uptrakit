@@ -26,7 +26,7 @@ impl MigrationTrait for Migration {
         if helpers::is_sqlite(manager) {
             // SQLite: deliberate no-op — Json columns already store TEXT (type affinity), so no table recreation is needed (exception to the column-type-change→recreation default; see ADR). The declared column type remains 'json' while the entity declares Text — harmless via affinity; a future schema-comparison gate must not be surprised by it.
         } else {
-            // Raw SQL exception (spec 2026-08-09 §4; comment protocol per docs/development/database-migrations.md): Postgres has no assignment cast from json to text, so the type change needs an explicit USING cast.
+            // Raw SQL exception (spec 2026-08-09 §4; comment protocol per docs/development/database-migrations.md): Postgres accepts `TYPE text` without `USING` (a cast to a string type is permitted at assignment context via I/O conversion), so this USING clause is redundant; it stays as shipped because the migration is merged.
             #[expect(
                 clippy::disallowed_methods,
                 reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
