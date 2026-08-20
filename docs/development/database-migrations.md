@@ -879,16 +879,16 @@ live-vs-fresh-install divergence, even when the same SQL is builder-expressible.
 below enumerates constructs with genuinely no sea_query equivalent (reason 1). `strftime`,
 `typeof()`, and `CASE` do not belong in this table — they are builder-expressible via
 `Func::cust` and `CaseStatement` respectively, so raw SQL using them is accepted only under
-reason 2 (a frozen merged migration), never as a claimed sea_query gap.
+reason 2 (a frozen merged migration), never as a claimed sea_query gap. The same holds for
+`LIKE` (`ExprTrait::like`) and for a `CASE` inside `ON CONFLICT DO UPDATE` — `OnConflict::values`
+takes `(column, Expr)` pairs and `CaseStatement` converts into `Expr`, so that composition builds.
 
-| Construct                                            | Reason sea_query cannot express it                                                                                                                                                                                                       |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CREATE TABLE new AS SELECT * FROM old`              | SQLite-specific shorthand; no builder equivalent                                                                                                                                                                                         |
-| bare `PRAGMA foreign_keys`                           | SQLite-specific pragma statement; no sea_query equivalent (the table-valued-function form of a pragma, e.g. `pragma_table_info(...)`, is expressible via `SelectStatement::from_function` — only the bare-statement form qualifies here) |
-| bare `PRAGMA foreign_key_check`                      | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment                                                  |
-| bare `PRAGMA database_list`                          | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment                                                  |
-| `SELECT … WHERE col LIKE pattern` in `query_all_raw` | Read-only SQLite-specific pattern matching                                                                                                                                                                                               |
-| `CASE WHEN` in `ON CONFLICT DO UPDATE`               | SeaORM's `on_conflict` builder limitation (the `CASE` expression itself is builder-expressible via `CaseStatement`; the gap is specific to composing it inside `on_conflict`'s `DO UPDATE SET`)                                          |
+| Construct                               | Reason sea_query cannot express it                                                                                                                                                                                                       |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CREATE TABLE new AS SELECT * FROM old` | SQLite-specific shorthand; no builder equivalent                                                                                                                                                                                         |
+| bare `PRAGMA foreign_keys`              | SQLite-specific pragma statement; no sea_query equivalent (the table-valued-function form of a pragma, e.g. `pragma_table_info(...)`, is expressible via `SelectStatement::from_function` — only the bare-statement form qualifies here) |
+| bare `PRAGMA foreign_key_check`         | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment                                                  |
+| bare `PRAGMA database_list`             | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment                                                  |
 
 **Frozen merged migration — inline comment requirement:** `typeof()` is builder-expressible
 via `Func::cust("typeof")`, so it is never accepted as a sea_query gap; raw SQL using it is
