@@ -659,6 +659,18 @@ pub async fn update_provider(
         }
     };
 
+    let purged_flows =
+        match crate::auth::oidc_state::OidcFlowStore::purge_for_provider_in_tx(&tx, provider_id)
+            .await
+        {
+            Ok(n) => n,
+            Err(e) => {
+                drop(tx);
+                tracing::error!(error = %e, "Failed to purge pending OIDC flows");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
     let after_view = OidcProviderView::from(&updated);
     let hook = state.audit_emitter.commit_hook();
     let audit_entry = match AuditEntry::<Stateful>::oidc_provider_update(&before_view, &after_view)
@@ -669,6 +681,7 @@ pub async fn update_provider(
             "updated_fields": updated_fields,
             "updated_field_count": updated_fields.len(),
             "client_secret_updated": client_secret_updated,
+            "pending_flows_purged": purged_flows,
         }))
         .build()
     {
@@ -805,6 +818,18 @@ pub async fn delete_provider(
         }
     };
 
+    let purged_flows =
+        match crate::auth::oidc_state::OidcFlowStore::purge_for_provider_in_tx(&tx, provider_id)
+            .await
+        {
+            Ok(n) => n,
+            Err(e) => {
+                drop(tx);
+                tracing::error!(error = %e, "Failed to purge pending OIDC flows");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
     let after_view = OidcProviderView::from(&deleted);
     let hook = state.audit_emitter.commit_hook();
     let audit_entry = match AuditEntry::<Stateful>::oidc_provider_delete(&before_view, &after_view)
@@ -813,6 +838,7 @@ pub async fn delete_provider(
         .outcome(AuditOutcome::Success)
         .details(serde_json::json!({
             "was_active": was_active,
+            "pending_flows_purged": purged_flows,
         }))
         .build()
     {
@@ -1004,6 +1030,21 @@ pub async fn activate_provider(
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
+        let other_purged_flows =
+            match crate::auth::oidc_state::OidcFlowStore::purge_for_provider_in_tx(&tx, other_id)
+                .await
+            {
+                Ok(n) => n,
+                Err(e) => {
+                    drop(tx);
+                    tracing::error!(error = %e, "Failed to purge pending OIDC flows");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
+
         let other_after_view = OidcProviderView::from(&deactivated);
         let other_entry = match AuditEntry::<Stateful>::oidc_provider_update(
             &other_before_view,
@@ -1016,6 +1057,7 @@ pub async fn activate_provider(
             "is_active": false,
             "reason_code": "replaced_by_provider_activation",
             "activated_provider_id": other_id,
+            "pending_flows_purged": other_purged_flows,
         }))
         .build()
         {
@@ -1050,6 +1092,18 @@ pub async fn activate_provider(
         }
     };
 
+    let purged_flows =
+        match crate::auth::oidc_state::OidcFlowStore::purge_for_provider_in_tx(&tx, provider_id)
+            .await
+        {
+            Ok(n) => n,
+            Err(e) => {
+                drop(tx);
+                tracing::error!(error = %e, "Failed to purge pending OIDC flows");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
     let after_view = OidcProviderView::from(&activated);
     let audit_entry = match AuditEntry::<Stateful>::oidc_provider_update(&before_view, &after_view)
         .tenant_scope(tenant_id)
@@ -1057,6 +1111,7 @@ pub async fn activate_provider(
         .outcome(AuditOutcome::Success)
         .details(serde_json::json!({
             "is_active": true,
+            "pending_flows_purged": purged_flows,
         }))
         .build()
     {
@@ -1220,6 +1275,18 @@ pub async fn deactivate_provider(
         }
     };
 
+    let purged_flows =
+        match crate::auth::oidc_state::OidcFlowStore::purge_for_provider_in_tx(&tx, provider_id)
+            .await
+        {
+            Ok(n) => n,
+            Err(e) => {
+                drop(tx);
+                tracing::error!(error = %e, "Failed to purge pending OIDC flows");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+
     let after_view = OidcProviderView::from(&deactivated);
     let hook = state.audit_emitter.commit_hook();
     let audit_entry = match AuditEntry::<Stateful>::oidc_provider_update(&before_view, &after_view)
@@ -1228,6 +1295,7 @@ pub async fn deactivate_provider(
         .outcome(AuditOutcome::Success)
         .details(serde_json::json!({
             "is_active": false,
+            "pending_flows_purged": purged_flows,
         }))
         .build()
     {

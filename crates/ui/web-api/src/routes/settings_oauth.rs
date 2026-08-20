@@ -315,11 +315,33 @@ pub async fn update_oauth_settings(
     // canonical_host — string or null (clear)
     if let Some(ref raw) = req.canonical_host {
         let trimmed = raw.trim().to_string();
-        let (db_value, _new_host) = if trimmed.is_empty() {
+        let (db_value, new_host) = if trimmed.is_empty() {
             (serde_json::Value::Null, None::<String>)
         } else {
             (serde_json::json!(trimmed.clone()), Some(trimmed))
         };
+
+        // Change-keyed purge decision: re-read the pre-write value inside the
+        // tx (never the pre-tx `before_canonical`, which swallows DB errors
+        // via `unwrap_or(None)` and would turn a transient read failure into
+        // a spurious "changed" verdict). Must run before the upsert below —
+        // reading after would always observe before == after.
+        let canonical_before_in_tx = match load_global_setting_raw(&tx, "oauth.canonical_host")
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                drop(tx);
+                tracing::error!("Failed to read oauth.canonical_host in tx: {e:?}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
+        let before_host_norm = canonical_before_in_tx
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
         if let Err(e) =
             upsert_global_setting_raw(&tx, "oauth.canonical_host", db_value.clone()).await
         {
@@ -337,11 +359,48 @@ pub async fn update_oauth_settings(
             );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+
+        // Only purge when the normalized canonical host actually changed —
+        // the frontend resends canonical_host on every OAuth-settings PUT,
+        // so a presence-keyed purge would nuke live logins on every
+        // unrelated save.
+        let purged_flows = if before_host_norm != new_host.as_deref() {
+            match crate::auth::oidc_state::OidcFlowStore::purge_all_in_tx(&tx).await {
+                Ok(n) => Some(n),
+                Err(e) => {
+                    drop(tx);
+                    tracing::error!(
+                        error = %e,
+                        "Failed to purge pending OIDC flows for canonical host change"
+                    );
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            }
+        } else {
+            None
+        };
+
         let key_str = "oauth.canonical_host".to_string();
         let after_view = GlobalSettingView {
             key: key_str.clone(),
             value: db_value,
         };
+        let mut details_map = serde_json::Map::new();
+        details_map.insert("setting_area".to_string(), serde_json::json!("oauth"));
+        details_map.insert(
+            "changed_keys".to_string(),
+            serde_json::json!(["oauth.canonical_host"]),
+        );
+        if let Some(n) = purged_flows {
+            details_map.insert(
+                "pending_oidc_flows_purged".to_string(),
+                serde_json::json!(n),
+            );
+        }
+        let details = serde_json::Value::Object(details_map);
         let audit_entry = match before_canonical {
             Some(bv) => {
                 let before_view = GlobalSettingView {
@@ -357,10 +416,7 @@ pub async fn update_oauth_settings(
         .system_scope()
         .actor(actor_type, actor_id)
         .outcome(AuditOutcome::Success)
-        .details(serde_json::json!({
-            "setting_area": "oauth",
-            "changed_keys": ["oauth.canonical_host"],
-        }))
+        .details(details)
         .build();
 
         match audit_entry {
