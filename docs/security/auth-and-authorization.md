@@ -173,8 +173,9 @@ re-deriving it from request headers, closing the authorize/callback divergence t
 header-derived scheme allowed.
 
 The return origin observed at authorize time is snapshotted alongside the redirect URI. At callback, it
-is validated against the canonical host plus `oauth.accepted_audience_hosts` (`https`-only entries,
-capped at 5), and the post-login success redirect is made absolute to that validated origin.
+is validated against the canonical host plus `oauth.accepted_audience_hosts` (`https`-only entries; the
+5-entry cap enforced by `CanonicalUrlConfig::new` applies only to the MCP OAuth boot-time config, not to
+this callback check), and the post-login success redirect is made absolute to that validated origin.
 **`oauth.accepted_audience_hosts` currently has no API or UI write path** — it is settable only by a
 direct database row edit until `uptrakit-t6je6` lands. In practice this means that, with a canonical
 host configured, the validated return origin is effectively always the canonical host today.
