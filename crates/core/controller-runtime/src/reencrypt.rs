@@ -1483,6 +1483,8 @@ mod tests {
                 EncryptedString::new("pkce_secret".to_string(), AAD_PKCE_VERIFIER).unwrap(),
             ),
             nonce: Set("nonce".to_string()),
+            redirect_uri: Set(String::new()),
+            return_origin: Set(String::new()),
             created_at: Set(now),
             expires_at: Set(now),
         }
@@ -2024,6 +2026,8 @@ mod tests {
                 EncryptedString::new("all_pkce".to_string(), AAD_PKCE_VERIFIER).unwrap(),
             ),
             nonce: Set("nonce".to_string()),
+            redirect_uri: Set(String::new()),
+            return_origin: Set(String::new()),
             created_at: Set(now),
             expires_at: Set(now),
         }

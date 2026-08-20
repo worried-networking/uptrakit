@@ -74,6 +74,11 @@ impl OidcFlowStore {
             )
             .context_to()?),
             nonce: Set(nonce.secret().clone()),
+            // TODO(cimd-b B2/B3): populate with the pinned redirect_uri and
+            // request return_origin once the authorize/callback handlers
+            // snapshot and pass them through (Task B1 only adds the columns).
+            redirect_uri: Set(String::new()),
+            return_origin: Set(String::new()),
             created_at: Set(now),
             expires_at: Set(expires_at),
         };

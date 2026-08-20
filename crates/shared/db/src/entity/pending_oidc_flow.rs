@@ -13,6 +13,13 @@ pub struct Model {
     pub pkce_verifier: EncryptedString,
     #[sea_orm(column_type = "Text")]
     pub nonce: String,
+    /// Canonical-host `redirect_uri` pinned at authorize time; not a
+    /// secret, appears in the OIDC redirect URL and audit trail anyway.
+    #[sea_orm(column_type = "Text")]
+    pub redirect_uri: String,
+    /// Originating request's scheme+host, snapshotted for callback replay.
+    #[sea_orm(column_type = "Text")]
+    pub return_origin: String,
     pub created_at: OffsetDateTime,
     pub expires_at: OffsetDateTime,
 }
