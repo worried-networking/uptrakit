@@ -162,6 +162,46 @@ leaves or rewrites the page URL. Fragment transport removes server-side logging
 exposure, but a compromised or observed client can still capture the token during its
 validity window.
 
+## Redirect pinning and pending-flow snapshots
+
+When `oauth.canonical_host` is set, the OIDC `redirect_uri` is built from it for **every** configured
+provider at authorize time. Header-derived bases (`base_url_from_headers`, preferring `Origin` then
+falling back to `Host`) are used only as a fallback when no canonical host is configured — they are no
+longer trusted whenever a canonical host exists. The exact `redirect_uri` string used at authorize time
+is stored on the `pending_oidc_flow` row, and the callback replays that stored value instead of
+re-deriving it from request headers, closing the authorize/callback divergence that a purely
+header-derived scheme allowed.
+
+The return origin observed at authorize time is snapshotted alongside the redirect URI. At callback, it
+is validated against the canonical host plus `oauth.accepted_audience_hosts` (`https`-only entries,
+capped at 5), and the post-login success redirect is made absolute to that validated origin.
+**`oauth.accepted_audience_hosts` currently has no API or UI write path** — it is settable only by a
+direct database row edit until `uptrakit-t6je6` lands. In practice this means that, with a canonical
+host configured, the validated return origin is effectively always the canonical host today.
+
+### Purge triggers
+
+Any provider mutation (update, deactivate, delete, activate) purges that provider's pending OIDC flows,
+and a changed `oauth.canonical_host` value purges every pending flow for the deployment. Both purges run
+in the same `BEGIN IMMEDIATE` transaction as the triggering mutation.
+
+These purges **invalidate pending flows** — they do not cancel all in-progress logins. A narrow race
+remains: an authorize request that lands between the settings read and the flow insert (live IdP
+discovery sits in that window) can still commit a flow pinned to the old redirect URI after the purge
+has already run. That login then fails at the IdP with `redirect_uri_mismatch` rather than completing.
+This is an accepted best-effort gap, affecting at most one racing user per canonical-host or provider
+change.
+
+### Upgrade note for MCP deployments setting the canonical host
+
+Deployments that already set `oauth.canonical_host` to enable MCP OAuth will see their OIDC login
+`redirect_uri` change to the canonical origin. The registered redirect URI at the IdP may need updating
+to match. Alternate origins (a LAN IP, a VPN hostname) keep working for the post-login return as long as
+they are allowlisted in `oauth.accepted_audience_hosts` — but the canonical callback host must still be
+reachable from the client's network regardless: the IdP redirects the browser to the canonical host
+first, and only the subsequent return trip can land on an allowlisted alternate origin. Redirect pinning
+does not rescue a split-horizon setup where the canonical host itself is unroutable from the client.
+
 ## Authorization Model
 
 Authorization is an action-string grant model enforced by a single decision point, the `AccessEngine`. See
