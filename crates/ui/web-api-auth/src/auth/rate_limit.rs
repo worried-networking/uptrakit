@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use rootcause::prelude::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    sea_query::{Alias, CaseStatement, Expr, ExprTrait, OnConflict, Query},
+};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{api_rate_limit, prelude::ApiRateLimit};
@@ -98,29 +101,54 @@ impl RateLimitStore {
         // If the row exists with a valid window (window_start >= threshold): increment.
         // If the row exists with an expired window: reset to count=1 with new timestamps.
         //
-        // Raw SQL is required because SeaORM's on_conflict builder doesn't
-        // support CASE WHEN expressions. The statement is fully parameterized.
-        let backend = self.db.get_database_backend();
-        let sql = r#"INSERT INTO api_rate_limits ("key", request_count, window_start, expires_at)
-                   VALUES ($1, 1, $2, $3)
-                   ON CONFLICT ("key") DO UPDATE SET
-                     request_count = CASE
-                       WHEN api_rate_limits.window_start >= $4 THEN api_rate_limits.request_count + 1
-                       ELSE 1
-                     END,
-                     window_start = CASE
-                       WHEN api_rate_limits.window_start >= $4 THEN api_rate_limits.window_start
-                       ELSE excluded.window_start
-                     END,
-                     expires_at = excluded.expires_at"#;
-        let params = vec![key.into(), now.into(), expires_at.into(), threshold.into()];
+        // Built with sea_query so the on_conflict CASE WHEN branches are fully
+        // parameterized and rendered per-backend by the connection.
+        let existing_window_start =
+            Expr::col((api_rate_limit::Entity, api_rate_limit::Column::WindowStart));
+        let existing_request_count =
+            Expr::col((api_rate_limit::Entity, api_rate_limit::Column::RequestCount));
+        let excluded_window_start =
+            Expr::col((Alias::new("excluded"), api_rate_limit::Column::WindowStart));
 
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "builder limitation: ON CONFLICT ... DO UPDATE with CASE WHEN expressions is not expressible in sea_query's on_conflict builder"
-        )]
-        let stmt = sea_orm::Statement::from_sql_and_values(backend, sql, params);
-        self.db.execute_raw(stmt).await.context_to()?;
+        let request_count_case = CaseStatement::new()
+            .case(
+                existing_window_start.clone().gte(threshold),
+                existing_request_count.add(1),
+            )
+            .finally(Expr::val(1));
+        let window_start_case = CaseStatement::new()
+            .case(
+                existing_window_start.clone().gte(threshold),
+                existing_window_start,
+            )
+            .finally(excluded_window_start);
+
+        let upsert = Query::insert()
+            .into_table(api_rate_limit::Entity)
+            .columns([
+                api_rate_limit::Column::Key,
+                api_rate_limit::Column::RequestCount,
+                api_rate_limit::Column::WindowStart,
+                api_rate_limit::Column::ExpiresAt,
+            ])
+            .values_panic([key.into(), 1.into(), now.into(), expires_at.into()])
+            .on_conflict(
+                OnConflict::column(api_rate_limit::Column::Key)
+                    .values([
+                        (
+                            api_rate_limit::Column::RequestCount,
+                            request_count_case.into(),
+                        ),
+                        (
+                            api_rate_limit::Column::WindowStart,
+                            window_start_case.into(),
+                        ),
+                    ])
+                    .update_column(api_rate_limit::Column::ExpiresAt)
+                    .to_owned(),
+            )
+            .to_owned();
+        self.db.execute(&upsert).await.context_to()?;
 
         // Read back the current count to decide the outcome.
         let row = ApiRateLimit::find_by_id(key)
