@@ -1010,6 +1010,12 @@ impl From<Report<AuthError>> for ApiError {
                 "auth.email_delivery_unavailable",
                 None,
             ),
+            InvalidCanonicalHost(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "auth.internal",
+                Some(format_report_summary(&report)),
+            ),
         }
     }
 }

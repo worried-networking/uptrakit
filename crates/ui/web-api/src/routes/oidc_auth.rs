@@ -21,6 +21,7 @@ use openidconnect::{
     RedirectUrl, Scope, TokenResponse,
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
 };
+use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -73,6 +74,10 @@ struct ValidatedOidcCallback {
     client: DiscoveredCoreClient,
     redirect_url: RedirectUrl,
     allow_private_network_issuers: bool,
+    /// Copied from the flow snapshot's `return_origin` before `flow` is
+    /// partially consumed below — see `create_oidc_exchange_and_redirect` for
+    /// the invariant this carries through to the final redirect.
+    return_origin: Option<String>,
 }
 
 /// Stage-1 callback validation failure. Carries the early response and, when
@@ -246,7 +251,7 @@ fn parse_callback_redirect_query(location: &str) -> (Option<String>, bool) {
 
 fn oidc_callback_outcome_for_error_code(error_code: &str) -> uptrakit_audit_log::AuditOutcome {
     match error_code {
-        "oidc_missing_params" | "oidc_missing_host" | "oidc_invalid_redirect" => {
+        "oidc_missing_params" | "oidc_invalid_redirect" => {
             uptrakit_audit_log::AuditOutcome::ValidationFailed
         }
         "oidc_denied"
@@ -336,6 +341,134 @@ fn emit_oidc_callback_audit_for_response(
         provider_id,
         serde_json::Value::Object(details),
     );
+}
+
+/// Result of pinning the OIDC `redirect_uri` to the deployment's canonical
+/// host. `return_origin: None` is the canonical-unset sentinel: it means the
+/// observed request origin was never validated against a canonical host, so
+/// callback-time redirects built from it must stay relative (see
+/// `create_oidc_exchange_and_redirect`).
+#[derive(Debug)]
+pub(crate) struct PinnedRedirect {
+    pub redirect_uri: String,
+    pub return_origin: Option<String>,
+}
+
+/// Read `oauth.canonical_host` fresh from `global_settings` on every call.
+///
+/// Deliberately bypasses `state.oauth` (whose disabled-mode placeholder host
+/// is `https://disabled.invalid`, see `oauth::canonical_url::disabled_placeholder`)
+/// so that redirect pinning works per-request regardless of whether the
+/// MCP/OAuth resource-server feature is enabled. Returns `Ok(None)` when the
+/// setting is unset or empty — the deployment has not pinned a canonical host
+/// yet, and callers must fall back to the observed request origin without
+/// validation. Returns `Err(AuthError::InvalidCanonicalHost)` when the stored
+/// value fails `is_bare_host` (contains userinfo, a path, or otherwise is not
+/// a bare host) — this never silently falls back, since accepting a malformed
+/// canonical host would defeat the pinning it's meant to enforce.
+pub(crate) async fn canonical_origin(
+    db: &sea_orm::DatabaseConnection,
+) -> crate::auth::Result<Option<String>> {
+    let Some(raw) =
+        crate::settings_store::load_global_setting_raw(db, "oauth.canonical_host").await?
+    else {
+        return Ok(None);
+    };
+    let Some(host) = raw.as_str() else {
+        return Ok(None);
+    };
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if !uptrakit_web_api_types::oauth::canonical_url::is_bare_host(trimmed) {
+        return Err(report!(crate::auth::AuthError::InvalidCanonicalHost(
+            trimmed.to_owned()
+        )));
+    }
+    Ok(Some(format!("https://{}", trimmed.to_ascii_lowercase())))
+}
+
+/// Read `oauth.accepted_audience_hosts` (a JSON string array) fresh from
+/// `global_settings`. Missing, malformed, or non-array values resolve to an
+/// empty list — fail closed, since an alias silently accepted here would let
+/// an attacker-observed origin bypass canonical pinning. Entries that fail
+/// `is_bare_host` are dropped by the caller rather than here, so a single bad
+/// entry doesn't invalidate the whole list.
+async fn accepted_audience_hosts(
+    db: &sea_orm::DatabaseConnection,
+) -> crate::auth::Result<Vec<String>> {
+    let Some(raw) =
+        crate::settings_store::load_global_setting_raw(db, "oauth.accepted_audience_hosts").await?
+    else {
+        return Ok(Vec::new());
+    };
+    Ok(raw
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// Compute the `redirect_uri` to send to the OIDC provider and the
+/// `return_origin` to snapshot alongside it, per the canonical-host pinning
+/// invariant:
+///
+/// - Canonical host unset: `redirect_uri` is derived from the request-observed
+///   `observed_base_url`; `return_origin: None` (unvalidated, callback-time
+///   redirects stay relative).
+/// - Canonical host set: `redirect_uri` always pins to the canonical origin.
+///   `return_origin` is `Some(observed_base_url)` only when it equals the
+///   canonical origin or matches an entry in `oauth.accepted_audience_hosts`
+///   (case-insensitive host comparison, no port normalization); otherwise it
+///   falls back to `Some(canonical)` — never `None`, since a canonical host is
+///   configured and the flow can safely replay to it.
+///
+/// DB errors propagate via `?` — this never defaults or fails open.
+pub(crate) async fn compute_pinned_redirect(
+    db: &sea_orm::DatabaseConnection,
+    observed_base_url: &str,
+) -> crate::auth::Result<PinnedRedirect> {
+    let observed = observed_base_url.trim_end_matches('/').to_string();
+
+    let Some(canonical) = canonical_origin(db).await? else {
+        return Ok(PinnedRedirect {
+            redirect_uri: format!("{observed}/api/v1/auth/oidc/callback"),
+            return_origin: None,
+        });
+    };
+
+    let redirect_uri = format!("{canonical}/api/v1/auth/oidc/callback");
+    let observed_lower = observed.to_ascii_lowercase();
+    let canonical_lower = canonical.to_ascii_lowercase();
+
+    if observed_lower == canonical_lower {
+        return Ok(PinnedRedirect {
+            redirect_uri,
+            return_origin: Some(observed),
+        });
+    }
+
+    let accepted = accepted_audience_hosts(db).await?;
+    let observed_matches_alias = accepted.iter().any(|host| {
+        uptrakit_web_api_types::oauth::canonical_url::is_bare_host(host)
+            && format!("https://{}", host.to_ascii_lowercase()) == observed_lower
+    });
+
+    let return_origin = if observed_matches_alias {
+        Some(observed)
+    } else {
+        Some(canonical)
+    };
+
+    Ok(PinnedRedirect {
+        redirect_uri,
+        return_origin,
+    })
 }
 
 /// Get available auth methods (public)
@@ -436,27 +569,6 @@ pub async fn oidc_authorize(
         }
     };
 
-    let redirect_uri_string = format!("{base_url}/api/v1/auth/oidc/callback");
-    let redirect_url = match RedirectUrl::new(redirect_uri_string.clone()) {
-        Ok(url) => url,
-        Err(e) => {
-            tracing::error!(error = %e, "Invalid OIDC redirect URL");
-            emit_oidc_route_audit(
-                &state,
-                uptrakit_audit_log::AuditActionType::from_static(
-                    uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
-                ),
-                uptrakit_audit_log::AuditOutcome::ValidationFailed,
-                None,
-                Some(provider_id),
-                serde_json::json!({
-                    "reason_code": "invalid_redirect_url",
-                }),
-            );
-            return error_response(StatusCode::BAD_REQUEST, "Invalid redirect URL");
-        }
-    };
-
     let provider =
         match find_active_provider(state.db(), state.default_tenant_id, provider_id).await {
             Some(p) => p,
@@ -498,6 +610,49 @@ pub async fn oidc_authorize(
         };
     let allow_private_network_issuers =
         provider.allow_private_network_issuers && !multi_tenancy_enabled;
+
+    // Pin the redirect_uri to the deployment's canonical host (when configured)
+    // and compute the return_origin to snapshot alongside it — see
+    // `compute_pinned_redirect` for the full invariant.
+    let pinned = match compute_pinned_redirect(state.db(), &base_url).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(error = ?e, "Failed to compute pinned OIDC redirect");
+            emit_oidc_route_audit(
+                &state,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+                ),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some(&provider),
+                None,
+                serde_json::json!({
+                    "reason_code": "redirect_pinning_failed",
+                }),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    let redirect_uri_string = pinned.redirect_uri.clone();
+    let redirect_url = match RedirectUrl::new(redirect_uri_string.clone()) {
+        Ok(url) => url,
+        Err(e) => {
+            tracing::error!(error = %e, "Invalid OIDC redirect URL");
+            emit_oidc_route_audit(
+                &state,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+                ),
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                Some(&provider),
+                None,
+                serde_json::json!({
+                    "reason_code": "invalid_redirect_url",
+                }),
+            );
+            return error_response(StatusCode::BAD_REQUEST, "Invalid redirect URL");
+        }
+    };
 
     // Build OIDC client via discovery
     let client =
@@ -552,7 +707,7 @@ pub async fn oidc_authorize(
             &nonce,
             crate::auth::oidc_state::FlowSnapshot {
                 redirect_uri: redirect_uri_string,
-                return_origin: None,
+                return_origin: pinned.return_origin,
             },
         )
         .await
@@ -608,8 +763,6 @@ pub async fn oidc_authorize(
 pub async fn oidc_callback(
     State(state): State<Arc<AppState>>,
     Query(params): Query<OidcCallbackParams>,
-    external_base_url: Option<Extension<crate::extract::ExternalBaseUrl>>,
-    headers: HeaderMap,
 ) -> Response {
     // Handle error from provider
     if let Some(provider_error) = params.error.as_deref() {
@@ -634,7 +787,8 @@ pub async fn oidc_callback(
         client,
         redirect_url,
         allow_private_network_issuers,
-    } = match validate_oidc_state(&state, &csrf_state, external_base_url, &headers).await {
+        return_origin,
+    } = match validate_oidc_state(&state, &csrf_state).await {
         Ok(v) => v,
         Err(validation_failure) => {
             emit_oidc_callback_audit_for_response(
@@ -676,7 +830,14 @@ pub async fn oidc_callback(
     };
 
     // Stage 3: Resolve or create the user, sync roles, and produce the final response
-    let response = resolve_or_create_oidc_user(&state, provider_id, &provider, claims).await;
+    let response = resolve_or_create_oidc_user(
+        &state,
+        provider_id,
+        &provider,
+        claims,
+        return_origin.as_deref(),
+    )
+    .await;
     emit_oidc_callback_audit_for_response(
         &state,
         Some(&provider),
@@ -696,8 +857,6 @@ pub async fn oidc_callback(
 async fn validate_oidc_state(
     state: &AppState,
     csrf_state: &str,
-    external_base_url: Option<Extension<crate::extract::ExternalBaseUrl>>,
-    headers: &HeaderMap,
 ) -> Result<ValidatedOidcCallback, OidcStateValidationFailure> {
     // Retrieve pending flow from database
     let flow = match state.oidc.oidc_flow_store.take(csrf_state).await {
@@ -718,6 +877,20 @@ async fn validate_oidc_state(
     };
     let provider_id = flow.provider_id;
 
+    // A flow snapshot with an empty redirect_uri predates B3 pinning (or was
+    // never populated) — treat it the same as an expired/unknown state rather
+    // than falling back to a header-derived redirect_uri.
+    if flow.redirect_uri.is_empty() {
+        tracing::warn!(
+            provider_id = %provider_id,
+            "OIDC flow snapshot has empty redirect_uri; treating as expired"
+        );
+        return Err(OidcStateValidationFailure::new(
+            Redirect::to("/login?error=oidc_state_expired").into_response(),
+            Some(provider_id),
+        ));
+    }
+
     // Load provider
     let provider =
         match find_active_provider(state.db(), state.default_tenant_id, provider_id).await {
@@ -730,19 +903,9 @@ async fn validate_oidc_state(
             }
         };
 
-    let base_url = external_base_url
-        .map(|Extension(u)| u.0)
-        .or_else(|| base_url_from_headers(headers));
-    let base_url = match base_url {
-        Some(url) => url,
-        None => {
-            return Err(OidcStateValidationFailure::new(
-                Redirect::to("/login?error=oidc_missing_host").into_response(),
-                Some(provider_id),
-            ));
-        }
-    };
-    let redirect_url = match RedirectUrl::new(format!("{base_url}/api/v1/auth/oidc/callback")) {
+    // Replay the redirect_uri pinned at authorize time — never re-derive it
+    // from this request's headers, or the pinning would be meaningless.
+    let redirect_url = match RedirectUrl::new(flow.redirect_uri.clone()) {
         Ok(url) => url,
         Err(e) => {
             tracing::error!(error = %e, "Invalid OIDC redirect URL during callback");
@@ -783,12 +946,14 @@ async fn validate_oidc_state(
         }
     };
 
+    let return_origin = flow.return_origin.clone();
     Ok(ValidatedOidcCallback {
         flow,
         provider,
         client,
         redirect_url,
         allow_private_network_issuers,
+        return_origin,
     })
 }
 
@@ -800,6 +965,7 @@ async fn resolve_or_create_oidc_user(
     provider_id: Uuid,
     provider: &oidc_provider::Model,
     claims: ExtractedOidcClaims,
+    return_origin: Option<&str>,
 ) -> Response {
     let ExtractedOidcClaims {
         sub,
@@ -821,6 +987,7 @@ async fn resolve_or_create_oidc_user(
         first_name.as_deref(),
         last_name.as_deref(),
         &additional_claims,
+        return_origin,
     )
     .await
     {
@@ -868,6 +1035,7 @@ async fn resolve_or_create_oidc_user(
         first_name,
         last_name,
         &additional_claims,
+        return_origin,
     )
     .await
 }
@@ -891,6 +1059,7 @@ async fn execute_oidc_resolution(
     first_name: Option<String>,
     last_name: Option<String>,
     additional_claims: &serde_json::Value,
+    return_origin: Option<&str>,
 ) -> Response {
     match resolution {
         OidcUserResolution::LinkedUser(user_id) => {
@@ -904,7 +1073,7 @@ async fn execute_oidc_resolution(
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
             }
             handle_role_sync_outcome(state, user_id, provider.name.as_str(), sync_outcome).await;
-            create_oidc_exchange_and_redirect(state, user_id, provider_id).await
+            create_oidc_exchange_and_redirect(state, user_id, provider_id, return_origin).await
         }
         OidcUserResolution::NewUser(user_id) => {
             let (user_id, first_user_registration, sync_outcome) =
@@ -930,7 +1099,7 @@ async fn execute_oidc_resolution(
                 None,
                 Some(is_first_user),
             );
-            create_oidc_exchange_and_redirect(state, user_id, provider_id).await
+            create_oidc_exchange_and_redirect(state, user_id, provider_id, return_origin).await
         }
         OidcUserResolution::LinkViaPasswordRequired { user_id } => {
             drop(txn);
@@ -944,6 +1113,7 @@ async fn execute_oidc_resolution(
                 last_name,
                 additional_claims,
                 user_id,
+                return_origin,
             )
             .await
         }
@@ -963,6 +1133,7 @@ async fn execute_oidc_resolution(
                 additional_claims,
                 user_id,
                 existing_provider_id,
+                return_origin,
             )
             .await
         }
@@ -979,6 +1150,17 @@ async fn execute_oidc_resolution(
             Redirect::to("/login?error=account_deactivated").into_response()
         }
     }
+}
+
+/// Compute the prefix that makes a relative post-login redirect absolute to
+/// the pinned `return_origin` from the flow snapshot. Empty when
+/// `return_origin` is `None` (canonical host was unset at authorize time),
+/// which keeps the redirect relative rather than substituting a
+/// header-derived value. Single shared identity for every prefix site
+/// (`check_registration_eligibility`, `link_redirect_with_no_referrer`) --
+/// do not reimplement per call site.
+fn redirect_origin_prefix(return_origin: Option<&str>) -> &str {
+    return_origin.unwrap_or("")
 }
 
 /// Pre-check: when registration mode is Invite and auto-create is enabled,
@@ -999,6 +1181,7 @@ async fn check_registration_eligibility(
     first_name: Option<&str>,
     last_name: Option<&str>,
     additional_claims: &serde_json::Value,
+    return_origin: Option<&str>,
 ) -> Option<Response> {
     let reg_settings = state.settings.registration();
     if reg_settings.mode != RegistrationMode::Invite || !provider.auto_create_users {
@@ -1093,7 +1276,8 @@ async fn check_registration_eligibility(
     // the request).
     Some(
         Redirect::to(&format!(
-            "/login#registration_token_required=true&registration_code={code}"
+            "{}/login#registration_token_required=true&registration_code={code}",
+            redirect_origin_prefix(return_origin)
         ))
         .into_response(),
     )
@@ -1283,6 +1467,7 @@ async fn handle_link_via_password(
     last_name: Option<String>,
     additional_claims: &serde_json::Value,
     user_id: Uuid,
+    return_origin: Option<&str>,
 ) -> Response {
     let mapped_roles = extract_mapped_roles(provider, additional_claims);
     let link_token_value = match generate_secure_token() {
@@ -1315,7 +1500,7 @@ async fn handle_link_via_password(
         }
     };
 
-    link_redirect_with_no_referrer(email, &link_token, None)
+    link_redirect_with_no_referrer(email, &link_token, None, return_origin)
 }
 
 /// Handle the `LinkViaOidcRequired` resolution: store a pending link and
@@ -1335,6 +1520,7 @@ async fn handle_link_via_oidc(
     additional_claims: &serde_json::Value,
     user_id: Uuid,
     existing_provider_id: Uuid,
+    return_origin: Option<&str>,
 ) -> Response {
     let mapped_roles = extract_mapped_roles(provider, additional_claims);
     let link_token_value = match generate_secure_token() {
@@ -1367,7 +1553,12 @@ async fn handle_link_via_oidc(
         }
     };
 
-    link_redirect_with_no_referrer(email, &link_token, Some(existing_provider_id))
+    link_redirect_with_no_referrer(
+        email,
+        &link_token,
+        Some(existing_provider_id),
+        return_origin,
+    )
 }
 
 /// Build a redirect response for account-linking flows, suppressing the
@@ -1377,6 +1568,7 @@ fn link_redirect_with_no_referrer(
     email: &str,
     link_token: &str,
     existing_provider_id: Option<Uuid>,
+    return_origin: Option<&str>,
 ) -> Response {
     let mut link_headers = HeaderMap::new();
     link_headers.insert(
@@ -1385,10 +1577,10 @@ fn link_redirect_with_no_referrer(
     );
     (
         link_headers,
-        Redirect::to(&build_link_required_redirect(
-            email,
-            link_token,
-            existing_provider_id,
+        Redirect::to(&format!(
+            "{}{}",
+            redirect_origin_prefix(return_origin),
+            build_link_required_redirect(email, link_token, existing_provider_id)
         )),
     )
         .into_response()
@@ -2266,6 +2458,7 @@ async fn create_oidc_exchange_and_redirect(
     state: &AppState,
     user_id: uuid::Uuid,
     provider_id: uuid::Uuid,
+    return_origin: Option<&str>,
 ) -> Response {
     // Generate exchange code
     let exchange_code = match generate_secure_token() {
@@ -2293,7 +2486,16 @@ async fn create_oidc_exchange_and_redirect(
         return Redirect::to("/login?error=oidc_session_failed").into_response();
     }
 
-    Redirect::to(&format!("/login?oidc_code={exchange_code}")).into_response()
+    // `return_origin` was validated against the canonical host / accepted
+    // audience hosts at authorize time and replayed verbatim from the flow
+    // snapshot -- never substitute a header-derived value here, or the
+    // absolute redirect becomes attacker-steerable again.
+    match return_origin {
+        Some(origin) => {
+            Redirect::to(&format!("{origin}/login?oidc_code={exchange_code}")).into_response()
+        }
+        None => Redirect::to(&format!("/login?oidc_code={exchange_code}")).into_response(),
+    }
 }
 
 async fn store_pending_link(
@@ -2389,6 +2591,273 @@ mod tests {
         assert_eq!(
             redirect,
             "/login?link_required=true&email=user%40example%2Ecom&link_provider_id=00000000-0000-0000-0000-000000000000#link_token=token"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite", feature = "oidc"))]
+mod pinned_redirect_tests {
+    use super::{PinnedRedirect, compute_pinned_redirect};
+    use crate::auth::AuthError;
+    use crate::test_harness::setup_migrated_db;
+    use uptrakit_shared_db::raw_settings::upsert_global_setting_raw;
+
+    #[tokio::test]
+    async fn canonical_unset_uses_observed_base_url() {
+        let db = setup_migrated_db().await;
+
+        let PinnedRedirect {
+            redirect_uri,
+            return_origin,
+        } = compute_pinned_redirect(&db, "https://observed.example.com")
+            .await
+            .expect("compute_pinned_redirect should succeed");
+
+        assert_eq!(
+            redirect_uri,
+            "https://observed.example.com/api/v1/auth/oidc/callback"
+        );
+        assert_eq!(return_origin, None);
+    }
+
+    #[tokio::test]
+    async fn canonical_set_observed_matches_canonical() {
+        let db = setup_migrated_db().await;
+        upsert_global_setting_raw(
+            &db,
+            "oauth.canonical_host",
+            serde_json::json!("auth.example.com"),
+        )
+        .await
+        .expect("insert canonical_host");
+
+        let PinnedRedirect {
+            redirect_uri,
+            return_origin,
+        } = compute_pinned_redirect(&db, "https://auth.example.com")
+            .await
+            .expect("compute_pinned_redirect should succeed");
+
+        assert_eq!(
+            redirect_uri,
+            "https://auth.example.com/api/v1/auth/oidc/callback"
+        );
+        assert_eq!(return_origin, Some("https://auth.example.com".to_string()));
+    }
+
+    #[tokio::test]
+    async fn canonical_set_observed_in_accepted_list() {
+        let db = setup_migrated_db().await;
+        upsert_global_setting_raw(
+            &db,
+            "oauth.canonical_host",
+            serde_json::json!("auth.example.com"),
+        )
+        .await
+        .expect("insert canonical_host");
+        upsert_global_setting_raw(
+            &db,
+            "oauth.accepted_audience_hosts",
+            serde_json::json!(["alias.example.com"]),
+        )
+        .await
+        .expect("insert accepted_audience_hosts");
+
+        let PinnedRedirect {
+            redirect_uri,
+            return_origin,
+        } = compute_pinned_redirect(&db, "https://alias.example.com")
+            .await
+            .expect("compute_pinned_redirect should succeed");
+
+        assert_eq!(
+            redirect_uri, "https://auth.example.com/api/v1/auth/oidc/callback",
+            "redirect_uri always pins to canonical, regardless of accepted-list match"
+        );
+        assert_eq!(return_origin, Some("https://alias.example.com".to_string()));
+    }
+
+    #[tokio::test]
+    async fn canonical_set_observed_not_listed_falls_back_to_canonical() {
+        let db = setup_migrated_db().await;
+        upsert_global_setting_raw(
+            &db,
+            "oauth.canonical_host",
+            serde_json::json!("auth.example.com"),
+        )
+        .await
+        .expect("insert canonical_host");
+        upsert_global_setting_raw(
+            &db,
+            "oauth.accepted_audience_hosts",
+            serde_json::json!(["alias.example.com"]),
+        )
+        .await
+        .expect("insert accepted_audience_hosts");
+
+        let PinnedRedirect {
+            redirect_uri,
+            return_origin,
+        } = compute_pinned_redirect(&db, "https://evil.example.com")
+            .await
+            .expect("compute_pinned_redirect should succeed");
+
+        assert_eq!(
+            redirect_uri,
+            "https://auth.example.com/api/v1/auth/oidc/callback"
+        );
+        assert_eq!(return_origin, Some("https://auth.example.com".to_string()));
+    }
+
+    /// Accepted-list entries that fail `is_bare_host` (e.g. carry a path or
+    /// userinfo) are skipped rather than causing the whole list to error —
+    /// fail closed to canonical for that entry, not fail open.
+    #[tokio::test]
+    async fn accepted_list_skips_invalid_entries_fail_closed() {
+        let db = setup_migrated_db().await;
+        upsert_global_setting_raw(
+            &db,
+            "oauth.canonical_host",
+            serde_json::json!("auth.example.com"),
+        )
+        .await
+        .expect("insert canonical_host");
+        upsert_global_setting_raw(
+            &db,
+            "oauth.accepted_audience_hosts",
+            serde_json::json!(["evil.example.com/x@y", "alias.example.com"]),
+        )
+        .await
+        .expect("insert accepted_audience_hosts");
+
+        let PinnedRedirect { return_origin, .. } =
+            compute_pinned_redirect(&db, "https://evil.example.com")
+                .await
+                .expect("compute_pinned_redirect should succeed");
+        assert_eq!(
+            return_origin,
+            Some("https://auth.example.com".to_string()),
+            "malformed accepted-list entry must not match; falls back to canonical"
+        );
+
+        let PinnedRedirect { return_origin, .. } =
+            compute_pinned_redirect(&db, "https://alias.example.com")
+                .await
+                .expect("compute_pinned_redirect should succeed");
+        assert_eq!(
+            return_origin,
+            Some("https://alias.example.com".to_string()),
+            "well-formed accepted-list entry alongside a malformed one still matches"
+        );
+    }
+
+    #[tokio::test]
+    async fn canonical_host_case_normalized_to_lowercase_origin() {
+        let db = setup_migrated_db().await;
+        upsert_global_setting_raw(
+            &db,
+            "oauth.canonical_host",
+            serde_json::json!("Auth.Example.COM"),
+        )
+        .await
+        .expect("insert canonical_host");
+
+        let PinnedRedirect { redirect_uri, .. } =
+            compute_pinned_redirect(&db, "https://Auth.Example.COM")
+                .await
+                .expect("compute_pinned_redirect should succeed");
+
+        assert_eq!(
+            redirect_uri,
+            "https://auth.example.com/api/v1/auth/oidc/callback"
+        );
+    }
+
+    #[tokio::test]
+    async fn canonical_host_with_userinfo_is_rejected() {
+        let db = setup_migrated_db().await;
+        upsert_global_setting_raw(&db, "oauth.canonical_host", serde_json::json!("x@evil.com"))
+            .await
+            .expect("insert canonical_host");
+
+        let err = compute_pinned_redirect(&db, "https://observed.example.com")
+            .await
+            .expect_err("malformed canonical_host must fail closed, not silently default");
+
+        assert!(matches!(
+            err.current_context(),
+            AuthError::InvalidCanonicalHost(host) if host == "x@evil.com"
+        ));
+    }
+}
+
+/// Direct-call tests for `create_oidc_exchange_and_redirect`'s final
+/// redirect construction -- the last link in the pin-at-authorize,
+/// replay-at-callback chain. `return_origin` here is always a value already
+/// validated (or explicitly absent) upstream; these tests pin the two
+/// outcomes so a future refactor cannot silently swap in a header-derived
+/// origin.
+#[cfg(all(test, feature = "db-sqlite", feature = "oidc"))]
+mod exchange_redirect_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test code: panics on failure are acceptable"
+    )]
+
+    use super::create_oidc_exchange_and_redirect;
+    use crate::test_harness::TestApp;
+    use axum::response::Response;
+    use http::{StatusCode, header};
+
+    fn location(resp: &Response) -> String {
+        resp.headers()
+            .get(header::LOCATION)
+            .expect("expected Location header")
+            .to_str()
+            .expect("Location header is not valid UTF-8")
+            .to_string()
+    }
+
+    /// Critical regression pin: when `return_origin` is `None` (canonical
+    /// host was unset at authorize time, the flow-snapshot sentinel for
+    /// "never validated"), the exchange redirect MUST stay relative.
+    /// Substituting a header-derived origin here would reopen the exact
+    /// Host-header-injection vector this task closes.
+    #[tokio::test]
+    async fn exchange_redirect_is_relative_when_return_origin_none() {
+        let app = TestApp::new().await;
+        let user_id = uuid::Uuid::now_v7();
+        let provider_id = uuid::Uuid::now_v7();
+
+        let resp = create_oidc_exchange_and_redirect(&app.state, user_id, provider_id, None).await;
+
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let loc = location(&resp);
+        assert!(
+            loc.starts_with("/login?oidc_code="),
+            "expected relative redirect, got: {loc}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exchange_redirect_is_absolute_to_return_origin() {
+        let app = TestApp::new().await;
+        let user_id = uuid::Uuid::now_v7();
+        let provider_id = uuid::Uuid::now_v7();
+
+        let resp = create_oidc_exchange_and_redirect(
+            &app.state,
+            user_id,
+            provider_id,
+            Some("https://alias.example.com"),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let loc = location(&resp);
+        assert!(
+            loc.starts_with("https://alias.example.com/login?oidc_code="),
+            "expected absolute redirect to return_origin, got: {loc}"
         );
     }
 }
@@ -2547,6 +3016,56 @@ mod audit_tests {
         );
     }
 
+    /// End-to-end (HTTP-level) coverage for the `compute_pinned_redirect`
+    /// error arm added to `oidc_authorize`: a malformed
+    /// `oauth.canonical_host` value must fail closed (500 +
+    /// `redirect_pinning_failed` audit event), not silently fall back to
+    /// the observed request origin or an unpinned redirect_uri.
+    #[tokio::test]
+    async fn oidc_authorize_invalid_canonical_host_writes_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "OIDC Invalid Canonical Host",
+            "oidc-invalid-canonical-host",
+        )
+        .await;
+
+        uptrakit_shared_db::raw_settings::upsert_global_setting_raw(
+            &app.db,
+            "oauth.canonical_host",
+            serde_json::json!("x@evil.example.test"),
+        )
+        .await
+        .expect("insert malformed canonical_host");
+
+        let response = client
+            .get(&format!("/api/v1/auth/oidc/{provider_id}/authorize"))
+            .header("Host", "localhost")
+            .send()
+            .await;
+        assert_eq!(response.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let provider_id_str = provider_id.to_string();
+        assert_eq!(row.target_id.as_deref(), Some(provider_id_str.as_str()));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("redirect_pinning_failed")
+        );
+    }
+
     #[tokio::test]
     async fn oidc_callback_provider_error_writes_denied_audit_event() {
         let app = TestApp::new().await;
@@ -2580,8 +3099,15 @@ mod audit_tests {
         );
     }
 
+    /// Stage 1 no longer re-derives `redirect_uri` from request headers (B3
+    /// pinning: it replays the flow snapshot instead), so a missing Host
+    /// header can no longer be a stage-1 failure mode. The next reachable
+    /// stage-1 failure is OIDC discovery against the seeded provider's
+    /// unreachable `issuer_url` — this test retargets to that failure while
+    /// keeping the original assertion this test exists for: provider target
+    /// identity survives stage-1 failures in the audit event.
     #[tokio::test]
-    async fn oidc_callback_stage1_missing_host_keeps_provider_target_in_audit_event() {
+    async fn oidc_callback_stage1_discovery_failure_keeps_provider_target_in_audit_event() {
         let app = TestApp::new().await;
         let client = app.client();
         let provider_id = insert_active_oidc_provider(
@@ -2626,7 +3152,7 @@ mod audit_tests {
         .await;
         assert_eq!(
             row.outcome,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
         );
         assert_eq!(row.target_type.as_deref(), Some("oidc_provider"));
         let provider_id_str = provider_id.to_string();
@@ -2634,7 +3160,7 @@ mod audit_tests {
         let details = row.details_json.expect("audit details");
         assert_eq!(
             details["reason_code"],
-            serde_json::json!("oidc_missing_host")
+            serde_json::json!("oidc_discovery_failed")
         );
     }
 

@@ -59,6 +59,9 @@ pub enum AuthError {
     #[error("OIDC link verification failed")]
     OidcLinkVerificationFailed,
 
+    #[error("invalid oauth.canonical_host stored value: {0}")]
+    InvalidCanonicalHost(String),
+
     #[error("password authentication is disabled")]
     PasswordAuthDisabled,
 
