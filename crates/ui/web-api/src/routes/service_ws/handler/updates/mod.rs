@@ -33,8 +33,8 @@ pub(super) use replay::{
     prepare_pending_replay_messages, recover_owned_updates_on_connect_with_dispatch_mode,
 };
 
-pub(crate) use dispatch::dispatch_next_batch_update;
 use dispatch::dispatch_next_queued_update;
+pub(crate) use dispatch::{dispatch_next_batch_update, dispatch_next_batch_update_for_tenant};
 
 pub(super) use batch::{
     emit_batch_progress_event, emit_batch_progress_from_db, handle_batch_completion,

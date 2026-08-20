@@ -54,4 +54,4 @@ pub(crate) use embedded::{
 };
 pub(crate) use session_authenticated::handle_authenticated_loop;
 pub(crate) use session_enrolled::handle_enrolled_loop;
-pub(crate) use updates::dispatch_next_batch_update;
+pub(crate) use updates::{dispatch_next_batch_update, dispatch_next_batch_update_for_tenant};

@@ -117,6 +117,27 @@ async fn dispatch_next_batch_update_for_replay(
     .await;
 }
 
+/// Advance a batch for a row that never had an owning service (reaped
+/// `Pending` rows — `execution_owner_service_id` is `None` by construction).
+/// Same semantics as [`dispatch_next_batch_update`], but keyed by the row's
+/// own `tenant_id` instead of resolving it through a service.
+pub(crate) async fn dispatch_next_batch_update_for_tenant(
+    state: &Arc<AppState>,
+    tenant_id: uuid::Uuid,
+    batch_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+) {
+    dispatch_next_batch_update_with_notifier_for_tenant(
+        state,
+        tenant_id,
+        batch_id,
+        host_id,
+        &state.notification.notification_service,
+        state.controller_update_protection(),
+    )
+    .await;
+}
+
 async fn dispatch_next_batch_update_with_notifier(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -135,6 +156,22 @@ async fn dispatch_next_batch_update_with_notifier(
         _ => return,
     };
 
+    dispatch_next_batch_update_with_notifier_for_tenant(
+        state, tenant_id, batch_id, host_id, notifier, protection,
+    )
+    .await;
+}
+
+async fn dispatch_next_batch_update_with_notifier_for_tenant(
+    state: &Arc<AppState>,
+    tenant_id: uuid::Uuid,
+    batch_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+    notifier: &dyn crate::ServiceNotifier,
+    protection: Option<
+        Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateProtection>,
+    >,
+) {
     match crate::queries::update_batches::dispatch_next_in_batch(
         state.db(),
         crate::queries::update_dispatch::DispatchContext {

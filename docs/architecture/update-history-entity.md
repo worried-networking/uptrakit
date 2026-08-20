@@ -123,6 +123,34 @@ When a second update is triggered while the host is busy, it is **queued** inste
 All update types (individual software item updates and batch updates) share the same
 `update_history` table and the same per-host queue.
 
+### Pending-row reaping
+
+A `Pending` row whose `created_at` is older than `PENDING_DISPATCH_GRACE` (600s) is reaped to
+`Interrupted` — dispatch never started — when every live service linked to the row's host has
+`services.last_seen_at` older than the grace (never-seen counts as absent) and none of them is
+currently connected. The output records `dispatch never started` and the recovery hint tells the
+caller it is safe to re-run once the agent reconnects. `services.last_seen_at` is persisted and
+refreshed on every service ping, so a controller restart does not blind the reaper for a fresh
+grace window the way an in-memory observation window would.
+
+A reaped row that belongs to a batch advances the batch via the tenant-scoped dispatch variant
+(reaped `Pending` rows have no owning service, so the owner-keyed advance used for the
+`InProgress` budget reaper cannot fire for them), so the batch still reaches a terminal status
+instead of staying `in_progress` with orphaned `Queued` siblings.
+
+A candidate suppressed because a linked service is live or was seen inside the grace window is
+logged (a `warn` with the suppressed count) and left `Pending` — the connected-but-wedged agent
+class is handled separately by agent-side deadlines, not this reaper. `Queued` rows are never
+touched here; only batch promotion (ADR-0024) moves them. A late `UpdateResult` for an already
+reaped row is discarded by the existing non-owner stale-result handling.
+
+One case is not closed by this backstop: an agent that received the dispatch, executed the update
+across a disconnect, and reconnects only after the reap can overlap a newly started update on the
+same host. The live `is_connected` check taken immediately before the reap narrows the race to the
+residual milliseconds between that check and the write, but it cannot detect an agent that stays
+disconnected through the whole grace window and then reconnects with the original dispatch still
+in flight. Closing that gap needs reconnect reconciliation and is tracked as a deferred follow-up.
+
 ### Single (non-batch) update queueing
 
 When `trigger_update_for_host` is called and the host already has an active update:
