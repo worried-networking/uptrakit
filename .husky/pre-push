@@ -106,6 +106,9 @@ bash ci/verify_no_new_cfg_not_feature.sh
 echo "[pre-push] Running engine-owned-entities check..."
 bash ci/verify_engine_owned_entities.sh
 
+echo "[pre-push] Running raw-sql-expect-taxonomy check..."
+bash ci/verify_raw_sql_expect_taxonomy.sh
+
 echo "[pre-push] Verifying ADR numbers..."
 bash ci/verify_adr_numbers.sh
 echo "[pre-push] Checking ADR TOC staleness..."
