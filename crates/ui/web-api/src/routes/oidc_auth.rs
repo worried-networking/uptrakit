@@ -354,6 +354,19 @@ pub(crate) struct PinnedRedirect {
     pub return_origin: Option<String>,
 }
 
+/// Short, non-noisy description of a JSON value's type, for error payloads
+/// that must not echo a potentially large/complex raw value verbatim.
+fn json_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
 /// Read `oauth.canonical_host` fresh from `global_settings` on every call.
 ///
 /// Deliberately bypasses `state.oauth` (whose disabled-mode placeholder host
@@ -363,8 +376,9 @@ pub(crate) struct PinnedRedirect {
 /// setting is unset or empty — the deployment has not pinned a canonical host
 /// yet, and callers must fall back to the observed request origin without
 /// validation. Returns `Err(AuthError::InvalidCanonicalHost)` when the stored
-/// value fails `is_bare_host` (contains userinfo, a path, or otherwise is not
-/// a bare host) — this never silently falls back, since accepting a malformed
+/// value is not a JSON string, or is a string that fails `is_bare_host`
+/// (contains userinfo, a path, or otherwise is not a bare host) — corrupt
+/// configuration never silently falls back, since accepting a malformed
 /// canonical host would defeat the pinning it's meant to enforce.
 pub(crate) async fn canonical_origin(
     db: &sea_orm::DatabaseConnection,
@@ -375,7 +389,12 @@ pub(crate) async fn canonical_origin(
         return Ok(None);
     };
     let Some(host) = raw.as_str() else {
-        return Ok(None);
+        return Err(report!(crate::auth::AuthError::InvalidCanonicalHost(
+            format!(
+                "stored value is not a string (got {})",
+                json_type_name(&raw)
+            )
+        )));
     };
     let trimmed = host.trim();
     if trimmed.is_empty() {
@@ -627,7 +646,7 @@ pub async fn oidc_authorize(
                 Some(&provider),
                 None,
                 serde_json::json!({
-                    "reason_code": "redirect_pinning_failed",
+                    "reason_code": "canonical_settings_read_failed",
                 }),
             );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
@@ -2789,6 +2808,27 @@ mod pinned_redirect_tests {
             AuthError::InvalidCanonicalHost(host) if host == "x@evil.com"
         ));
     }
+
+    /// A non-string stored value (e.g. a JSON number) is the same class of
+    /// corrupt-configuration event as a malformed string and must fail
+    /// closed identically -- silently disabling pinning here would be the
+    /// opposite (fail-open) posture from the malformed-string case above.
+    #[tokio::test]
+    async fn canonical_host_non_string_value_is_rejected() {
+        let db = setup_migrated_db().await;
+        upsert_global_setting_raw(&db, "oauth.canonical_host", serde_json::json!(12345))
+            .await
+            .expect("insert canonical_host");
+
+        let err = compute_pinned_redirect(&db, "https://observed.example.com")
+            .await
+            .expect_err("non-string canonical_host must fail closed, not silently disable pinning");
+
+        assert!(matches!(
+            err.current_context(),
+            AuthError::InvalidCanonicalHost(detail) if detail.contains("number")
+        ));
+    }
 }
 
 /// Direct-call tests for `create_oidc_exchange_and_redirect`'s final
@@ -2884,8 +2924,10 @@ mod audit_tests {
     };
     use time::OffsetDateTime;
     use tower::ServiceExt;
-    use uptrakit_shared_db::entity::prelude::{Role, User, UserRole};
-    use uptrakit_shared_db::entity::{audit_log, oidc_provider, role, session, user, user_role};
+    use uptrakit_shared_db::entity::prelude::{PendingOidcFlow, Role, User, UserRole};
+    use uptrakit_shared_db::entity::{
+        audit_log, oidc_provider, pending_oidc_flow, role, session, user, user_role,
+    };
     use uptrakit_shared_types::MaskedEmail;
 
     const ACTION_AUTH_OIDC_EXCHANGE: uptrakit_audit_log::RegisteredAuditAction =
@@ -2944,6 +2986,31 @@ mod audit_tests {
         name: &str,
         slug: &str,
     ) -> uuid::Uuid {
+        insert_active_oidc_provider_with_issuer(
+            db,
+            tenant_id,
+            name,
+            slug,
+            "https://issuer.example.test",
+            false,
+        )
+        .await
+    }
+
+    /// Sibling of [`insert_active_oidc_provider`] for tests that drive a real
+    /// discovery round-trip against a `httpmock` `MockServer`: lets the
+    /// caller point `issuer_url` at the mock server's base URL and enable
+    /// `allow_private_network_issuers` (required since the mock listens on
+    /// 127.0.0.1, which the default SSRF-safe resolver blocks — see
+    /// `crate::oidc_http_client::OidcHttpClient::new`).
+    async fn insert_active_oidc_provider_with_issuer(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        name: &str,
+        slug: &str,
+        issuer_url: &str,
+        allow_private_network_issuers: bool,
+    ) -> uuid::Uuid {
         let provider_id = uuid::Uuid::now_v7();
         let now = OffsetDateTime::now_utc();
         oidc_provider::ActiveModel {
@@ -2952,7 +3019,7 @@ mod audit_tests {
             name: Set(name.to_string()),
             slug: Set(slug.to_string()),
             logo_url: Set(None),
-            issuer_url: Set("https://issuer.example.test".to_string()),
+            issuer_url: Set(issuer_url.to_string()),
             client_id: Set("client-id".to_string()),
             client_secret: Set(uptrakit_crypto::EncryptedString::new(
                 "client-secret".to_string(),
@@ -2961,7 +3028,7 @@ mod audit_tests {
             .expect("encrypt client secret")),
             scopes: Set("openid email profile".to_string()),
             auto_create_users: Set(true),
-            allow_private_network_issuers: Set(false),
+            allow_private_network_issuers: Set(allow_private_network_issuers),
             role_claim_path: Set(None),
             role_mapping: Set(oidc_provider::RoleMapping(std::collections::HashMap::new())),
             is_active: Set(true),
@@ -2973,6 +3040,36 @@ mod audit_tests {
         .await
         .expect("insert oidc provider");
         provider_id
+    }
+
+    /// Mount a minimal OIDC discovery document (plus an empty JWKS) on
+    /// `server`, matching what `build_oidc_client` (via
+    /// `CoreProviderMetadata::discover_async`) requires: `issuer` must equal
+    /// the mock server's own base URL exactly, and the JWKS referenced by
+    /// `jwks_uri` is fetched as a second round-trip.
+    fn mount_oidc_discovery(server: &httpmock::MockServer) {
+        let issuer = server.base_url();
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/.well-known/openid-configuration");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({
+                    "issuer": issuer,
+                    "authorization_endpoint": format!("{issuer}/authorize"),
+                    "token_endpoint": format!("{issuer}/token"),
+                    "jwks_uri": format!("{issuer}/jwks"),
+                    "response_types_supported": ["code"],
+                    "subject_types_supported": ["public"],
+                    "id_token_signing_alg_values_supported": ["RS256"],
+                }));
+        });
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/jwks");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(serde_json::json!({ "keys": [] }));
+        });
     }
 
     #[tokio::test]
@@ -3019,8 +3116,8 @@ mod audit_tests {
     /// End-to-end (HTTP-level) coverage for the `compute_pinned_redirect`
     /// error arm added to `oidc_authorize`: a malformed
     /// `oauth.canonical_host` value must fail closed (500 +
-    /// `redirect_pinning_failed` audit event), not silently fall back to
-    /// the observed request origin or an unpinned redirect_uri.
+    /// `canonical_settings_read_failed` audit event), not silently fall back
+    /// to the observed request origin or an unpinned redirect_uri.
     #[tokio::test]
     async fn oidc_authorize_invalid_canonical_host_writes_failed_audit_event() {
         let app = TestApp::new().await;
@@ -3062,7 +3159,131 @@ mod audit_tests {
         let details = row.details_json.expect("audit details");
         assert_eq!(
             details["reason_code"],
-            serde_json::json!("redirect_pinning_failed")
+            serde_json::json!("canonical_settings_read_failed")
+        );
+    }
+
+    /// The security-critical join at the end of `oidc_authorize`: the
+    /// `redirect_uri` and `return_origin` handed to `oidc_flow_store.insert`
+    /// must be exactly what `compute_pinned_redirect` computed, not the raw
+    /// observed base URL. Drives a real authorize request against a mocked
+    /// OIDC discovery document and reads the persisted `pending_oidc_flows`
+    /// row back to verify it.
+    #[tokio::test]
+    async fn authorize_pins_redirect_and_snapshots_return_origin() {
+        let app = TestApp::new().await;
+        let client = app.client();
+
+        let server = httpmock::MockServer::start_async().await;
+        mount_oidc_discovery(&server);
+
+        let provider_id = insert_active_oidc_provider_with_issuer(
+            &app.db,
+            app.state.default_tenant_id,
+            "OIDC Redirect Pinning",
+            "oidc-redirect-pinning",
+            &server.base_url(),
+            true,
+        )
+        .await;
+
+        // Canonical host equals the request's own observed host, so
+        // `return_origin` should be `Some("https://localhost")`.
+        uptrakit_shared_db::raw_settings::upsert_global_setting_raw(
+            &app.db,
+            "oauth.canonical_host",
+            serde_json::json!("localhost"),
+        )
+        .await
+        .expect("insert canonical_host");
+
+        let response = client
+            .get(&format!("/api/v1/auth/oidc/{provider_id}/authorize"))
+            .header("Host", "localhost")
+            .send()
+            .await;
+        assert_eq!(
+            response.status(),
+            http::StatusCode::OK,
+            "authorize should succeed against the mocked discovery document"
+        );
+
+        let flow = PendingOidcFlow::find()
+            .filter(pending_oidc_flow::Column::ProviderId.eq(provider_id))
+            .one(&app.db)
+            .await
+            .expect("query pending_oidc_flows")
+            .expect("expected a pending_oidc_flows row for this provider");
+
+        assert_eq!(
+            flow.redirect_uri, "https://localhost/api/v1/auth/oidc/callback",
+            "redirect_uri must be the canonical-host-pinned callback URL"
+        );
+        assert_eq!(
+            flow.return_origin, "https://localhost",
+            "return_origin must be the canonical origin (equal to the observed origin here)"
+        );
+    }
+
+    /// Companion to `authorize_pins_redirect_and_snapshots_return_origin`:
+    /// when the observed request origin is neither the canonical origin nor
+    /// listed in `oauth.accepted_audience_hosts`, the persisted
+    /// `return_origin` must fall back to the CANONICAL origin, never the
+    /// observed one -- that fallback is the actual security control this
+    /// task exists to cover.
+    #[tokio::test]
+    async fn authorize_unlisted_origin_falls_back_to_canonical() {
+        let app = TestApp::new().await;
+        let client = app.client();
+
+        let server = httpmock::MockServer::start_async().await;
+        mount_oidc_discovery(&server);
+
+        let provider_id = insert_active_oidc_provider_with_issuer(
+            &app.db,
+            app.state.default_tenant_id,
+            "OIDC Redirect Pinning Unlisted",
+            "oidc-redirect-pinning-unlisted",
+            &server.base_url(),
+            true,
+        )
+        .await;
+
+        // Canonical host differs from the observed request host ("localhost"
+        // below), and "localhost" is not in the accepted-audience list.
+        uptrakit_shared_db::raw_settings::upsert_global_setting_raw(
+            &app.db,
+            "oauth.canonical_host",
+            serde_json::json!("canonical.example.test"),
+        )
+        .await
+        .expect("insert canonical_host");
+
+        let response = client
+            .get(&format!("/api/v1/auth/oidc/{provider_id}/authorize"))
+            .header("Host", "localhost")
+            .send()
+            .await;
+        assert_eq!(
+            response.status(),
+            http::StatusCode::OK,
+            "authorize should succeed against the mocked discovery document"
+        );
+
+        let flow = PendingOidcFlow::find()
+            .filter(pending_oidc_flow::Column::ProviderId.eq(provider_id))
+            .one(&app.db)
+            .await
+            .expect("query pending_oidc_flows")
+            .expect("expected a pending_oidc_flows row for this provider");
+
+        assert_eq!(
+            flow.redirect_uri, "https://canonical.example.test/api/v1/auth/oidc/callback",
+            "redirect_uri always pins to canonical"
+        );
+        assert_eq!(
+            flow.return_origin, "https://canonical.example.test",
+            "return_origin must fall back to the canonical origin, not the observed one"
         );
     }
 

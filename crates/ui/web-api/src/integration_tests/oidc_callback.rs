@@ -143,12 +143,10 @@ async fn oidc_callback_provider_gone_redirects_to_oidc_provider_gone() {
     );
 
     // The flow exists but the provider does not — expect oidc_provider_gone.
-    // The Host header is required for `base_url_from_headers` to succeed.
     let resp = client
         .get(&format!(
             "/api/v1/auth/oidc/callback?code=any_code&state={csrf_state}"
         ))
-        .header("Host", "localhost")
         .send()
         .await;
 
@@ -165,7 +163,6 @@ async fn oidc_callback_provider_gone_redirects_to_oidc_provider_gone() {
         .get(&format!(
             "/api/v1/auth/oidc/callback?code=any_code&state={csrf_state}"
         ))
-        .header("Host", "localhost")
         .send()
         .await;
 
