@@ -876,19 +876,25 @@ Raw SQL is accepted for two distinct reasons, and the inline comment must name w
 applies: (1) the construct has no sea_query equivalent at all, or (2) the raw SQL already
 ships inside a merged migration's `up()`/`down()` body, kept as-is because rewriting risks
 live-vs-fresh-install divergence, even when the same SQL is builder-expressible. The table
-below enumerates constructs with genuinely no sea_query equivalent (reason 1). `strftime`,
+below enumerates constructs with genuinely no sea_query equivalent (reason 1), and it tracks the
+real call sites one-for-one — a construct with no call site does not belong in it. `strftime`,
 `typeof()`, and `CASE` do not belong in this table — they are builder-expressible via
 `Func::cust` and `CaseStatement` respectively, so raw SQL using them is accepted only under
 reason 2 (a frozen merged migration), never as a claimed sea_query gap. The same holds for
 `LIKE` (`ExprTrait::like`) and for a `CASE` inside `ON CONFLICT DO UPDATE` — `OnConflict::values`
 takes `(column, Expr)` pairs and `CaseStatement` converts into `Expr`, so that composition builds.
+**Read** pragmas likewise do not belong here: SQLite exposes them as the read-only `pragma_*`
+table-valued functions, so `Query::select().from_function(Func::cust(Alias::new("pragma_table_info")).arg(Expr::val(table)), …)`
+sent via `query_all` expresses them with the pragma argument bound as a parameter. Only the
+setter form below has no table-valued-function counterpart.
 
-| Construct                               | Reason sea_query cannot express it                                                                                                                                                                                                       |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CREATE TABLE new AS SELECT * FROM old` | SQLite-specific shorthand; no builder equivalent                                                                                                                                                                                         |
-| bare `PRAGMA foreign_keys`              | SQLite-specific pragma statement; no sea_query equivalent (the table-valued-function form of a pragma, e.g. `pragma_table_info(...)`, is expressible via `SelectStatement::from_function` — only the bare-statement form qualifies here) |
-| bare `PRAGMA foreign_key_check`         | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment                                                  |
-| bare `PRAGMA database_list`             | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment                                                  |
+| Construct                               | Reason sea_query cannot express it                                                                                                                                                                                                                            |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PRAGMA <name> = <value>` (setter form) | SQLite pragma **writes** have no table-valued-function counterpart (`pragma_*` functions are read-only); used to suspend FK enforcement on a dedicated connection (`crates/shared/db/src/migration/mod.rs`, `crates/ui/web-api-auth/src/auth/device_flow.rs`) |
+| `ALTER TABLE ADD CONSTRAINT ... CHECK`  | sea_query's check branch emits no `ADD` prefix, producing invalid `ALTER TABLE` SQL (`crates/shared/db/src/migration/m20260414_000001_update_execution_ownership.rs`)                                                                                         |
+| `ALTER TABLE DROP CONSTRAINT IF EXISTS` | `drop_constraint` exists but has no `IF EXISTS` variant (`crates/shared/db/src/migration/m20260414_000001_update_execution_ownership.rs`)                                                                                                                     |
+| `ROLLBACK`                              | transaction-control verb, not a statement sea_query builds (`crates/shared/db/src/migration/mod.rs`)                                                                                                                                                          |
+| `CREATE DATABASE`                       | cluster-level DDL with no sea_query builder (`crates/core/integration-tests/tests/database_helpers/db_providers.rs`)                                                                                                                                          |
 
 **Frozen merged migration — inline comment requirement:** `typeof()` is builder-expressible
 via `Func::cust("typeof")`, so it is never accepted as a sea_query gap; raw SQL using it is

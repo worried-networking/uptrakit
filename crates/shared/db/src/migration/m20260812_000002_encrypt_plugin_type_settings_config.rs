@@ -66,7 +66,7 @@ impl MigrationTrait for Migration {
         }
 
         if !helpers::is_sqlite(manager) {
-            // Raw SQL exception (spec 2026-08-09 §4; comment protocol per docs/development/database-migrations.md): Postgres has no assignment cast from json to text, so the type change needs an explicit USING cast.
+            // Raw SQL exception (spec 2026-08-09 §4; comment protocol per docs/development/database-migrations.md): Postgres has no assignment cast from text to json, so the type change needs an explicit USING cast.
             #[expect(
                 clippy::disallowed_methods,
                 reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"

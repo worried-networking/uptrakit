@@ -353,30 +353,27 @@ impl sea_orm_migration::MigratorTraitSelf for CombinedMigrator {
 /// Detection deliberately avoids `SqliteConnectOptions::get_filename()`:
 /// sqlx rewrites `sqlite::memory:` URLs to an internal
 /// `file:sqlx-in-memory-{n}` filename, which would misroute every in-memory
-/// caller onto the file-backed path. `PRAGMA database_list` reports an
-/// empty `file` column for in-memory databases and an absolute path for
+/// caller onto the file-backed path. `database_list` reports an empty
+/// `file` column for in-memory databases and an absolute path for
 /// file-backed ones (documented SQLite behavior, independent of sqlx
 /// internals).
 #[cfg(feature = "db-sqlite")]
 async fn sqlite_main_db_file(db: &DatabaseConnection) -> Result<Option<String>, sea_orm::DbErr> {
-    use sea_orm::TryGetable;
-    // `PRAGMA database_list` is a SQLite-specific statement with no
-    // sea_query equivalent.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "builder limitation: PRAGMA database_list has no sea_query equivalent"
-    )]
-    let rows = db
-        .query_all_raw(sea_orm::Statement::from_string(
-            sea_orm::DatabaseBackend::Sqlite,
-            "PRAGMA database_list",
-        ))
-        .await?;
+    // SQLite exposes the read-only `database_list` pragma as a table-valued
+    // function, so it selects like any other relation.
+    let stmt = Query::select()
+        .column(Alias::new("name"))
+        .column(Alias::new("file"))
+        .from_function(
+            Func::cust(Alias::new("pragma_database_list")),
+            Alias::new("database_list"),
+        )
+        .to_owned();
+    let rows = db.query_all(&stmt).await?;
     for row in rows {
-        // Columns: seq(0), name(1), file(2).
-        let name = String::try_get_by_index(&row, 1)?;
+        let name = row.try_get::<String>("", "name")?;
         if name == "main" {
-            let file = String::try_get_by_index(&row, 2)?;
+            let file = row.try_get::<String>("", "file")?;
             return Ok((!file.is_empty()).then_some(file));
         }
     }
@@ -392,25 +389,24 @@ async fn sqlite_main_db_file(db: &DatabaseConnection) -> Result<Option<String>, 
 /// with FK OFF.
 #[cfg(feature = "db-sqlite")]
 async fn sqlite_foreign_key_check(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr> {
-    use sea_orm::TryGetable;
-    // `PRAGMA foreign_key_check` is a SQLite-specific statement with no
-    // sea_query equivalent.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "builder limitation: PRAGMA foreign_key_check has no sea_query equivalent"
-    )]
-    let rows = db
-        .query_all_raw(sea_orm::Statement::from_string(
-            sea_orm::DatabaseBackend::Sqlite,
-            "PRAGMA foreign_key_check",
-        ))
-        .await?;
+    // SQLite exposes the read-only `foreign_key_check` pragma as a
+    // table-valued function; an empty result set means "no violations".
+    // Its first column is literally named `table`, a reserved word, so the
+    // `Alias` quoting is load-bearing.
+    let stmt = Query::select()
+        .column(Alias::new("table"))
+        .from_function(
+            Func::cust(Alias::new("pragma_foreign_key_check")),
+            Alias::new("foreign_key_check"),
+        )
+        .to_owned();
+    let rows = db.query_all(&stmt).await?;
     if rows.is_empty() {
         return Ok(());
     }
     let mut tables = rows
         .iter()
-        .map(|row| String::try_get_by_index(row, 0))
+        .map(|row| row.try_get::<String>("", "table"))
         .collect::<Result<Vec<_>, _>>()?;
     tables.sort();
     tables.dedup();

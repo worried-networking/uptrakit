@@ -107,9 +107,12 @@ declared-vs-entity type as an error on SQLite; the comment in each migration exi
 surprise from being rediscovered as a bug.
 
 On PostgreSQL, where `json`→`text` genuinely changes on-disk representation, `up()` uses the pre-approved
-raw-SQL exception (`ALTER TABLE … ALTER COLUMN config TYPE text USING config::text`) because `sea_query`'s
-alter-column builder cannot express a `USING` clause and Postgres has no implicit assignment cast from
-`json` to `text`. The symmetric `down()` cast (`… TYPE json USING config::json`) is a bare cast with no
+raw-SQL exception (`ALTER TABLE … ALTER COLUMN config TYPE text USING config::text`). The `USING` clause
+itself is builder-expressible (`ColumnDef::using()`); the exception rests on the frozen-merged-migration
+rationale instead — the statement ships inside an already-merged `up()` body, and rewriting a shipped
+migration body risks live-vs-fresh-install divergence. The cast is not optional either way: Postgres has no
+implicit assignment cast from `json` to `text`. The symmetric `down()` cast (`… TYPE json USING
+config::json`, likewise with no implicit `text`→`json` assignment cast) is a bare cast with no
 `DROP DEFAULT`/`SET DEFAULT` dance — that was tested directly against real Postgres. For
 `plugin_type_settings.config` and `instance_plugin_setting.config`, both created with `.json().default("{}")`,
 the `DEFAULT '{}'` survives the round trip unmodified; no extra step is required or present in the migration.

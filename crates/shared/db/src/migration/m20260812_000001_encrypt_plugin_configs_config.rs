@@ -82,7 +82,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         if !helpers::is_sqlite(manager) {
-            // Raw SQL exception (spec 2026-08-09 §4; comment protocol per docs/development/database-migrations.md): Postgres has no assignment cast from json to text, so the type change needs an explicit USING cast.
+            // Raw SQL exception (spec 2026-08-09 §4; comment protocol per docs/development/database-migrations.md): Postgres has no assignment cast from text to json, so the type change needs an explicit USING cast.
             #[expect(
                 clippy::disallowed_methods,
                 reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
@@ -178,23 +178,19 @@ mod tests {
     }
 
     async fn table_info(db: &DatabaseConnection, table: &str) -> Vec<String> {
-        // `PRAGMA table_info(...)` is SQLite-specific with no sea_query
-        // equivalent (see docs/development/database-migrations.md's
-        // execute_unprepared/raw-statement exception table); query_all_raw
-        // with a raw Statement is the approved exception for this pattern.
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "builder limitation: PRAGMA table_info() has no sea_query equivalent"
-        )]
-        db.query_all_raw(sea_orm::Statement::from_string(
-            db.get_database_backend(),
-            format!("PRAGMA table_info({table})"),
-        ))
-        .await
-        .expect("pragma table_info")
-        .into_iter()
-        .map(|row| row.try_get::<String>("", "name").expect("column name"))
-        .collect()
+        let stmt = Query::select()
+            .column(Alias::new("name"))
+            .from_function(
+                Func::cust(Alias::new("pragma_table_info")).arg(Expr::val(table)),
+                Alias::new("table_info"),
+            )
+            .to_owned();
+        db.query_all(&stmt)
+            .await
+            .expect("pragma table_info")
+            .into_iter()
+            .map(|row| row.try_get::<String>("", "name").expect("column name"))
+            .collect()
     }
 
     #[tokio::test]

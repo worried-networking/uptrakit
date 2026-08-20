@@ -135,17 +135,20 @@ A site may opt out only with
 `#[expect(clippy::disallowed_methods, reason = "<category>: <concrete limitation>")]`
 (`clippy::disallowed_macros` for `raw_sql!`), where `<category>` is exactly one of:
 
-1. **builder limitation** — SQL genuinely inexpressible in sea_query, wherever it occurs: bare
-   `PRAGMA <name>` statements (`table_info`, `foreign_keys`, `database_list`,
-   `foreign_key_check` — the `pragma_table_info(...)` table-valued-function form is expressible
-   via `SelectStatement::from_function`, so only the bare-statement form qualifies),
-   `ALTER TABLE ADD CONSTRAINT ... CHECK` (the check branch emits no `ADD` prefix, producing
-   invalid `ALTER TABLE` SQL), `ALTER TABLE DROP CONSTRAINT IF EXISTS` (`drop_constraint` exists
-   but has no `IF EXISTS` variant), `ROLLBACK`, and `CREATE DATABASE`. This list is short by
-   construction: a partial index's `WHERE` (`impl ConditionalStatement for IndexCreateStatement`),
-   `ALTER COLUMN TYPE ... USING` (`ColumnDef::using()`), `ADD UNIQUE (col)`
-   (`ColumnDef::unique_key()`), functional indexes, window functions, `INSERT ... SELECT`, and
-   SQLite scalar functions via `Func::cust` are all expressible.
+1. **builder limitation** — SQL genuinely inexpressible in sea_query, wherever it occurs: the
+   pragma **setter** form (`PRAGMA foreign_keys = OFF`), `ALTER TABLE ADD CONSTRAINT ... CHECK`
+   (the check branch emits no `ADD` prefix, producing invalid `ALTER TABLE` SQL),
+   `ALTER TABLE DROP CONSTRAINT IF EXISTS` (`drop_constraint` exists but has no `IF EXISTS`
+   variant), `ROLLBACK`, and `CREATE DATABASE`. This list is short by construction. **Read**
+   pragmas do not qualify: SQLite exposes them as the read-only `pragma_*` table-valued
+   functions (`pragma_database_list`, `pragma_foreign_key_check`, `pragma_table_info(?)`), and
+   `SelectStatement::from_function` + `Func::cust` selects over one, binding the pragma argument
+   as a parameter rather than interpolating it — every read pragma in the tree uses that builder
+   form. Only the setter form qualifies, precisely because the `pragma_*` functions are
+   read-only and have no setter counterpart. Also expressible: a partial index's `WHERE`
+   (`impl ConditionalStatement for IndexCreateStatement`), `ALTER COLUMN TYPE ... USING`
+   (`ColumnDef::using()`), `ADD UNIQUE (col)` (`ColumnDef::unique_key()`), functional indexes,
+   window functions, `INSERT ... SELECT`, and SQLite scalar functions via `Func::cust`.
    Detail: [database-migrations.md](database-migrations.md#no-raw-sql--use-sea_query-builders-for-dml).
 2. **connectivity probe** — only where no builder query can be issued at all (the builder
    `SELECT 1` works over any `ConnectionTrait`, so this category is currently empty — prefer

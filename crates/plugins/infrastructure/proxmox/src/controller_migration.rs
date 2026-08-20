@@ -404,7 +404,7 @@ impl MigrationName for AddProxmoxHmLowerNameIndex {
 #[async_trait::async_trait]
 impl MigrationTrait for AddProxmoxHmLowerNameIndex {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // SQLite supports LOWER() functional indexes natively.
+        // SQLite and PostgreSQL support LOWER() functional indexes natively.
         #[expect(
             clippy::disallowed_methods,
             reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
@@ -2305,19 +2305,26 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
+    use sea_orm::{ConnectionTrait, Database};
     use sea_orm_migration::{MigrationTrait, SchemaManager};
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "builder limitation: PRAGMA table_info() has no sea_query equivalent"
-    )]
+    /// Select `columns` from SQLite's read-only `table_info` pragma
+    /// table-valued function, binding the table name as a parameter.
+    fn table_info_select(table: &str, columns: &[&str]) -> SelectStatement {
+        let mut stmt = Query::select();
+        for column in columns {
+            stmt.column(Alias::new(*column));
+        }
+        stmt.from_function(
+            Func::cust(Alias::new("pragma_table_info")).arg(Expr::val(table)),
+            Alias::new("table_info"),
+        )
+        .to_owned()
+    }
+
     async fn column_names(db: &sea_orm::DatabaseConnection, table: &str) -> Vec<String> {
         let rows = db
-            .query_all_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                format!("PRAGMA table_info({table})"),
-            ))
+            .query_all(&table_info_select(table, &["name"]))
             .await
             .unwrap();
         rows.into_iter()
@@ -2325,21 +2332,12 @@ mod tests {
             .collect()
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "builder limitation: PRAGMA table_info() has no sea_query equivalent"
-    )]
     async fn column_decl_types(
         db: &sea_orm::DatabaseConnection,
         table: &str,
     ) -> std::collections::HashMap<String, String> {
-        // Raw statement: `PRAGMA table_info` is a SQLite introspection command
-        // with no sea_query builder equivalent (approved raw-SQL exception).
         let rows = db
-            .query_all_raw(Statement::from_string(
-                DbBackend::Sqlite,
-                format!("PRAGMA table_info({table})"),
-            ))
+            .query_all(&table_info_select(table, &["name", "type"]))
             .await
             .unwrap();
         rows.into_iter()
