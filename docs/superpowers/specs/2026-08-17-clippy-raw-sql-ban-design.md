@@ -133,6 +133,17 @@ Granularity:
 
 ### 3. Exception taxonomy (the "when to use it" policy)
 
+> **Correction (2026-08-20, from implementation).** Three claims below were falsified while
+> implementing this spec, each checked against the pinned sea-query 1.0.2 source and a live SQLite:
+> the category-1 examples (read `PRAGMA` shapes, window functions, functional indexes, `typeof()`,
+> `ALTER COLUMN … TYPE … USING`) are all builder-expressible and do **not** qualify; the category-2
+> `ping()` guidance is inverted (`DatabaseConnection::ping()` executes no SQL on SQLite, so health
+> checks use a builder `SELECT 1` instead); and the `pragma_table_info` probe in § 5 is expressible
+> via the read-only `pragma_*` table-valued functions, so it is frozen under category 4, not
+> inexpressible under category 1. The shipped taxonomy —
+> [coding-standards.md § Raw-SQL ban](../../development/coding-standards.md) — is canonical; the text
+> below is preserved as the design-time record. Do not cite it for what sea_query can express.
+
 A site may carry the `#[expect]` only when it falls into one of:
 
 1. **Builder limitation** — SQL genuinely inexpressible in sea_query, wherever it occurs (not
@@ -201,8 +212,8 @@ Rewrites (raw SQL removed, no `#[expect]` needed):
 `proxmox/src/agent/migration.rs` carries four raw-SQL sites (two `INSERT OR IGNORE … SELECT`
 statements, a `sqlite_master` table-existence probe, a `pragma_table_info('ssh_hosts')` column probe).
 All four are **annotated, not rewritten**, under the applied-migration freeze (category per site: the
-`pragma_table_info` probe and the `pending_matches` insert are genuinely inexpressible — category 1;
-the two builder-expressible sites are category 4): these migration bodies
+all four are category 4 — see the § 3 correction: the `pragma_table_info` probe was assumed
+inexpressible at design time and is not): these migration bodies
 have already run on the live deployment, so a rewrite changes what fresh installs execute relative to
 what the live DB already absorbed (e.g. `ON CONFLICT DO NOTHING` is narrower than SQLite's
 `INSERT OR IGNORE` — it does not suppress NOT NULL/CHECK violations), and the divergence is

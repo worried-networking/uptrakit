@@ -29,6 +29,14 @@
 #       (deleting/rewriting a frozen migration site) is always fine and needs
 #       no action here; incrementing means a new raw-SQL migration landed and
 #       requires explicit owner sign-off (update the pin in the same change).
+#   (e) no `#[expect(clippy::disallowed_methods|disallowed_macros …)]`
+#       attaches to an `up()`/`down()` migration method. Inside an
+#       `#[async_trait]` method the body moves into a generated `Box::pin`,
+#       so `#[expect]` fulfillment is unverified — and because one lint name
+#       covers the begin*/transaction* bans too, an `up()`-level expect would
+#       silently swallow a stray `.begin()` as well. Checks (a)-(d) all pass
+#       on such an attribute, so without this check the granularity rule is
+#       documentation only.
 #
 # See docs/development/coding-standards.md § Raw-SQL ban for the full
 # taxonomy and rationale.
@@ -77,6 +85,12 @@ DB_TX_PREFIXES = (
 # owner sign-off before the pin is raised.
 PINNED_FROZEN_MERGED_MIGRATION_COUNT = 87
 
+# Migration trait methods that may never carry a fn-level #[expect]: their
+# bodies move into a generated Box::pin under #[async_trait]. Matched by name
+# so a plain (non-async_trait) up()/down() is rejected too — the granularity
+# rule does not depend on which desugaring is in play.
+UNATTACHABLE_FN_NAMES = ("up", "down")
+
 SCAN_DIRS = ("crates", "xtask")
 DOC_POINTER = "docs/development/coding-standards.md § Raw-SQL ban"
 
@@ -97,6 +111,51 @@ def is_migration_path(path):
         return True
     base = os.path.basename(path)
     return base == "migration.rs" or base.endswith("_migration.rs")
+
+
+def attached_item_head(text, pos):
+    """Return the item head an attribute at `pos` attaches to.
+
+    Skips whitespace, line/block comments, and any further stacked attributes
+    (`#[...]`, bracket-balanced) so `#[expect(...)] #[rustfmt::skip] async fn
+    up()` still resolves to the `fn` line. Returns "" at end of file.
+    """
+    n = len(text)
+    i = pos
+    while i < n:
+        c = text[i]
+        if c.isspace():
+            i += 1
+        elif text.startswith("//", i):
+            nl = text.find("\n", i)
+            i = n if nl == -1 else nl + 1
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+        elif c == "#":
+            # stacked attribute: skip to its bracket-balanced end
+            j = text.find("[", i)
+            if j == -1:
+                return text[i : i + 120]
+            depth = 0
+            while j < n:
+                if text[j] == "[":
+                    depth += 1
+                elif text[j] == "]":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            i = j + 1
+        else:
+            break
+    return text[i : i + 120]
+
+
+ITEM_FN_RE = re.compile(
+    r"^(?:pub(?:\s*\([^)]*\))?\s+)?(?:default\s+)?(?:const\s+)?"
+    r"(?:async\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]*\"\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)"
+)
 
 
 def scan_expect_attrs(text):
@@ -153,12 +212,17 @@ def scan_expect_attrs(text):
             reason_line = text[:reason_abs].count("\n") + 1
 
         attr_line = text[: m.start()].count("\n") + 1
+        # `i` sits just past the attribute's closing ')'; step over the ']'.
+        after = text.find("]", i)
+        head = attached_item_head(text, after + 1 if after != -1 else i)
+        fn_match = ITEM_FN_RE.match(head)
         results.append(
             {
                 "inner": inner,
                 "attr_line": attr_line,
                 "reason": reason,
                 "reason_line": reason_line,
+                "attached_fn": fn_match.group(1) if fn_match else None,
             }
         )
     return results
@@ -200,6 +264,17 @@ def main():
                 violations.append(
                     f'{path}:{line}: reason "{reason}" does not start with '
                     f"an allowed prefix ({DOC_POINTER})"
+                )
+
+            if attr["attached_fn"] in UNATTACHABLE_FN_NAMES:
+                violations.append(
+                    f"{path}:{attr['attr_line']}: "
+                    f"#[expect(clippy::disallowed…)] attaches to "
+                    f"{attr['attached_fn']}() — a migration method body moves "
+                    f"into a generated Box::pin under #[async_trait], leaving "
+                    f"the expect unverified and masking every other "
+                    f"disallowed-methods ban in the body. Move it to the "
+                    f"individual statement ({DOC_POINTER})"
                 )
 
             if reason.startswith("frozen merged migration"):

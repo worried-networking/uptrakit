@@ -178,7 +178,8 @@ body moves into a generated `Box::pin` and `#[expect]` fulfillment is unverified
 (`disallowed_methods`
 also carries the `begin*` bans — a fn-level expect would mask a stray `.begin()`, and it
 likewise swallows any future `disallowed-methods` entry: whoever adds a new ban entry must
-re-audit the fn-level-expected migration fns); never file-level. There is no test exemption:
+re-audit the fn-level-expected migration fns); never file-level. The taxonomy gate rejects both
+banned placements — an `up()`/`down()`-level attachment and the file-level `#![expect]` form. There is no test exemption:
 `disallowed-methods` has no `allow-*-in-tests` flag, so test code follows the same taxonomy.
 
 Each ban entry has a canary in `crates/shared/db-tx`'s `#[cfg(test)]` canary module: if an
