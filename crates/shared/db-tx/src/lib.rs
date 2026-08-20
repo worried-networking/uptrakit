@@ -43,18 +43,20 @@ where
 #[cfg(test)]
 mod tests {
     use sea_orm::{
-        DatabaseConnection, DatabaseExecutor, DatabaseTransaction, DbErr, TransactionTrait,
+        ConnectionTrait, DatabaseConnection, DatabaseExecutor, DatabaseTransaction, DbErr,
+        TransactionTrait,
     };
 
-    /// Canary: proves the clippy `disallowed-methods` bans still resolve.
+    /// Canary: proves the clippy `disallowed-methods`/`disallowed-macros` bans
+    /// still resolve.
     ///
     /// If a sea-orm upgrade renames or relocates a banned method, the
     /// unresolvable `clippy.toml` path degrades to a config warning that
     /// `-D warnings` does not deny — but these expectations then go
     /// unfulfilled and `unfulfilled_lint_expectations = "deny"` fails the
-    /// build instead. Every one of the eleven banned paths gets its own call
-    /// site below, each under its own `#[expect]`, so a rename anywhere in
-    /// the list is caught — not just in the three most commonly used
+    /// build instead. Every one of the nineteen banned paths gets its own
+    /// call site below, each under its own `#[expect]`, so a rename anywhere
+    /// in the list is caught — not just in the three most commonly used
     /// methods.
     // A closure that ignores its `&DatabaseTransaction` argument gets a
     // rustc region-inference failure ("implementation of AsyncFnOnce is not
@@ -154,6 +156,57 @@ mod tests {
         let _r11 = exec
             .transaction_with_config_async::<_, (), DbErr>(canary_txn_noop, None, None)
             .await;
+
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the Statement::from_string ban still resolves"
+        )]
+        let _r12 = sea_orm::Statement::from_string(sea_orm::DbBackend::Sqlite, "SELECT 1");
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the Statement::from_sql_and_values ban still resolves"
+        )]
+        let _r13 = sea_orm::Statement::from_sql_and_values(
+            sea_orm::DbBackend::Sqlite,
+            "SELECT ?",
+            [1.into()],
+        );
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the ConnectionTrait::execute_unprepared ban still resolves"
+        )]
+        let _r14 = db.execute_unprepared("SELECT 1").await;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the Expr::cust ban still resolves"
+        )]
+        let _r15 = sea_orm::sea_query::Expr::cust("1");
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the Expr::cust_with_values ban still resolves"
+        )]
+        let _r16 = sea_orm::sea_query::Expr::cust_with_values("?", [sea_orm::Value::from(1)]);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the Expr::cust_with_expr ban still resolves"
+        )]
+        let _r17 = sea_orm::sea_query::Expr::cust_with_expr("$1", sea_orm::sea_query::Expr::val(1));
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the Expr::cust_with_exprs ban still resolves"
+        )]
+        let _r18 = sea_orm::sea_query::Expr::cust_with_exprs(
+            "$1 $2",
+            [
+                sea_orm::sea_query::Expr::val(1),
+                sea_orm::sea_query::Expr::val(2),
+            ],
+        );
+        #[expect(
+            clippy::disallowed_macros,
+            reason = "canary: proves the raw_sql! ban still resolves"
+        )]
+        let _r19 = sea_orm::raw_sql!(Sqlite, "SELECT 1");
     }
 }
 
