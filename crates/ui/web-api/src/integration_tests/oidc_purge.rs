@@ -98,9 +98,12 @@ async fn provider_update_purges_its_pending_flows() {
     let token = fixtures::register_and_get_token(&client).await;
 
     let provider_id = create_provider(&app, &token, "update-purge-target").await;
+    let other_id = create_provider(&app, &token, "update-purge-bystander").await;
     seed_flow(&app, "update-purge-state-1", provider_id).await;
     seed_flow(&app, "update-purge-state-2", provider_id).await;
+    seed_flow(&app, "update-purge-bystander-state", other_id).await;
     assert_eq!(flow_count_for_provider(&app, provider_id).await, 2);
+    assert_eq!(flow_count_for_provider(&app, other_id).await, 1);
 
     let (status, _body): (http::StatusCode, serde_json::Value) = client
         .put_json(
@@ -116,6 +119,11 @@ async fn provider_update_purges_its_pending_flows() {
         flow_count_for_provider(&app, provider_id).await,
         0,
         "update_provider must purge every pending flow tied to the provider"
+    );
+    assert_eq!(
+        flow_count_for_provider(&app, other_id).await,
+        1,
+        "update_provider must not purge pending flows tied to a different provider"
     );
 }
 
