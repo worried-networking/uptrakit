@@ -160,13 +160,10 @@ async fn copy_columns(
 }
 
 async fn create_partial_name_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
-    // SQLite does not support partial indexes via sea_query's `.and_where()`,
-    // so we use `execute_unprepared` with raw SQL. This is the same pattern
-    // used by other migrations that need partial unique indexes
-    // (m20260309_000003_host_tags.rs). The SQL is identical on both backends.
+    // The partial-index SQL is identical on both backends.
     #[expect(
         clippy::disallowed_methods,
-        reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+        reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
     )]
     manager
         .get_connection()
@@ -177,7 +174,7 @@ async fn create_partial_name_indexes(manager: &SchemaManager<'_>) -> Result<(), 
         .await?;
     #[expect(
         clippy::disallowed_methods,
-        reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+        reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
     )]
     manager
         .get_connection()
@@ -245,11 +242,12 @@ impl MigrationTrait for Migration {
                         .to_owned(),
                 )
                 .await?;
-            // Raw SQL: sea_query's Table::alter() has no builder for adding a
-            // table-level UNIQUE constraint (only FK builders exist).
+            // `ColumnDef::unique_key()` emits the unnamed `ADD UNIQUE (col)`
+            // form, which Postgres names `roles_name_key` — the same
+            // constraint this statement creates explicitly.
             #[expect(
                 clippy::disallowed_methods,
-                reason = "builder limitation: ALTER TABLE ADD CONSTRAINT UNIQUE has no sea_query builder (only FK builders exist)"
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
             )]
             manager
                 .get_connection()

@@ -404,8 +404,7 @@ impl MigrationName for AddProxmoxHmLowerNameIndex {
 #[async_trait::async_trait]
 impl MigrationTrait for AddProxmoxHmLowerNameIndex {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // sea_query Index::create() does not support expression columns
-        // (functional indexes); raw SQL required.
+        // SQLite supports LOWER() functional indexes natively.
         #[expect(
             clippy::disallowed_methods,
             reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
@@ -2173,20 +2172,18 @@ impl MigrationTrait for RepairProxmoxScalingUuidStorage {
 /// indexes into `uuid_cols` and names the table's UNIQUE tuple.
 /// Invariant: `uuid_cols[0]` MUST be `"id"` — the detection predicate,
 /// the UPDATE/DELETE key, and `old_texts[0]` all assume it.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "builder limitation: typeof() has no typed sea_query expression"
-)]
 async fn repair_scaling_table(
     txn: &sea_orm::DatabaseTransaction,
     table: &str,
     uuid_cols: &[&str],
     key_col_indices: [usize; 2],
 ) -> Result<(), DbErr> {
-    // `typeof()` is a SQLite-specific function with no sea_query equivalent;
-    // query_all_raw with a raw Statement is the approved exception for this
-    // pattern. See docs/development/database-migrations.md.
+    // `typeof()` is a SQLite-specific function; this repair is SQLite-only.
     let cols = uuid_cols.join(", ");
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
+    )]
     let broken_rows = txn
         .query_all_raw(sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,

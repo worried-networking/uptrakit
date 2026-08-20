@@ -928,7 +928,7 @@ mod tests {
     /// 4. Assert `typeof(id) = 'blob'` for the injected permission.
     #[tokio::test]
     async fn repair_migration_fixes_text_uuid_storage() {
-        use sea_orm::{ConnectionTrait as _, Statement, TryGetable as _};
+        use sea_orm::{ConnectionTrait as _, TryGetable as _};
 
         let opt = ConnectOptions::new("sqlite::memory:");
         let db = Database::connect(opt).await.unwrap();
@@ -938,8 +938,9 @@ mod tests {
             .await
             .expect("first 18 migrations should succeed");
 
-        // Resolve the owner role via raw SQL — the entity API expects the
-        // `is_built_in` column that does not exist yet at migration step 18.
+        // Resolve the owner role with a column-list select — the entity API
+        // expects the `is_built_in` column that does not exist yet at
+        // migration step 18.
         let owner_role_id: uuid::Uuid = {
             let stmt = Query::select()
                 .from(Alias::new("roles"))
@@ -999,18 +1000,13 @@ mod tests {
         .expect("injecting TEXT-uuid role_permission must succeed");
 
         // Confirm the injection was TEXT before the repair.
-        //
-        // `typeof()` is a SQLite-specific function with no sea_query equivalent;
-        // query_one_raw with a Statement is the approved exception for this.
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "builder limitation: typeof() has no typed sea_query expression"
-        )]
+        let typeof_stmt = Query::select()
+            .expr(Func::cust(Alias::new("typeof")).arg(Expr::col(Alias::new("id"))))
+            .from(Alias::new("permissions"))
+            .and_where(Expr::col(Alias::new("name")).eq("test_broken_perm"))
+            .to_owned();
         let typeof_before = db
-            .query_one_raw(Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT typeof(id) FROM permissions WHERE name = 'test_broken_perm'",
-            ))
+            .query_one(&typeof_stmt)
             .await
             .unwrap()
             .expect("injected row must exist");
@@ -1024,15 +1020,8 @@ mod tests {
             .expect("repair migration must succeed");
 
         // After the repair, typeof(id) must be 'blob'.
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "builder limitation: typeof() has no typed sea_query expression"
-        )]
         let typeof_after = db
-            .query_one_raw(Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT typeof(id) FROM permissions WHERE name = 'test_broken_perm'",
-            ))
+            .query_one(&typeof_stmt)
             .await
             .unwrap()
             .expect("repaired row must still exist");

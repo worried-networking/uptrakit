@@ -15,7 +15,7 @@ impl MigrationTrait for Migration {
             .await?;
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         db.execute_unprepared(
             "CREATE UNIQUE INDEX uix_update_history_host_active \
@@ -36,7 +36,7 @@ impl MigrationTrait for Migration {
             .await?;
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         db.execute_unprepared(
             "CREATE UNIQUE INDEX uix_update_history_host_active \

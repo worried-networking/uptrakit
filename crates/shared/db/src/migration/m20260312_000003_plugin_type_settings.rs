@@ -372,10 +372,8 @@ impl Migration {
         manager: &SchemaManager<'_>,
     ) -> Result<(), DbErr> {
         // For each package manager type: migrate the auto-created plugin_config
-        // rows to plugin_type_settings and NULL out the FK on assignments.
-        //
-        // We use raw SQL because this involves a correlated UPDATE + INSERT
-        // with conditional logic.
+        // rows to plugin_type_settings and NULL out the FK on assignments,
+        // via a correlated INSERT ... SELECT followed by a correlated UPDATE.
         for pm_type in PACKAGE_MANAGER_TYPES {
             // Insert into plugin_type_settings if not already present.
             // Uses the first active plugin_config per (tenant_id, plugin_type).

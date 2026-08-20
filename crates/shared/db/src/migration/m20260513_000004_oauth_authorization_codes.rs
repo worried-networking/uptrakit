@@ -121,14 +121,12 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Partial index on un-consumed codes for the hot-path redemption lookup.
-        //
-        // sea_query does not support `WHERE` clauses on `CREATE INDEX`, so use
-        // raw SQL. SQLite and PostgreSQL both support partial indexes with
-        // identical `WHERE column IS NULL` syntax, so a single statement covers
-        // both backends.
+        // SQLite and PostgreSQL both support partial indexes with identical
+        // `WHERE column IS NULL` syntax, so a single statement covers both
+        // backends.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()

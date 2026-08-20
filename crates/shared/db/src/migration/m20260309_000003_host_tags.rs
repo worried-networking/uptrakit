@@ -55,16 +55,12 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Partial unique: one active tag name per tenant.
-        //
-        // SQLite does not support partial indexes via sea_query's `.and_where()`,
-        // so we use `execute_unprepared` with raw SQL. This is the same pattern
-        // used by other migrations that need partial unique indexes.
         let partial_unique_sql = "CREATE UNIQUE INDEX uix_host_tags_tenant_name \
              ON host_tags (tenant_id, name) \
              WHERE deactivated_at IS NULL";
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()

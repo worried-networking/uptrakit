@@ -11,9 +11,7 @@ impl MigrationName for Migration {
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // sea_query Index::create() does not support expression columns (functional indexes);
-        // raw SQL required. The SSH agent uses SQLite exclusively, so no backend branching
-        // is needed.
+        // The SSH agent uses SQLite exclusively, so no backend branching is needed.
         #[expect(
             clippy::disallowed_methods,
             reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"

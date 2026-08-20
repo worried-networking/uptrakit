@@ -143,13 +143,11 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Partial index on active (non-revoked) tokens per (user, client).
-        //
-        // sea_query does not support `WHERE` clauses on `CREATE INDEX`, so use
-        // raw SQL. SQLite and PostgreSQL both support partial indexes with
-        // identical `WHERE column IS NULL` syntax.
+        // SQLite and PostgreSQL both support partial indexes with identical
+        // `WHERE column IS NULL` syntax.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: partial index with a WHERE clause is not expressible via sea_query's CREATE INDEX builder"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()

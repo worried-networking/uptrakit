@@ -58,14 +58,11 @@ impl MigrationTrait for Migration {
             return Ok(());
         }
 
-        // Find all permissions whose id is stored as TEXT.
-        //
-        // `typeof()` is a SQLite-specific function with no sea_query equivalent;
-        // using query_all_raw with a Statement is the approved exception for this
-        // pattern.  See docs/development/database-migrations.md.
+        // Find all permissions whose id is stored as TEXT (`typeof()` is a
+        // SQLite-specific function; this branch is already backend-guarded).
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: typeof() has no typed sea_query expression"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         let broken_rows = db
             .query_all_raw(Statement::from_string(
