@@ -27,18 +27,21 @@ pub struct CommandSpec {
     pub working_dir: Option<String>,
     pub timeout: Option<std::time::Duration>,
     pub privileged: bool,
+    pub envs: Vec<(String, String)>,
 }
 ```
 
 Convenience constructors:
 
-| Constructor                               | Description                                                                               |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `CommandSpec::exec(program, args)`        | Direct program execution (no shell).                                                      |
-| `CommandSpec::shell(command)`             | Shell command via Bash with fail-early settings (`set -euo pipefail`).                    |
-| `CommandSpec::shell_with(command, shell)` | Shell command with a specific shell (`Bash`, `Sh`).                                       |
-| `.with_working_dir(dir)`                  | Builder method to set the working directory.                                              |
-| `.privileged()`                           | Mark the command as requiring elevated privileges (used with `SudoAwareCommandExecutor`). |
+| Constructor                               | Description                                                                                                                                            |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CommandSpec::exec(program, args)`        | Direct program execution (no shell).                                                                                                                   |
+| `CommandSpec::shell(command)`             | Shell command via Bash with fail-early settings (`set -euo pipefail`).                                                                                 |
+| `CommandSpec::shell_with(command, shell)` | Shell command with a specific shell (`Bash`, `Sh`).                                                                                                    |
+| `.with_working_dir(dir)`                  | Builder method to set the working directory.                                                                                                           |
+| `.privileged()`                           | Mark the command as requiring elevated privileges (used with `SudoAwareCommandExecutor`).                                                              |
+| `.with_timeout(duration)`                 | Set a maximum execution time; on expiry the executor returns `CommandError::TimedOut`.                                                                 |
+| `.with_env(name, value)`                  | Add an environment variable (local: set on the process; SSH: `NAME='VALUE'` prefix; sudo: inline `NAME=VALUE` before the program, requires `SETENV:`). |
 
 #### The `privileged` flag
 

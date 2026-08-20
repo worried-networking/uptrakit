@@ -106,13 +106,6 @@ Any new `ControllerMessage` variant that triggers command execution on agents
 
 ## Agent-Side Execution Hardening
 
-### Per-hook plugin timeout
-
-Individual pre/post-update lifecycle hook plugin executions have a 5-minute
-timeout (`HOOK_TIMEOUT = 300s`). On timeout, the hook's child process is killed
-via `kill_on_drop(true)` and an error is returned. This prevents a single
-malicious or stuck hook from consuming the entire update timeout budget.
-
 ### Update rate limiting
 
 Both agents enforce an `UPDATE_COOLDOWN` of 5 seconds between consecutive

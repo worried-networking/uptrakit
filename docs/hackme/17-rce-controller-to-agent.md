@@ -90,10 +90,9 @@ The same attack applies via:
   handles `ExecuteBatchUpdate` messages with the same freeze file check
   as `ExecuteUpdate`. Previously, batch update messages were silently dropped by the
   wildcard `_ =>` arm.
-- **Per-hook timeout.** _(Implemented)_ Individual pre/post-update hooks have a
-  5-minute timeout (`HOOK_TIMEOUT = 300s`). A single hook cannot consume the entire
-  update timeout budget. On timeout, the hook is killed (via `kill_on_drop(true)`)
-  and `UpdateError::HookFailed` is returned. See `crates/shared/agent-core/src/update.rs`.
+- **Per-hook timeout.** _(Not implemented)_ No per-hook bound exists today —
+  hooks share the whole update's budget. Tracked in the Network & Timeout
+  Safety spec (M1.4).
 - **Agent-side update rate limiting.** _(Implemented)_ Both agents enforce an
   `UPDATE_COOLDOWN` of 5 seconds between consecutive update executions. For the SSH
   agent, cooldown is tracked per-host. Rapid-fire updates from a compromised

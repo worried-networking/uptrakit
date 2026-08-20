@@ -167,7 +167,9 @@ impl CommandSpec {
     ///
     /// For local execution the variable is set directly on the spawned process.
     /// For SSH execution it is prepended as a `NAME='VALUE'` assignment.
-    /// When sudo is used it is forwarded via `sudo env NAME=VALUE …`.
+    /// When sudo is used it is forwarded as an inline `NAME=VALUE` assignment
+    /// before the program name (`sudo NAME=VALUE PROG …`); the sudoers entry
+    /// must carry `SETENV:` for sudo to accept this form.
     #[must_use]
     pub fn with_env(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.envs.push((name.into(), value.into()));
