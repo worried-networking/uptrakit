@@ -129,12 +129,16 @@ indistinguishable from a real timestamp and makes stale-detection logic incorrec
 ### Converting existing INTEGER timestamps
 
 If an existing table stores timestamps as `INTEGER` (unix seconds), write a data migration using
-SQLite's `strftime` function. This is one of the approved `execute_unprepared()` exceptions
-because `strftime` is a SQLite-specific built-in that sea_query cannot express:
+SQLite's `strftime` function. `strftime` is builder-expressible via `Func::cust("strftime").arg(...)`
+— it is not a genuine sea_query gap — so new code should build it that way rather than reaching for
+`execute_unprepared()`. The raw form below is accepted only because it already lives inside a merged
+migration's `up()`/`down()` body: rewriting a shipped migration risks live-vs-fresh-install
+divergence, so **frozen merged migration** — not a claimed sea_query limitation — is the reason
+`execute_unprepared()` is accepted here:
 
 ```rust
-// `strftime` is a SQLite-specific function with no sea_query equivalent.
-// execute_unprepared is the approved exception for this pattern.
+// Frozen merged migration: `strftime` is builder-expressible via `Func::cust`, but rewriting
+// a shipped migration body risks live-vs-fresh-install divergence.
 manager
     .get_connection()
     .execute_unprepared(
@@ -634,8 +638,11 @@ using `helpers::is_sqlite(manager)` and use `ALTER TABLE` on PostgreSQL.
 
 **All steps — table creation, data copy, drop, rename, and index recreation — must use
 sea_query builders or the shared helpers.** Never use raw SQL strings for these operations.
-The only accepted exception is the data copy step when it requires constructs that sea_query
-cannot express (e.g., `CASE` expressions or SQLite-specific functions like `strftime`); see
+`CASE` expressions (`CaseStatement`, which implements `Into<Expr>`) and SQLite-specific
+functions like `strftime` (`Func::cust`) are both builder-expressible — neither is a genuine
+sea_query gap. The only accepted exception for the data copy step is a frozen merged
+migration: raw SQL already shipped inside an `up()`/`down()` body is kept as-is rather than
+rewritten, because rewriting a shipped migration risks live-vs-fresh-install divergence; see
 [Data copy strategies](#data-copy-strategies) below.
 
 #### Shared helpers
@@ -794,7 +801,9 @@ Before merging a table recreation migration, verify:
 #### Data copy strategies
 
 **Always prefer sea_query builders.** The data copy step must use sea_query's
-`INSERT...SELECT` builder whenever possible:
+`INSERT...SELECT` builder whenever possible — including `CASE` expressions (via
+`CaseStatement`, which implements `Into<Expr>`) and SQLite-specific functions like
+`strftime` (via `Func::cust`) inside the `SELECT` column list; both are builder-expressible:
 
 ```rust
 let select = Query::select().columns(DATA_COLS).from(OldTable::Table).to_owned();
@@ -808,15 +817,15 @@ insert
 manager.execute(insert).await?;
 ```
 
-**`execute_unprepared` exception** — only when the `INSERT...SELECT` requires constructs
-that sea_query's builder cannot express (e.g., `CASE` expressions in the `SELECT` column
-list, or SQLite-specific functions like `strftime`). Every such call **must** include an
-inline comment naming the specific sea_query limitation:
+**`execute_unprepared` exception** — only for a frozen merged migration: raw SQL already
+shipped inside an `up()`/`down()` body is kept as-is rather than rewritten, because rewriting
+a shipped migration risks live-vs-fresh-install divergence, even when the same `SELECT` is
+builder-expressible (e.g., via `CaseStatement` or `Func::cust`). Every such call **must**
+include an inline comment naming that rationale:
 
 ```rust
-// CASE expressions in INSERT...SELECT cannot be expressed with sea_query's
-// typed builder. execute_unprepared is the accepted pattern for complex
-// data transformations in migrations.
+// Frozen merged migration: CASE is builder-expressible via CaseStatement, but rewriting
+// a shipped migration body risks live-vs-fresh-install divergence.
 manager
     .get_connection()
     .execute_unprepared(
@@ -828,8 +837,9 @@ manager
     .await?;
 ```
 
-If the copy is a straightforward column mapping (even with column renames), use
-sea_query — do not reach for `execute_unprepared` as a convenience shortcut.
+If the copy is a straightforward column mapping (even with column renames), or is new code
+that needs `CASE` or a SQLite scalar function, use sea_query's builders (`CaseStatement`,
+`Func::cust`) — do not reach for `execute_unprepared` as a convenience shortcut.
 
 #### Backend branching
 
@@ -862,25 +872,31 @@ db.execute(&drop).await?;
 
 ### When `execute_unprepared()` or raw statements are still allowed
 
-Raw SQL is accepted **only** for constructs that have no sea_query equivalent. Every such call
-**must** include an inline comment naming the specific limitation.
+Raw SQL is accepted for two distinct reasons, and the inline comment must name which one
+applies: (1) the construct has no sea_query equivalent at all, or (2) the raw SQL already
+ships inside a merged migration's `up()`/`down()` body, kept as-is because rewriting risks
+live-vs-fresh-install divergence, even when the same SQL is builder-expressible. The table
+below enumerates constructs with genuinely no sea_query equivalent (reason 1). `strftime`,
+`typeof()`, and `CASE` do not belong in this table — they are builder-expressible via
+`Func::cust` and `CaseStatement` respectively, so raw SQL using them is accepted only under
+reason 2 (a frozen merged migration), never as a claimed sea_query gap.
 
-| Construct                                            | Reason sea_query cannot express it                                                                                                                                                      |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CREATE TABLE new AS SELECT * FROM old`              | SQLite-specific shorthand; no builder equivalent                                                                                                                                        |
-| `INSERT INTO … SELECT strftime(…)`                   | `strftime` is a SQLite-specific function                                                                                                                                                |
-| `SELECT typeof(col) FROM …`                          | `typeof()` is SQLite-specific; use `query_all_raw` / `query_one_raw`                                                                                                                    |
-| `PRAGMA foreign_keys`                                | SQLite-specific pragma; no sea_query equivalent                                                                                                                                         |
-| `PRAGMA foreign_key_check`                           | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment |
-| `PRAGMA database_list`                               | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment |
-| `SELECT … WHERE col LIKE pattern` in `query_all_raw` | Read-only SQLite-specific pattern matching                                                                                                                                              |
-| `CASE WHEN` in `ON CONFLICT DO UPDATE`               | SeaORM's `on_conflict` builder limitation                                                                                                                                               |
+| Construct                                            | Reason sea_query cannot express it                                                                                                                                                                                                       |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CREATE TABLE new AS SELECT * FROM old`              | SQLite-specific shorthand; no builder equivalent                                                                                                                                                                                         |
+| bare `PRAGMA foreign_keys`                           | SQLite-specific pragma statement; no sea_query equivalent (the table-valued-function form of a pragma, e.g. `pragma_table_info(...)`, is expressible via `SelectStatement::from_function` — only the bare-statement form qualifies here) |
+| bare `PRAGMA foreign_key_check`                      | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment                                                  |
+| bare `PRAGMA database_list`                          | SQLite-specific statement with no sea_query equivalent; used only by the migration runner (`crates/shared/db/src/migration/mod.rs`); each call site carries the standard inline comment                                                  |
+| `SELECT … WHERE col LIKE pattern` in `query_all_raw` | Read-only SQLite-specific pattern matching                                                                                                                                                                                               |
+| `CASE WHEN` in `ON CONFLICT DO UPDATE`               | SeaORM's `on_conflict` builder limitation (the `CASE` expression itself is builder-expressible via `CaseStatement`; the gap is specific to composing it inside `on_conflict`'s `DO UPDATE SET`)                                          |
 
-**Inline comment requirement:**
+**Frozen merged migration — inline comment requirement:** `typeof()` is builder-expressible
+via `Func::cust("typeof")`, so it is never accepted as a sea_query gap; raw SQL using it is
+accepted only where the call already lives inside a merged migration's `up()`/`down()` body:
 
 ```rust
-// `typeof()` is a SQLite-specific function with no sea_query equivalent;
-// query_one_raw with a raw Statement is the approved exception for this pattern.
+// Frozen merged migration: `typeof()` is builder-expressible via `Func::cust`, but rewriting
+// a shipped migration body risks live-vs-fresh-install divergence.
 db.query_one_raw(Statement::from_string(
     DatabaseBackend::Sqlite,
     "SELECT typeof(id) FROM permissions WHERE name = 'x'",
@@ -889,7 +905,8 @@ db.query_one_raw(Statement::from_string(
 ```
 
 If you find yourself reaching for `execute_unprepared()` for a plain `DELETE`, `INSERT`,
-`UPDATE`, or `SELECT` that does not fall into the table above, use a sea_query builder instead.
+`UPDATE`, or `SELECT` that does not fall into the table above and is not inside an
+already-shipped migration body, use a sea_query builder instead.
 
 ---
 
