@@ -35,6 +35,12 @@ const ATTENTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10
 /// Maximum accumulated output size (10 MB, matching non-interactive limit).
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 
+/// Bound on the post-kill `child.wait()` reap. If the process survives the
+/// group kill past this grace (e.g. root-owned members the unprivileged agent
+/// cannot signal — killpg EPERM), the child is abandoned and the session
+/// reports `TimedOut` instead of hanging forever.
+pub const KILL_REAP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Truncation marker appended when output exceeds `MAX_OUTPUT_BYTES`.
 const TRUNCATION_MARKER: &str = "\n... [output truncated at 10 MB] ...\n";
 
@@ -268,11 +274,11 @@ async fn drive_interactive_session(
             _ = deadline_sleep, if deadline.is_some() => {
                 tracing::warn!("interactive command timed out");
                 kill_process_group(child_pid);
-                #[expect(
-                    clippy::let_underscore_must_use,
-                    reason = "wait() after kill; we're returning an error immediately and don't need the exit status"
-                )]
-                let _ = child.wait().await;
+                // If the child survives the kill (e.g. root-owned group members the
+                // unprivileged agent cannot signal), the blocking PTY reader thread
+                // stays parked until the survivor drops the PTY slave — a bounded
+                // one-thread leak per abandoned session.
+                reap_child_bounded(child.wait(), child_pid, KILL_REAP_GRACE).await;
                 return Err(report!(CommandError::TimedOut));
             }
 
@@ -391,6 +397,28 @@ pub fn kill_process_group(pid: i32) {
     }
 }
 
+/// Await `wait` for at most `grace`. Returns `true` if the child was reaped
+/// in time, `false` if it survived and was abandoned (a structured warning
+/// names the abandoned pid). Generic over the future so the abandon branch
+/// is unit-testable without a real unkillable process.
+async fn reap_child_bounded<F: std::future::Future>(
+    wait: F,
+    pid: i32,
+    grace: std::time::Duration,
+) -> bool {
+    match tokio::time::timeout(grace, wait).await {
+        Ok(_) => true,
+        Err(_) => {
+            tracing::warn!(
+                pid,
+                grace_secs = grace.as_secs(),
+                "child survived kill past reap grace; abandoning process"
+            );
+            false
+        }
+    }
+}
+
 pub use run_command_interactive as run_interactive;
 
 #[cfg(test)]
@@ -487,5 +515,23 @@ mod tests {
 
         output_rx.close();
         while output_rx.recv().await.is_some() {}
+    }
+
+    /// The post-kill reap is bounded — a wait that never resolves is abandoned
+    /// after KILL_REAP_GRACE instead of hanging the session forever.
+    #[tokio::test(start_paused = true)]
+    async fn reap_child_bounded_abandons_unkillable_child_after_grace() {
+        let reaped = reap_child_bounded(std::future::pending::<()>(), 42, KILL_REAP_GRACE).await;
+        assert!(
+            !reaped,
+            "a never-resolving wait must be abandoned, not awaited forever"
+        );
+    }
+
+    /// Normal reap: the child exits within the grace and is awaited to completion.
+    #[tokio::test(start_paused = true)]
+    async fn reap_child_bounded_returns_when_child_exits() {
+        let reaped = reap_child_bounded(std::future::ready(()), 42, KILL_REAP_GRACE).await;
+        assert!(reaped);
     }
 }

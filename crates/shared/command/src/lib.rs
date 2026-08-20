@@ -21,7 +21,7 @@ pub use executor::{
     NoopCommandExecutor, StdioTunnel, build_remote_command_string,
 };
 #[cfg(feature = "interactive")]
-pub use interactive::kill_process_group;
+pub use interactive::{KILL_REAP_GRACE, kill_process_group};
 pub use remote_executor::{LocalRemoteExecutor, RemoteCommandResult, RemoteExecutor};
 pub use sudo::{ParseSudoPolicyError, SudoAwareCommandExecutor, SudoContext, SudoPolicy};
 pub use types::UpdateOutputLine;
