@@ -49,7 +49,7 @@ impl MigrationTrait for Migration {
         // skipped, and the DELETE is a single-row keyed write. No extra locking needed.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: bulk INSERT ... VALUES rows call the SQLite unixepoch() function, which sea_query's insert builder cannot embed without the banned Expr::cust"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         conn.execute_unprepared(
             "INSERT INTO seaql_migrations (version, applied_at) VALUES

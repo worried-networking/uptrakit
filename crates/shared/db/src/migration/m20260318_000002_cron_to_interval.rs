@@ -162,13 +162,9 @@ impl Migration {
                 .await?;
 
             // Copy data, mapping cron_expression → interval_seconds/jitter_seconds via CASE.
-            //
-            // This uses execute_unprepared because sea_query's INSERT…SELECT builder does not
-            // support CASE expressions in the SELECT column list. This is a migration-only
-            // statement and is the accepted pattern for complex data transformations.
             #[expect(
                 clippy::disallowed_methods,
-                reason = "builder limitation: SQLite table-recreation copy step uses CASE, which sea_query's INSERT...SELECT builder does not support"
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
             )]
             manager
                 .get_connection()

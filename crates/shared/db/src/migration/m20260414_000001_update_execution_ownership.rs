@@ -26,7 +26,7 @@ impl MigrationTrait for Migration {
         } else {
             #[expect(
                 clippy::disallowed_methods,
-                reason = "builder limitation: ALTER TABLE DROP CONSTRAINT has no sea_query builder equivalent"
+                reason = "builder limitation: ALTER TABLE DROP CONSTRAINT IF EXISTS is not expressible — sea_query has drop_constraint but no IF EXISTS variant"
             )]
             manager
                 .get_connection()
@@ -268,7 +268,7 @@ fn build_update_history_table(
 async fn copy_update_history_into_new_table(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     #[expect(
         clippy::disallowed_methods,
-        reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT into a rebuilt table) is not expressible via sea_query's builder API"
+        reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
     )]
     manager
         .get_connection()
@@ -329,7 +329,7 @@ async fn copy_update_history_into_new_table(manager: &SchemaManager<'_>) -> Resu
 async fn copy_update_history_into_old_table(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     #[expect(
         clippy::disallowed_methods,
-        reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT into a rebuilt table) is not expressible via sea_query's builder API"
+        reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
     )]
     manager
         .get_connection()

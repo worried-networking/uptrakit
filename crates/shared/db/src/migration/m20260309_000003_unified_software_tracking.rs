@@ -288,9 +288,6 @@ async fn rebuild_software_items_sqlite(manager: &SchemaManager<'_>) -> Result<()
 
         // Copy data: discovery_state=approved or manually created -> featured=true,
         // discovery_state=pending -> featured=false.
-        //
-        // SQLite does not support CASE in sea_query INSERT...SELECT well, so we
-        // use execute_unprepared for the data copy.
         let copy_sql = "INSERT INTO software_items_new (id, tenant_id, name, featured, last_checked_at, created_at, updated_at, deactivated_at) \
              SELECT id, tenant_id, name, \
                     CASE WHEN discovery_state = 'pending' THEN 0 ELSE 1 END, \
@@ -298,7 +295,7 @@ async fn rebuild_software_items_sqlite(manager: &SchemaManager<'_>) -> Result<()
              FROM software_items";
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: SQLite table-recreation copy step uses CASE, which sea_query's INSERT...SELECT builder does not support"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()
@@ -335,11 +332,9 @@ async fn alter_software_items(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
         .await?;
 
     // Backfill featured from discovery_state: anything not 'pending' becomes featured.
-    // sea_query cannot express UPDATE ... SET col = CASE WHEN ... in its builder API,
-    // so we use execute_unprepared.
     #[expect(
         clippy::disallowed_methods,
-        reason = "builder limitation: UPDATE ... SET col = CASE WHEN ... is not expressible in sea_query's builder API"
+        reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
     )]
     manager
         .get_connection()
@@ -460,7 +455,7 @@ async fn rebuild_host_software_items_sqlite(manager: &SchemaManager<'_>) -> Resu
             FROM host_software_items";
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT into a rebuilt table) is not expressible via sea_query's builder API"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()
@@ -713,7 +708,7 @@ async fn rebuild_update_history_sqlite(manager: &SchemaManager<'_>) -> Result<()
              INNER JOIN hosts h ON h.id = uh.host_id";
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT with a JOIN into a rebuilt table) is not expressible via sea_query's builder API"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()
@@ -749,11 +744,9 @@ async fn alter_update_history(manager: &SchemaManager<'_>) -> Result<(), DbErr> 
         .await?;
 
     // Backfill tenant_id from the hosts table via a correlated subquery.
-    // sea_query cannot express UPDATE ... SET col = (SELECT ...) correlated
-    // subqueries in its builder API, so we use execute_unprepared.
     #[expect(
         clippy::disallowed_methods,
-        reason = "builder limitation: UPDATE ... SET col = (correlated SELECT ...) is not expressible in sea_query's builder API"
+        reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
     )]
     manager
         .get_connection()
@@ -1125,7 +1118,7 @@ async fn rebuild_update_batches_sqlite(manager: &SchemaManager<'_>) -> Result<()
             FROM update_batches";
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT into a rebuilt table) is not expressible via sea_query's builder API"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()

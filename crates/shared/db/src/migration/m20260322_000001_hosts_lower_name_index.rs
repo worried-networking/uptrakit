@@ -15,7 +15,7 @@ impl MigrationTrait for Migration {
         // raw SQL required. SQLite and PostgreSQL support LOWER() functional indexes natively.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: functional index on lower() is not expressible in sea_query"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()

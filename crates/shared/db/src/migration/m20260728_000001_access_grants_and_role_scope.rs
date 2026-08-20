@@ -401,14 +401,13 @@ async fn rescope_roles_postgres(manager: &SchemaManager<'_>) -> Result<(), DbErr
                 .to_owned(),
         )
         .await?;
-    // Raw SQL: sea_query's Table::alter() has no builder for dropping a
-    // UNIQUE constraint. `roles_name_key` is PostgreSQL's deterministic
-    // auto-name for the inline UNIQUE from the initial CREATE TABLE's
-    // `string_uniq(Roles::Name)`; the Docker database suite (Task 5) is the
-    // empirical proof — a wrong name fails there loudly, never silently.
+    // `roles_name_key` is PostgreSQL's deterministic auto-name for the inline
+    // UNIQUE from the initial CREATE TABLE's `string_uniq(Roles::Name)`; the
+    // Docker database suite (Task 5) is the empirical proof — a wrong name
+    // fails there loudly, never silently.
     #[expect(
         clippy::disallowed_methods,
-        reason = "builder limitation: ALTER TABLE DROP CONSTRAINT has no sea_query builder equivalent"
+        reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
     )]
     manager
         .get_connection()

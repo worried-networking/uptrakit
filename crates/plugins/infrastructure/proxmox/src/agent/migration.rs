@@ -67,10 +67,9 @@ impl MigrationTrait for CreateProxmoxHostState {
         let db = manager.get_connection();
 
         // SQLite-specific: check if the old column exists via pragma.
-        // query_one_raw with a Statement is the approved exception for raw SQL.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: PRAGMA table_info() has no sea_query equivalent"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         let has_legacy = db
             .query_one_raw(sea_orm::Statement::from_string(
@@ -91,8 +90,6 @@ impl MigrationTrait for CreateProxmoxHostState {
                 .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
 
             // Copy PVE hosts into the new table.
-            // SQLite limitation: INSERT...SELECT with sea_query is awkward,
-            // so we use a raw parameterised statement.
             #[expect(
                 clippy::disallowed_methods,
                 reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"

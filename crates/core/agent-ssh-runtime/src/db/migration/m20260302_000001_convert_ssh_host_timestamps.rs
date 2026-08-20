@@ -53,11 +53,9 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Copy data, converting INTEGER Unix epoch seconds to RFC 3339 text.
-        // `strftime` is a SQLite-specific function with no sea_query equivalent;
-        // execute_unprepared is the approved exception for this pattern.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: strftime() epoch/RFC3339 conversion has no sea_query equivalent"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()
@@ -128,11 +126,9 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Convert RFC 3339 text back to INTEGER Unix epoch seconds.
-        // `strftime` is a SQLite-specific function with no sea_query equivalent;
-        // execute_unprepared is the approved exception for this pattern.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: strftime() epoch/RFC3339 conversion has no sea_query equivalent"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()

@@ -408,7 +408,7 @@ impl MigrationTrait for AddProxmoxHmLowerNameIndex {
         // (functional indexes); raw SQL required.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: functional index on lower() is not expressible in sea_query"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()
@@ -455,7 +455,7 @@ impl MigrationTrait for AddProxmoxHmUniqueHostIdIndex {
         // can be created safely.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: window function (ROW_NUMBER() OVER) is not expressible in sea_query"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()
@@ -1127,7 +1127,7 @@ impl MigrationTrait for ProxmoxHmVmidUniquePerConfig {
         // row with a host_id (already matched), then the most recently updated.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: window function (ROW_NUMBER() OVER) is not expressible in sea_query"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         conn.execute_unprepared(
             "DELETE FROM proxmox_host_mappings

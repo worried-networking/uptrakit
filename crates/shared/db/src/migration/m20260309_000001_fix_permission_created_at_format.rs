@@ -55,10 +55,6 @@ impl MigrationTrait for Migration {
         }
 
         // Find permissions with a three-component UTC offset.
-        //
-        // `LIKE` on a TEXT column is a SQLite-specific pattern check with no
-        // sea_query equivalent for the value content; query_all_raw is the
-        // approved exception.  See docs/development/database-migrations.md.
         #[expect(
             clippy::disallowed_methods,
             reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"

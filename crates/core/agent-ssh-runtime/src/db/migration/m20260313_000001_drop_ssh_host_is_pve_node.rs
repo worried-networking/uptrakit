@@ -5,12 +5,11 @@ use sea_orm_migration::prelude::*;
 /// This column was always `false` — PVE node detection state is tracked in
 /// the Proxmox plugin's own `proxmox_host_state` table.
 ///
-/// Uses raw SQL for two reasons:
-/// 1. sea-query's `ALTER TABLE DROP COLUMN` double-quotes the identifier on
-///    SQLite, causing a spurious "no such column" error.
-/// 2. The earlier `m20260308_000003` table-rebuild migration already omits
-///    this column, so on fresh databases it no longer exists. We guard with
-///    `pragma_table_info` to make the drop idempotent.
+/// The earlier `m20260308_000003` table-rebuild migration already omits
+/// this column, so on fresh databases it no longer exists; the drop guards
+/// on `pragma_table_info` to stay idempotent. This is a frozen merged
+/// migration: builder-expressible, but rewriting a shipped migration body
+/// risks live-vs-fresh-install divergence.
 #[derive(DeriveMigrationName)]
 pub(super) struct Migration;
 
@@ -23,7 +22,7 @@ impl MigrationTrait for Migration {
         // the table-rebuild in m20260308_000003).
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: pragma_table_info() table-valued function has no sea_query equivalent"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         let has_col = db
             .query_one_raw(sea_orm::Statement::from_string(
@@ -44,7 +43,7 @@ impl MigrationTrait for Migration {
         if col_exists {
             #[expect(
                 clippy::disallowed_methods,
-                reason = "builder limitation: sea_query's ALTER TABLE DROP COLUMN double-quotes the identifier, causing a spurious error on SQLite"
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
             )]
             db.execute_unprepared("ALTER TABLE ssh_hosts DROP COLUMN is_pve_node")
                 .await?;
@@ -57,7 +56,7 @@ impl MigrationTrait for Migration {
         let db = manager.get_connection();
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: down()-side counterpart to the raw ALTER TABLE DROP COLUMN in up(); kept as raw ALTER TABLE ADD COLUMN for symmetry"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         db.execute_unprepared(
             "ALTER TABLE ssh_hosts ADD COLUMN is_pve_node BOOLEAN NOT NULL DEFAULT FALSE",

@@ -218,11 +218,9 @@ impl Migration {
 
             // Copy data from old table, populating plugin_type from joined plugin_configs.
             // `config_override` is renamed to `config` in the copy.
-            // `execute_unprepared` is the approved pattern for complex INSERT...SELECT
-            // with JOINs that sea_query cannot express.
             #[expect(
                 clippy::disallowed_methods,
-                reason = "builder limitation: SQLite table-recreation copy step (INSERT...SELECT with a JOIN into a rebuilt table) is not expressible via sea_query's builder API"
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
             )]
             manager
                 .get_connection()
@@ -330,7 +328,7 @@ impl Migration {
         // Populate plugin_type from joined plugin_configs.
         #[expect(
             clippy::disallowed_methods,
-            reason = "builder limitation: UPDATE ... SET col = COALESCE((correlated SELECT ...)) is not expressible in sea_query's builder API"
+            reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
         )]
         manager
             .get_connection()
@@ -377,7 +375,7 @@ impl Migration {
         // rows to plugin_type_settings and NULL out the FK on assignments.
         //
         // We use raw SQL because this involves a correlated UPDATE + INSERT
-        // with conditional logic that sea_query cannot express.
+        // with conditional logic.
         for pm_type in PACKAGE_MANAGER_TYPES {
             // Insert into plugin_type_settings if not already present.
             // Uses the first active plugin_config per (tenant_id, plugin_type).
@@ -407,7 +405,7 @@ impl Migration {
             );
             #[expect(
                 clippy::disallowed_methods,
-                reason = "builder limitation: INSERT...SELECT with NOT EXISTS and a correlated ORDER BY/LIMIT subquery is not expressible in sea_query's builder API"
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
             )]
             manager
                 .get_connection()
@@ -510,7 +508,7 @@ impl Migration {
             // Copy data back (only rows with non-NULL plugin_config_id).
             #[expect(
                 clippy::disallowed_methods,
-                reason = "builder limitation: SQLite table-recreation copy-back step (INSERT...SELECT into a rebuilt table) is not expressible via sea_query's builder API"
+                reason = "frozen merged migration: builder-expressible, but rewriting a shipped migration body risks live-vs-fresh-install divergence"
             )]
             manager
                 .get_connection()
