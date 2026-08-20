@@ -42,6 +42,19 @@ pub struct PendingOidcFlowData {
     pub provider_id: uuid::Uuid,
     pub pkce_verifier: PkceCodeVerifier,
     pub nonce: Nonce,
+    pub redirect_uri: String,
+    pub return_origin: Option<String>,
+}
+
+/// Redirect-pinning snapshot taken at authorize time and replayed at
+/// callback, instead of re-deriving these values from the request.
+///
+/// `return_origin: None` is the canonical-unset sentinel — the type makes
+/// it unforgettable at every hop. It is flattened to `""` only at the DB
+/// boundary, since the column is `NOT NULL`.
+pub struct FlowSnapshot {
+    pub redirect_uri: String,
+    pub return_origin: Option<String>,
 }
 
 /// Database-backed store for pending OIDC flows keyed by `state` parameter.
@@ -61,6 +74,7 @@ impl OidcFlowStore {
         provider_id: uuid::Uuid,
         pkce_verifier: &PkceCodeVerifier,
         nonce: &Nonce,
+        snapshot: FlowSnapshot,
     ) -> Result<()> {
         let now = OffsetDateTime::now_utc();
         let expires_at = now + time::Duration::seconds(TTL_SECONDS);
@@ -74,11 +88,8 @@ impl OidcFlowStore {
             )
             .context_to()?),
             nonce: Set(nonce.secret().clone()),
-            // TODO(cimd-b B2/B3): populate with the pinned redirect_uri and
-            // request return_origin once the authorize/callback handlers
-            // snapshot and pass them through (Task B1 only adds the columns).
-            redirect_uri: Set(String::new()),
-            return_origin: Set(String::new()),
+            redirect_uri: Set(snapshot.redirect_uri),
+            return_origin: Set(snapshot.return_origin.unwrap_or_default()),
             created_at: Set(now),
             expires_at: Set(expires_at),
         };
@@ -116,6 +127,8 @@ impl OidcFlowStore {
             provider_id: flow.provider_id,
             pkce_verifier: PkceCodeVerifier::new(flow.pkce_verifier.expose_secret().to_string()),
             nonce: Nonce::new(flow.nonce),
+            redirect_uri: flow.redirect_uri,
+            return_origin: (!flow.return_origin.is_empty()).then_some(flow.return_origin),
         }))
     }
 
@@ -129,6 +142,42 @@ impl OidcFlowStore {
         if let Err(e) = result {
             tracing::warn!("failed to clean up expired OIDC flows: {e}");
         }
+    }
+
+    /// Purges all pending OIDC flows for one provider.
+    ///
+    /// Runs in the caller's `BEGIN IMMEDIATE` transaction so the purge
+    /// commits atomically with the mutation that invalidated the flows.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OidcStoreError::Database`] if the delete query fails.
+    pub async fn purge_for_provider_in_tx(
+        tx: &sea_orm::DatabaseTransaction,
+        provider_id: uuid::Uuid,
+    ) -> Result<u64> {
+        PendingOidcFlow::delete_many()
+            .filter(pending_oidc_flow::Column::ProviderId.eq(provider_id))
+            .exec(tx)
+            .await
+            .map(|r| r.rows_affected)
+            .context_to()
+    }
+
+    /// Purges all pending OIDC flows across every provider.
+    ///
+    /// Runs in the caller's `BEGIN IMMEDIATE` transaction so the purge
+    /// commits atomically with the mutation that invalidated the flows.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OidcStoreError::Database`] if the delete query fails.
+    pub async fn purge_all_in_tx(tx: &sea_orm::DatabaseTransaction) -> Result<u64> {
+        PendingOidcFlow::delete_many()
+            .exec(tx)
+            .await
+            .map(|r| r.rows_affected)
+            .context_to()
     }
 }
 
@@ -519,7 +568,16 @@ mod tests {
         let nonce = Nonce::new("test-nonce".to_string());
 
         store
-            .insert("csrf-state-1".to_string(), provider_id, &pkce, &nonce)
+            .insert(
+                "csrf-state-1".to_string(),
+                provider_id,
+                &pkce,
+                &nonce,
+                FlowSnapshot {
+                    redirect_uri: "https://test.example.com/api/v1/auth/oidc/callback".into(),
+                    return_origin: Some("https://test.example.com".into()),
+                },
+            )
             .await
             .unwrap();
 
@@ -529,6 +587,14 @@ mod tests {
         assert_eq!(flow.provider_id, provider_id);
         assert_eq!(flow.pkce_verifier.secret(), "test-verifier");
         assert_eq!(flow.nonce.secret(), "test-nonce");
+        assert_eq!(
+            flow.redirect_uri,
+            "https://test.example.com/api/v1/auth/oidc/callback"
+        );
+        assert_eq!(
+            flow.return_origin.as_deref(),
+            Some("https://test.example.com")
+        );
 
         // Second take should return None
         let flow = store.take("csrf-state-1").await.unwrap();
@@ -542,6 +608,44 @@ mod tests {
 
         let flow = store.take("nonexistent").await.unwrap();
         assert!(flow.is_none());
+    }
+
+    /// `FlowSnapshot { return_origin: None, .. }` is the canonical-unset
+    /// sentinel: it round-trips through the DB's `NOT NULL` empty-string
+    /// representation and back to `None`, never a literal `Some("")`.
+    #[tokio::test]
+    async fn test_oidc_flow_return_origin_none_sentinel_roundtrips() {
+        let db = test_db().await;
+        let store = OidcFlowStore::new(db);
+
+        let provider_id = uuid::Uuid::now_v7();
+        let pkce = PkceCodeVerifier::new("test-verifier".to_string());
+        let nonce = Nonce::new("test-nonce".to_string());
+
+        store
+            .insert(
+                "csrf-state-no-origin".to_string(),
+                provider_id,
+                &pkce,
+                &nonce,
+                FlowSnapshot {
+                    redirect_uri: "https://test.example.com/api/v1/auth/oidc/callback".into(),
+                    return_origin: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let flow = store
+            .take("csrf-state-no-origin")
+            .await
+            .unwrap()
+            .expect("flow present");
+        assert_eq!(
+            flow.redirect_uri,
+            "https://test.example.com/api/v1/auth/oidc/callback"
+        );
+        assert!(flow.return_origin.is_none());
     }
 
     #[tokio::test]
@@ -631,6 +735,10 @@ mod tests {
                 uuid::Uuid::now_v7(),
                 &pkce,
                 &nonce,
+                FlowSnapshot {
+                    redirect_uri: "https://test.example.com/api/v1/auth/oidc/callback".into(),
+                    return_origin: Some("https://test.example.com".into()),
+                },
             )
             .await
             .unwrap();
@@ -654,6 +762,109 @@ mod tests {
         // Flow should be gone
         let flow = store.take("state-to-expire").await.unwrap();
         assert!(flow.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oidc_flow_purge_for_provider_in_tx_only_deletes_matching_provider() {
+        let db = test_db().await;
+        let store = OidcFlowStore::new(db.clone());
+
+        let target_provider = uuid::Uuid::now_v7();
+        let other_provider = uuid::Uuid::now_v7();
+        let pkce = PkceCodeVerifier::new("verifier".to_string());
+        let nonce = Nonce::new("nonce".to_string());
+        let snapshot = || FlowSnapshot {
+            redirect_uri: "https://test.example.com/api/v1/auth/oidc/callback".into(),
+            return_origin: Some("https://test.example.com".into()),
+        };
+
+        store
+            .insert(
+                "state-target-1".to_string(),
+                target_provider,
+                &pkce,
+                &nonce,
+                snapshot(),
+            )
+            .await
+            .unwrap();
+        store
+            .insert(
+                "state-target-2".to_string(),
+                target_provider,
+                &pkce,
+                &nonce,
+                snapshot(),
+            )
+            .await
+            .unwrap();
+        store
+            .insert(
+                "state-other".to_string(),
+                other_provider,
+                &pkce,
+                &nonce,
+                snapshot(),
+            )
+            .await
+            .unwrap();
+
+        let tx = uptrakit_shared_db::begin_immediate(&db)
+            .await
+            .expect("begin immediate");
+        let rows_affected = OidcFlowStore::purge_for_provider_in_tx(&tx, target_provider)
+            .await
+            .unwrap();
+        tx.commit().await.expect("commit");
+
+        assert_eq!(rows_affected, 2);
+        assert!(store.take("state-target-1").await.unwrap().is_none());
+        assert!(store.take("state-target-2").await.unwrap().is_none());
+        assert!(store.take("state-other").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_oidc_flow_purge_all_in_tx_deletes_every_flow() {
+        let db = test_db().await;
+        let store = OidcFlowStore::new(db.clone());
+
+        let pkce = PkceCodeVerifier::new("verifier".to_string());
+        let nonce = Nonce::new("nonce".to_string());
+        let snapshot = || FlowSnapshot {
+            redirect_uri: "https://test.example.com/api/v1/auth/oidc/callback".into(),
+            return_origin: Some("https://test.example.com".into()),
+        };
+
+        store
+            .insert(
+                "state-a".to_string(),
+                uuid::Uuid::now_v7(),
+                &pkce,
+                &nonce,
+                snapshot(),
+            )
+            .await
+            .unwrap();
+        store
+            .insert(
+                "state-b".to_string(),
+                uuid::Uuid::now_v7(),
+                &pkce,
+                &nonce,
+                snapshot(),
+            )
+            .await
+            .unwrap();
+
+        let tx = uptrakit_shared_db::begin_immediate(&db)
+            .await
+            .expect("begin immediate");
+        let rows_affected = OidcFlowStore::purge_all_in_tx(&tx).await.unwrap();
+        tx.commit().await.expect("commit");
+
+        assert_eq!(rows_affected, 2);
+        assert!(store.take("state-a").await.unwrap().is_none());
+        assert!(store.take("state-b").await.unwrap().is_none());
     }
 
     #[tokio::test]

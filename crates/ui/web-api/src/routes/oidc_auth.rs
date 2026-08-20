@@ -436,7 +436,8 @@ pub async fn oidc_authorize(
         }
     };
 
-    let redirect_url = match RedirectUrl::new(format!("{base_url}/api/v1/auth/oidc/callback")) {
+    let redirect_uri_string = format!("{base_url}/api/v1/auth/oidc/callback");
+    let redirect_url = match RedirectUrl::new(redirect_uri_string.clone()) {
         Ok(url) => url,
         Err(e) => {
             tracing::error!(error = %e, "Invalid OIDC redirect URL");
@@ -549,6 +550,10 @@ pub async fn oidc_authorize(
             provider_id,
             &pkce_verifier,
             &nonce,
+            crate::auth::oidc_state::FlowSnapshot {
+                redirect_uri: redirect_uri_string,
+                return_origin: None,
+            },
         )
         .await
     {
@@ -2593,7 +2598,16 @@ mod audit_tests {
         app.state
             .oidc
             .oidc_flow_store
-            .insert(csrf_state.to_string(), provider_id, &pkce_verifier, &nonce)
+            .insert(
+                csrf_state.to_string(),
+                provider_id,
+                &pkce_verifier,
+                &nonce,
+                crate::auth::oidc_state::FlowSnapshot {
+                    redirect_uri: "https://test.example.com/api/v1/auth/oidc/callback".into(),
+                    return_origin: Some("https://test.example.com".into()),
+                },
+            )
             .await
             .expect("store pending oidc flow");
 

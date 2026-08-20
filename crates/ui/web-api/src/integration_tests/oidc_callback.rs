@@ -131,6 +131,10 @@ async fn oidc_callback_provider_gone_redirects_to_oidc_provider_gone() {
             nonexistent_provider_id,
             &PkceCodeVerifier::new("test_pkce_verifier".to_string()),
             &Nonce::new("test_nonce".to_string()),
+            crate::auth::oidc_state::FlowSnapshot {
+                redirect_uri: "https://test.example.com/api/v1/auth/oidc/callback".into(),
+                return_origin: Some("https://test.example.com".into()),
+            },
         )
         .await;
     assert!(
