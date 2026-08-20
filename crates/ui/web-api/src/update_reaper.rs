@@ -157,14 +157,11 @@ pub fn spawn_update_reaper(state: Arc<AppState>) {
                 );
             }
 
-            let all_reaped: Vec<&uptrakit_shared_db::entity::update_history::Model> =
-                reaped.iter().chain(&pending_reaped).collect();
-
             // Emit one admin/SSE event per reaped row and collect affected
             // tenants for a single software-state refresh each.
             let mut tenants: std::collections::HashSet<uuid::Uuid> =
                 std::collections::HashSet::new();
-            for row in &all_reaped {
+            for row in reaped.iter().chain(&pending_reaped) {
                 tenants.insert(row.tenant_id);
                 state
                     .notification

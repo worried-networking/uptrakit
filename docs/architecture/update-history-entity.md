@@ -138,6 +138,13 @@ A reaped row that belongs to a batch advances the batch via the tenant-scoped di
 `InProgress` budget reaper cannot fire for them), so the batch still reaches a terminal status
 instead of staying `in_progress` with orphaned `Queued` siblings.
 
+[ADR-0024](../adr/0024-update-liveness-and-interrupted-status.md) forbids keying the reaper on connectivity,
+but that rule is about `InProgress` rows: the agent owns a live SSH session there, so a websocket partition says
+nothing about the update. A `Pending` row has no session — nothing is running anywhere — so connection absence is
+the only available evidence that the dispatch was never delivered, and it is used as a precondition on top of the
+row-age bar, never as the trigger. The ADR extension covering this case is a documentation deliverable of a later
+milestone.
+
 A candidate suppressed because a linked service is live or was seen inside the grace window is
 logged (a `warn` with the suppressed count) and left `Pending` — the connected-but-wedged agent
 class is handled separately by agent-side deadlines, not this reaper. `Queued` rows are never
