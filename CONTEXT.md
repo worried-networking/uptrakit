@@ -16,6 +16,28 @@ macOS, FreeBSD, and RouterOS (MikroTik). Agent-SSH bootstraps RouterOS hosts
 via a non-POSIX SSH path; all other OS families use a standard POSIX SSH path.
 _Avoid_: device (reserved for the OAuth CLI flow), machine, node, server
 
+**Host OS Identity**:
+The machine-readable distribution identity of a Host: the `ID` and `VERSION_ID` pair from
+`/etc/os-release` (e.g. `debian` / `12`). Distinct from the human-readable OS description
+(`PRETTY_NAME`) already shown in the UI. Nullable — non-Linux Hosts and older Agents may not
+report it.
+_Avoid_: OS type, platform (both already mean the coarser family-level notion)
+
+**Base-OS Requirement**:
+The distribution identity a Release's installer declares it supports, recorded per Host /
+Software Item link. Sourced from the installer's own metadata (for PHS, the script's
+`var_os`/`var_version` header). Absence means "no declared requirement", never "incompatible".
+_Avoid_: OS constraint, platform requirement, compatibility (too generic — plugin runtime
+compatibility is a different axis)
+
+**Base-OS Ack**:
+A user's explicit, per-Host acknowledgement that Updates may proceed despite a Base-OS
+Requirement mismatch. Keyed to the acknowledged Base-OS Requirement pair (`os version`) and
+held as a set on the Host: it covers every Software Item on that Host declaring the same pair,
+stays valid while a declared requirement matches an acked pair, and re-arms the gate the moment
+the requirement changes to a pair not yet acked.
+_Avoid_: override, bypass, ignore (the mismatch stays visible; only the block is lifted)
+
 **Software Item**:
 A managed piece of software installed on a Host (app, daemon, package, container).
 _Avoid_: service (reserved for uptrakit's own satellite components), app, workload
