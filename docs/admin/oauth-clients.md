@@ -12,8 +12,9 @@ Related: [ADR 0010](../adr/0010-mcp-oauth-authorization-server-placement.md) ·
 
 Complete these steps in order before exposing the MCP OAuth surface to users.
 
-1. **Set `oauth.canonical_host`** to the publicly reachable hostname of the controller. This is the
-   hostname (optionally with port) that clients use to reach the controller — no scheme, no path, no
+1. **Set `oauth.canonical_host`** to the publicly reachable hostname of the controller. The canonical
+   host is configured in the web UI under Global Settings → Canonical Host. This is the hostname
+   (optionally with port) that clients use to reach the controller — no scheme, no path, no
    trailing slash. Examples: `controller.example.com`, `controller.example.com:9443`. This value is
    used to derive the AS issuer (`https://<canonical_host>`) and the MCP resource URL
    (`https://<canonical_host>/mcp`). Setting `oauth.canonical_host` alone does not enable OAuth — see
