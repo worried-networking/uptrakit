@@ -139,6 +139,14 @@ During a software update, hook plugins execute in this order:
    is called with `update_succeeded` set. Errors are logged but do not fail the update.
 5. **Version detection** (`detect_installed_version()`).
 
+Each individual hook invocation (pre or post, single-update or batch) is bounded by
+`HOOK_TIMEOUT` (300 seconds) in `crates/shared/agent-core/src/update.rs`. A pre-hook
+that exceeds the deadline fails the update the same way a pre-hook error does; a
+post-hook that exceeds the deadline is logged as a warning and does not block the
+remaining hooks or fail the update. This prevents a single wedged hook plugin from
+holding the update pipeline — or, for batch operations, the whole batch — open
+indefinitely.
+
 ### Context
 
 Hook plugins receive an `UpdateLifecycleContext` with:

@@ -230,8 +230,7 @@ These are non-negotiable design constraints. Do not violate them.
    `BatchUpdateResult`, call `conn.send_auto_paginate(msg)`; new paginatable types implement `Paginatable`. See [Report
    Pagination](docs/api/wire-protocol.md#report-pagination).
 1. **Command-bearing plugin config fields must be validated.** Configs with command strings (`version_command`, `update_command`, hook `commands`)
-   must validate length via `validate_command_length()` (`uptrakit-shared-types::command_validation`); hook counts against
-   `MAX_HOOK_COMMANDS_PER_PHASE`.
+   must validate length via `validate_command_length()` (`uptrakit-shared-types::command_validation`).
 1. **Version/build metadata contract is unified.** All workspace binaries expose consistent `--version` output; enabled features are derived at
    build time via `uptrakit_build_info::emit_enabled_features_env()` — never hardcode per-binary.
 1. **Every command execution path carries a deadline.** The executor resolves `DEFAULT_COMMAND_TIMEOUT` at the execution decision point (never

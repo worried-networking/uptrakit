@@ -870,6 +870,7 @@ See [Tracing Conventions](../development/tracing.md) for the full tracing guide.
 | TCP connect timeout (client)    | 30 seconds             | The enrollment client aborts the TCP connection if it cannot be established within 30 seconds.                 |
 | Response timeout (client)       | 60 seconds             | The `Enroll` and `RequestCertificate` request-response exchanges time out after 60 seconds.                    |
 | Approval timeout (client)       | 30 minutes             | The `wait_for_approval` loop times out after 30 minutes. The caller retries the enrollment flow on timeout.    |
+| Per-hook plugin timeout (agent) | 5 minutes              | Individual pre/post-update hook executions are bounded at 300s. Pre-hook failure is fatal; post-hook is not.   |
 | Update cooldown (agent)         | 5 seconds              | Agents reject consecutive updates within the cooldown period.                                                  |
 | Report pagination total timeout | 5 minutes              | All pages of a paginated report must arrive within 5 minutes of the first page.                                |
 | Report pagination idle timeout  | 15 seconds             | Consecutive pages must arrive within 15 seconds of each other.                                                 |

@@ -426,6 +426,9 @@ const DEFAULT_LINE_COUNT: usize = 150;
 ///   never itself trigger PTY promotion. Only the update command can.
 pub struct TestLifecycleHookPlugin {
     line_count: usize,
+    /// When true, `execute_pre_hook` never returns — used to pin the
+    /// `HOOK_TIMEOUT` deadline in agent-core's lifecycle-hook runners.
+    hang: bool,
 }
 
 impl PluginMeta for TestLifecycleHookPlugin {
@@ -441,6 +444,9 @@ impl LifecycleHook for TestLifecycleHookPlugin {
         _ctx: &UpdateLifecycleContext,
         output_tx: &UpdateOutputSender,
     ) -> Result<PreUpdateHookResult> {
+        if self.hang {
+            std::future::pending::<()>().await;
+        }
         for i in 0..self.line_count {
             send_output(
                 output_tx,
@@ -469,7 +475,11 @@ fn create_test_lifecycle_hook(
         .get("line_count")
         .and_then(serde_json::Value::as_u64)
         .map_or(DEFAULT_LINE_COUNT, |n| n as usize);
-    Ok(Box::new(TestLifecycleHookPlugin { line_count }))
+    let hang = cfg
+        .get("hang")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    Ok(Box::new(TestLifecycleHookPlugin { line_count, hang }))
 }
 
 pub static TEST_LIFECYCLE_HOOK_DESCRIPTOR: PluginDescriptor = PluginDescriptor {

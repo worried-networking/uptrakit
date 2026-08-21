@@ -36,6 +36,11 @@ const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 /// Marker appended when output is truncated at the limit.
 const TRUNCATION_MARKER: &str = "\n... [output truncated at 10 MB] ...\n";
 
+/// Deadline for a single lifecycle-hook invocation (pre/post, single or
+/// batch). Hooks are auxiliary to the update — a wedged hook must not hold
+/// the update pipeline (or the whole batch) forever.
+pub(crate) const HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Append text to a bounded buffer. Once the buffer reaches `max` bytes,
 /// further text is silently dropped and a single truncation marker is appended.
 fn append_bounded(buffer: &mut String, text: &str, max: usize) {
@@ -564,9 +569,28 @@ async fn run_pre_hook_plugins(
         })?;
 
         let (plugin_tx, bridge_handle) = make_output_bridge(output_tx);
-        let result = lifecycle.execute_pre_hook(ctx, &plugin_tx).await;
+        let result =
+            tokio::time::timeout(HOOK_TIMEOUT, lifecycle.execute_pre_hook(ctx, &plugin_tx)).await;
         drop(plugin_tx);
         let _ = bridge_handle.await;
+
+        let result = match result {
+            Ok(inner) => inner,
+            Err(_elapsed) => {
+                let error_msg = format!(
+                    "pre-update hook plugin {} timed out after {}s",
+                    assignment.plugin_type,
+                    HOOK_TIMEOUT.as_secs()
+                );
+                send_output(
+                    output_tx,
+                    &format!("[pre-hook] Failed: {error_msg}"),
+                    OutputStreamType::PreHook,
+                )
+                .await;
+                return Err(AgentCoreError::PreUpdateHookFailed(error_msg));
+            }
+        };
 
         match result {
             Ok(pre_result) => {
@@ -687,9 +711,30 @@ async fn run_post_hook_plugins(
         };
 
         let (plugin_tx, bridge_handle) = make_output_bridge(output_tx);
-        let result = lifecycle.execute_post_hook(ctx, &plugin_tx).await;
+        let result =
+            tokio::time::timeout(HOOK_TIMEOUT, lifecycle.execute_post_hook(ctx, &plugin_tx)).await;
         drop(plugin_tx);
         let _ = bridge_handle.await;
+
+        let result = match result {
+            Ok(inner) => inner,
+            Err(_elapsed) => {
+                let msg = format!(
+                    "post-update hook plugin {} timed out after {}s (non-fatal)",
+                    assignment.plugin_type,
+                    HOOK_TIMEOUT.as_secs()
+                );
+                tracing::warn!(msg);
+                send_output(
+                    output_tx,
+                    &format!("[post-hook] Warning: {msg}"),
+                    OutputStreamType::PostHook,
+                )
+                .await;
+                append_bounded(accumulated_output, &format!("{msg}\n"), MAX_OUTPUT_BYTES);
+                continue;
+            }
+        };
 
         match result {
             Ok(()) => {
@@ -752,9 +797,21 @@ pub(crate) async fn run_batch_pre_hook_plugins(
         let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
         let drain_handle = tokio::spawn(async move { while plugin_rx.recv().await.is_some() {} });
 
-        let result = lifecycle.execute_pre_hook(ctx, &plugin_tx).await;
+        let result =
+            tokio::time::timeout(HOOK_TIMEOUT, lifecycle.execute_pre_hook(ctx, &plugin_tx)).await;
         drop(plugin_tx);
         let _ = drain_handle.await;
+
+        let result = match result {
+            Ok(inner) => inner,
+            Err(_elapsed) => {
+                return Err(report!(UpdateError::HookFailed(format!(
+                    "pre-update hook plugin {} timed out after {}s",
+                    assignment.plugin_type,
+                    HOOK_TIMEOUT.as_secs()
+                ))));
+            }
+        };
 
         let pre_result = result.map_err(|e| {
             report!(UpdateError::HookFailed(format!(
@@ -812,16 +869,27 @@ pub(crate) async fn run_batch_post_hook_plugins(
         let (plugin_tx, mut plugin_rx) = mpsc::channel::<UpdateOutputLine>(100);
         let drain_handle = tokio::spawn(async move { while plugin_rx.recv().await.is_some() {} });
 
-        let result = lifecycle.execute_post_hook(ctx, &plugin_tx).await;
+        let result =
+            tokio::time::timeout(HOOK_TIMEOUT, lifecycle.execute_post_hook(ctx, &plugin_tx)).await;
         drop(plugin_tx);
         let _ = drain_handle.await;
 
-        if let Err(e) = result {
-            tracing::warn!(
-                plugin_type = %assignment.plugin_type,
-                error = %e,
-                "batch post-update hook plugin failed (non-fatal)"
-            );
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    plugin_type = %assignment.plugin_type,
+                    error = %e,
+                    "batch post-update hook plugin failed (non-fatal)"
+                );
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    plugin_type = %assignment.plugin_type,
+                    timeout_secs = HOOK_TIMEOUT.as_secs(),
+                    "batch post-update hook plugin timed out (non-fatal)"
+                );
+            }
         }
     }
 }
@@ -1474,6 +1542,25 @@ mod tests {
         let mut output = String::new();
         let result = run_pre_hook_plugins(&[], &ctx, test_runtime(), &tx, &mut output).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pre_hook_deadline_fails_the_update() {
+        // TestLifecycleHookPlugin with hang: true never returns; the paused
+        // clock auto-advances past HOOK_TIMEOUT.
+        let plugins = vec![PluginAssignment {
+            plugin_type: plugin_ids::TEST_LIFECYCLE_HOOK,
+            package_identifier: "test-lifecycle-hook".to_string(),
+            config: serde_json::json!({"hang": true}),
+        }];
+        let ctx = UpdateLifecycleContext::for_pre_hook("pkg", "1.0", None, None);
+        let (tx, _rx) = mpsc::channel(100);
+        let mut output = String::new();
+
+        let result = run_pre_hook_plugins(&plugins, &ctx, test_runtime(), &tx, &mut output).await;
+
+        let err = result.expect_err("hanging pre-hook must fail the update");
+        assert!(err.to_string().contains("timed out"), "got: {err}");
     }
 
     #[tokio::test]

@@ -106,6 +106,17 @@ Any new `ControllerMessage` variant that triggers command execution on agents
 
 ## Agent-Side Execution Hardening
 
+### Per-hook plugin timeout
+
+Individual pre/post-update lifecycle hook plugin executions have a 5-minute
+timeout (`HOOK_TIMEOUT = 300s`), enforced via `tokio::time::timeout(...)`
+around each hook trait call in agent-core (`crates/shared/agent-core/src/update.rs`).
+On timeout, the underlying command executor's own cleanup guard kills the
+hook's child process (`kill_on_drop(true)`, the default `AbandonmentPolicy`).
+A pre-hook timeout fails the update; a post-hook timeout is logged as a
+warning and does not block the remaining hooks. This prevents a single
+malicious or stuck hook from consuming the entire update timeout budget.
+
 ### Update rate limiting
 
 Both agents enforce an `UPDATE_COOLDOWN` of 5 seconds between consecutive

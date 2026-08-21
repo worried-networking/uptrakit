@@ -11,9 +11,6 @@
 /// from being stored and later executed on managed hosts.
 pub const MAX_COMMAND_LENGTH: usize = 8192;
 
-/// Maximum number of custom hook commands per phase (pre_update or post_update).
-pub const MAX_HOOK_COMMANDS_PER_PHASE: usize = 20;
-
 /// Validate that a command string does not exceed [`MAX_COMMAND_LENGTH`].
 ///
 /// Returns `Ok(())` if the command is within the limit, or `Err` with a

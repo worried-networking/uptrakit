@@ -125,10 +125,13 @@ code execution on managed hosts via plugin configuration manipulation.
 - **Command length limits.** _(Implemented)_ All command strings are validated
   against `MAX_COMMAND_LENGTH` (8,192 bytes). `ShellConfig::validate()` checks
   `version_command` and `update_command`; `DockerConfig::validate()` checks
-  `post_pull_command`; `HooksConfig::validate()` checks custom hook `commands`
-  arrays (both length per command and count per phase via
-  `MAX_HOOK_COMMANDS_PER_PHASE`). Validation constants live in
-  `uptrakit-shared-types::command_validation`.
+  `post_pull_command`; hook plugin configs (`ShellHookConfig`, one
+  `pre_command`/`post_command` string each) validate the same way via
+  `validate_command_length()`. Validation constants live in
+  `uptrakit-shared-types::command_validation`. Hook execution is additionally
+  time-bounded: agent-core wraps every pre/post hook invocation in
+  `HOOK_TIMEOUT` (300s) — a pre-hook timeout fails the update, a post-hook
+  timeout is logged and non-fatal.
 - **Dangerous pattern detection.** _(Implemented)_ The controller emits advisory
   `security_audit:` warnings when command-bearing fields contain patterns
   associated with supply chain attacks (e.g., `curl|bash`, `wget|sh`, `rm -rf /`,
@@ -138,12 +141,11 @@ code execution on managed hosts via plugin configuration manipulation.
   handler validates both plugin-specific config (via `validate_config_str()`) and
   hooks (via `validate_hooks_internal()`), matching the existing update path. This
   closes a gap where the create path previously skipped validation.
-- **Legacy hook array validation.** _(Implemented)_ The `validate_hooks_internal()`
-  function now validates `pre_update_commands` and `post_update_commands` legacy flat
-  arrays in plugin configs — checking element count against
-  `MAX_HOOK_COMMANDS_PER_PHASE`, verifying each element is a string, and validating
-  command length via `validate_command_length()`. Previously these arrays bypassed all
-  validation.
+- **Hook plugin config validation.** _(Implemented)_ Update-lifecycle hook plugins
+  (`hook.shell`, `hook.systemd`) validate their config on create and update — each
+  configured command string passes through `validate_command_length()`. There is no
+  per-phase command _count_ to police: each phase holds exactly one optional command
+  field, not an array.
 - **Malformed hooks rejection.** _(Implemented)_ If the `"hooks"` JSON key is present
   but cannot be parsed as a valid `HooksConfig`, validation now returns HTTP 400
   instead of silently accepting the malformed value.
