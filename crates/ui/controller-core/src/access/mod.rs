@@ -355,10 +355,10 @@ impl AccessEngine {
         Ok(ids.into_iter().collect())
     }
 
-    /// Visibility verdict for `action`: grants matching the action **and**
-    /// surviving scope intersection — any → `Full` (every M1 selector is
-    /// `All`), none → `Visibility::None`. M2.3 adds the selector-union →
-    /// `Filter` arm to this match-then-union shape.
+    /// Visibility verdict for `action`: the selector union of grants
+    /// matching the action, after scope intersection — any `All` → `Full`,
+    /// no matching grant (or scoped out) → `None`, otherwise the per-axis
+    /// union as `Filter` (implemented in M2.1).
     ///
     /// Deliberately omits the dynamic-action registry gate that
     /// [`AccessEngine::authorize`] applies (per the PDP design): M1.5 list
@@ -370,16 +370,13 @@ impl AccessEngine {
         {
             return Visibility::None;
         }
-        let has_matching_grant = ctx
-            .authority
-            .grants
-            .iter()
-            .any(|g| g.patterns.iter().any(|pattern| pattern.matches(action)));
-        if has_matching_grant {
-            Visibility::Full
-        } else {
-            Visibility::None
-        }
+        Visibility::from_selectors(
+            ctx.authority
+                .grants
+                .iter()
+                .filter(|g| g.patterns.iter().any(|pattern| pattern.matches(action)))
+                .map(|g| &g.selector),
+        )
     }
 
     /// Coarse capability summary: actions the principal holds ANY matching
@@ -1150,6 +1147,56 @@ mod tests {
             engine.visibility(&out_of_scope, &actions::HOSTS_READ),
             Visibility::None
         );
+    }
+
+    #[tokio::test]
+    async fn c9_visibility_unions_selectors_per_axis() {
+        let engine = dummy_engine();
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let ctx = ctx_with(
+            vec![
+                resolved_grant_with_selector("hosts:read", Selector::Tags { ids: vec![a] }),
+                resolved_grant_with_selector("hosts:read", Selector::Tags { ids: vec![a, b] }),
+                resolved_grant_with_selector("hosts:read", Selector::Hosts { ids: vec![b] }),
+                // Non-matching grant must not contribute.
+                resolved_grant_with_selector("checks:trigger", Selector::Items { ids: vec![a] }),
+            ],
+            None,
+        );
+        let action = "hosts:read".parse::<Action>().expect("valid action");
+        assert_eq!(
+            engine.visibility(&ctx, &action),
+            Visibility::Filter {
+                tags: BTreeSet::from([a, b]),
+                hosts: BTreeSet::from([b]),
+                software: BTreeSet::new(),
+                items: BTreeSet::new(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn c9_visibility_all_and_none_edges() {
+        let engine = dummy_engine();
+        let action = "hosts:read".parse::<Action>().expect("valid action");
+        // Any All among matching grants ⇒ Full.
+        let full_ctx = ctx_with(
+            vec![
+                resolved_grant_with_selector(
+                    "hosts:read",
+                    Selector::Tags {
+                        ids: vec![Uuid::from_u128(1)],
+                    },
+                ),
+                resolved_grant("hosts:read"),
+            ],
+            None,
+        );
+        assert_eq!(engine.visibility(&full_ctx, &action), Visibility::Full);
+        // No matching grant ⇒ None.
+        let none_ctx = ctx_with(vec![resolved_grant("checks:trigger")], None);
+        assert_eq!(engine.visibility(&none_ctx, &action), Visibility::None);
     }
 
     #[test]
