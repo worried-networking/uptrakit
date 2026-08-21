@@ -1,0 +1,23 @@
+# Production `.authorize(` call sites (the coarse, targetless gate), per
+# file. Format: <repo-relative path>|<count>|<classification>
+#   coarse-only      — list/summary/capability sites, coarse by design
+#   needs-fine-check — M2.3 must route these through authorize_target
+#   fine-checked     — fully routed through authorize_target; count MUST
+#                      be 0 (no coarse calls left) and the script
+#                      positively verifies a production, non-comment
+#                      authorize_target( call
+#   test-only        — every .authorize( hit is in test code (count 0);
+#                      row required so the test-boundary heuristic can
+#                      never silently zero a file's production sites
+# Checked by ci/verify_access_enforcement_sites.sh (also enforces the
+# series invariant: gate lift requires zero needs-fine-check rows; the
+# three M2.3 target files are pinned — see the script header).
+crates/ui/controller-core/src/access/mod.rs|1|coarse-only
+crates/ui/mcp/src/auth.rs|2|coarse-only
+crates/ui/mcp/src/oauth/tool_auth.rs|1|needs-fine-check
+crates/ui/web-api/src/event_delivery.rs|0|test-only
+crates/ui/web-api/src/middleware/action.rs|3|needs-fine-check
+crates/ui/web-api/src/surface_action_registry.rs|0|test-only
+crates/ui/web-api/src/visibility.rs|1|coarse-only
+crates/ui/web-api/src/routes/surfaces.rs|1|needs-fine-check
+crates/ui/web-api/src/routes/users.rs|1|coarse-only

@@ -64,6 +64,7 @@ python3 ci/verify_no_orphan_modules.py                               # Every tra
 bash ci/verify_no_new_cfg_not_feature.sh                             # Additive-only feature flags: no new negated-feature cfg outside allowlist
 python3 ci/verify_action_security_declarations.py                    # Operation oauth2 scope lists match handler action extractors
 bash ci/verify_raw_sql_expect_taxonomy.sh                             # Raw-SQL #[expect] reasons match the four-category taxonomy (see coding-standards.md § Raw-SQL ban)
+bash ci/verify_access_enforcement_sites.sh                            # Coarse authorize() site inventory + M2.3 series invariant (see access_grants.rs SelectorPhaseGate)
 cargo xtask contribution-monotonicity-check                          # Plugin contributions survive feature unification (ADR-0032)
 ```
 

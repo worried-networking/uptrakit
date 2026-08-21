@@ -98,6 +98,7 @@ jobs:
       - run: bash ci/verify_engine_owned_entities.sh
       - run: python3 ci/verify_action_security_declarations.py
       - run: bash ci/verify_agents_md_budget.sh
+      - run: bash ci/verify_access_enforcement_sites.sh
       - run: bash ci/test_verify_no_raw_body_extractors.sh
       # fetch-depth: 0 + per-event BASE_REF are load-bearing for the gate's
       # history check; a named BASE_REF that fails to resolve HARD-FAILS by
