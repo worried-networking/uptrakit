@@ -90,6 +90,10 @@ display time:
 - A repository with no releases at all, or only prereleases while `include_prereleases` is off,
   is still an empty success, not an error.
 
+Use `tag_prefix` — not `tag_strip_prefix` — to select a series. `tag_strip_prefix` only strips; set
+to a full series prefix it strips without filtering, so tags from every other series in the
+repository still compare as candidate versions and reintroduce cross-series phantom updates.
+
 ### `releases.gitlab` configuration fields
 
 The GitLab Releases plugin is **controller-side only**. It fetches upstream release metadata via
