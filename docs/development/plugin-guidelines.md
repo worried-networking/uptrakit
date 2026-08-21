@@ -835,6 +835,27 @@ plugin code to run commands locally (via `LocalCommandExecutor`) or remotely (vi
 
 See [Command Executor](command-executor.md) for the full trait reference, `CommandSpec` constructors, and guidance on implementing custom executors.
 
+### Command timeout classification
+
+Every `CommandSpec` executes under a deadline; which one depends on the kind of command:
+
+- **Update-path commands** (an update/install/removal invocation dispatched through the controller's update flow) are covered automatically by the
+  dispatch payload's update budget -- no per-plugin `with_timeout` call is needed.
+- **Version detection and index-refresh commands** ride the executor's `DEFAULT_COMMAND_TIMEOUT` (600s) when the spec sets no timeout of its own --
+  again, no change needed for most plugins.
+- **Plugins that run arbitrary user-supplied scripts** (rather than a fixed, known command) should expose an explicit timeout field on their config,
+  validated to a bounded range (e.g. 1..=86400 seconds), and apply it via `CommandSpec::with_timeout()`. The Shell plugin's `timeout_seconds`
+  (`crates/plugins/generic/shell/src/config.rs`) is the reference implementation.
+- **HTTP requests** (release fetching, etc.) are bounded by the shared HTTP client's request timeout (see `build_plugin_http_client` above), not by
+  `CommandSpec` timeouts.
+
+A plugin-set timeout on an update-path `CommandSpec` still applies as the effective deadline: budget-forwarding only fills in a timeout when the
+spec doesn't already carry one.
+
+**Interaction with config tests:** interactive config-test runs (the "Test Configuration" UI flow) are capped at `CONFIG_TEST_OP_TIMEOUT` (25s)
+regardless of any plugin-level timeout. A `timeout_seconds` set far above 25s is honored on real detect/update runs, but a `version_command` that
+takes longer than 25s to return will still fail the config-test flow with a deadline error.
+
 ### `execute_and_capture` helper
 
 For the common pattern of running a command and capturing its stdout as a `String`, use the shared helper from `uptrakit-plugin-infrastructure-core`:

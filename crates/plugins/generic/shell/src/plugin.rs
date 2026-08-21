@@ -64,15 +64,15 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for ShellPlugin {
 
         let cmd = cmd_template.replace("{package_identifier}", &shell_escape(package_identifier));
 
-        let output = self
-            .executor
-            .execute_quiet(&CommandSpec::shell(&cmd))
-            .await
-            .map_err(|e| {
-                report!(PluginError::PluginInternal(format!(
-                    "version_command failed: {e}"
-                )))
-            })?;
+        let mut spec = CommandSpec::shell(&cmd);
+        if let Some(t) = self.config.timeout_seconds {
+            spec = spec.with_timeout(std::time::Duration::from_secs(u64::from(t)));
+        }
+        let output = self.executor.execute_quiet(&spec).await.map_err(|e| {
+            report!(PluginError::PluginInternal(format!(
+                "version_command failed: {e}"
+            )))
+        })?;
 
         let version = output
             .output
@@ -128,15 +128,15 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ShellPlugin {
 
         tracing::debug!(command = %cmd, "running shell update command");
 
-        let cmd_output = self
-            .executor
-            .execute(&CommandSpec::shell(&cmd), output_tx)
-            .await
-            .map_err(|e| {
-                report!(PluginError::InstallFailed(format!(
-                    "update_command failed: {e}"
-                )))
-            })?;
+        let mut spec = CommandSpec::shell(&cmd);
+        if let Some(t) = self.config.timeout_seconds {
+            spec = spec.with_timeout(std::time::Duration::from_secs(u64::from(t)));
+        }
+        let cmd_output = self.executor.execute(&spec, output_tx).await.map_err(|e| {
+            report!(PluginError::InstallFailed(format!(
+                "update_command failed: {e}"
+            )))
+        })?;
 
         Ok(ExecuteUpdateResult::new(
             cmd_output.output,
@@ -168,6 +168,7 @@ mod tests {
             ShellConfig {
                 version_command: version_command.map(String::from),
                 update_command: update_command.map(String::from),
+                timeout_seconds: None,
                 prefer_interactive: false,
                 resumable: false,
                 version_strip_prefix: None,

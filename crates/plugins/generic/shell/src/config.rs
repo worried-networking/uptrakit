@@ -37,6 +37,17 @@ pub struct ShellConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_command: Option<String>,
 
+    /// Maximum execution time in seconds for `version_command` and
+    /// `update_command` (1..=86400).
+    ///
+    /// When unset, `version_command` runs under the executor's default
+    /// timeout and `update_command` runs under the update dispatch's budget
+    /// instead. Set this when a shell command needs a different bound than
+    /// those defaults — most commonly a shorter one for scripts that should
+    /// fail fast, or a longer one for slow installers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u32>,
+
     /// Literal prefix stripped from the detected version line.
     ///
     /// After the first non-empty trimmed line of `version_command` output is
@@ -115,6 +126,14 @@ impl PluginConfig for ShellConfig {
                 e,
             ));
         }
+        if let Some(t) = self.timeout_seconds
+            && !(1..=86_400).contains(&t)
+        {
+            return Err(PluginConfigValidationError::invalid_field(
+                "timeout_seconds",
+                "must be between 1 and 86400 seconds",
+            ));
+        }
         Ok(())
     }
 
@@ -137,6 +156,9 @@ impl PluginConfig for ShellConfig {
             FormFieldDescriptor::new("resumable", "Resumable (Restart Required)")
                 .with_type(FormFieldType::Toggle)
                 .with_help_text("Mark the update as requiring a host restart to take effect. The item stays in AwaitingRestart until the agent reports the expected version after reboot."),
+            FormFieldDescriptor::new("timeout_seconds", "Command Timeout (seconds)")
+                .with_type(FormFieldType::Number)
+                .with_help_text("Maximum execution time for the version and update commands (1-86400). Leave empty for the defaults (600s detection, update budget for updates)."),
         ]
     }
 }
@@ -161,6 +183,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: None,
+            timeout_seconds: None,
             version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
@@ -173,6 +196,7 @@ mod tests {
         let config = ShellConfig {
             version_command: None,
             update_command: Some("apt-get install -y myapp".to_string()),
+            timeout_seconds: None,
             version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
@@ -185,6 +209,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("apt-get install -y myapp".to_string()),
+            timeout_seconds: None,
             version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
@@ -197,6 +222,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: None,
+            timeout_seconds: None,
             version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
@@ -211,6 +237,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("myapp update".to_string()),
+            timeout_seconds: None,
             version_strip_prefix: None,
             prefer_interactive: true,
             resumable: false,
@@ -232,6 +259,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("myapp update".to_string()),
+            timeout_seconds: None,
             version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
@@ -250,6 +278,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some(cmd),
             update_command: None,
+            timeout_seconds: None,
             version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
@@ -263,6 +292,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some(cmd),
             update_command: None,
+            timeout_seconds: None,
             version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
@@ -278,6 +308,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("echo ok".to_string()),
             update_command: Some(cmd),
+            timeout_seconds: None,
             version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
@@ -344,5 +375,36 @@ mod tests {
             deserialized.version_strip_prefix,
             config.version_strip_prefix
         );
+    }
+
+    #[test]
+    fn validate_timeout_seconds_bounds() {
+        let mut config = ShellConfig {
+            version_command: Some("echo 1".to_string()),
+            update_command: None,
+            timeout_seconds: Some(0),
+            version_strip_prefix: None,
+            prefer_interactive: false,
+            resumable: false,
+        };
+        assert!(config.validate().is_err());
+        config.timeout_seconds = Some(86_401);
+        assert!(config.validate().is_err());
+        config.timeout_seconds = Some(1);
+        assert!(config.validate().is_ok());
+        config.timeout_seconds = Some(86_400);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn serde_timeout_seconds_roundtrip_and_default() {
+        let json = r#"{"version_command":"echo 1","timeout_seconds":300}"#;
+        let config: ShellConfig = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(config.timeout_seconds, Some(300));
+        let absent: ShellConfig =
+            serde_json::from_str(r#"{"version_command":"echo 1"}"#).expect("deserialize");
+        assert_eq!(absent.timeout_seconds, None);
+        let serialized = serde_json::to_string(&absent).expect("serialize");
+        assert!(!serialized.contains("timeout_seconds"));
     }
 }
