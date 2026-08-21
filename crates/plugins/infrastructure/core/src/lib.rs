@@ -30,6 +30,7 @@ pub mod macros;
 pub mod plugin_config;
 pub mod plugin_ops;
 pub mod registration;
+pub mod release_filters;
 pub mod roles;
 pub mod secret_paths;
 pub mod serde_helpers;
@@ -73,6 +74,9 @@ pub use catalog::{InstancePluginStates, PluginCatalog};
 
 // Re-export the shared command-capture helper so plugin crates access it through this crate
 pub use command::execute_and_capture;
+
+// Re-export the shared release-source filter diagnostics
+pub use release_filters::FilteredOutDiagnostic;
 
 // Re-export shared package-manager helpers
 pub use helpers::{

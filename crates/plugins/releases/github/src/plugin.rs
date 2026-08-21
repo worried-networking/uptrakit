@@ -16,9 +16,10 @@ use tokio::io::AsyncWriteExt;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
-    AttestationStatus, ConfigModel, ConfigTestKind, ExecuteUpdateResult, HostRequirements,
-    HostRuntime, OutputStreamType, PluginCapability, PluginError, PluginFamily, ReleaseAsset,
-    ReleaseInfo, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version, declare_plugin,
+    AttestationStatus, ConfigModel, ConfigTestKind, ExecuteUpdateResult, FilteredOutDiagnostic,
+    HostRequirements, HostRuntime, OutputStreamType, PluginCapability, PluginError, PluginFamily,
+    ReleaseAsset, ReleaseInfo, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
+    declare_plugin,
 };
 use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
 
@@ -193,11 +194,8 @@ impl GitHubPlugin {
 
     /// Decide whether a fully-filtered fetch result is a configuration error.
     ///
-    /// Returns `Some(message)` when releases passed baseline checks but the
-    /// series/asset filters removed all of them — a misconfigured
-    /// `tag_prefix`/`asset_patterns` would otherwise present as a silent
-    /// "no releases". Returns `None` for genuinely empty results or when no
-    /// filter is active.
+    /// Delegates to the shared [`FilteredOutDiagnostic`] so the operator-facing
+    /// wording stays identical across release-source plugins.
     fn filtered_out_error(
         &self,
         raw_count: usize,
@@ -205,42 +203,20 @@ impl GitHubPlugin {
         surviving_count: usize,
         window_exhausted: bool,
     ) -> Option<String> {
-        if baseline_count == 0 || surviving_count > 0 {
-            return None;
+        FilteredOutDiagnostic {
+            raw_count,
+            baseline_count,
+            surviving_count,
+            window_exhausted,
+            max_pages: MAX_PAGES,
+            per_page: PER_PAGE,
+            tag_prefix: self.config.tag_prefix.as_deref(),
+            asset_patterns: &self.config.asset_patterns,
+            // Compiled filters, not the raw config strings: this check must
+            // never disagree with the gating convert_release actually applies.
+            asset_filters_active: !self.asset_filters.is_empty(),
         }
-        let tag_prefix_active = self
-            .config
-            .tag_prefix
-            .as_deref()
-            .is_some_and(|p| !p.is_empty());
-        // Compiled filters, not the raw config strings: this check must never
-        // disagree with the gating convert_release actually applies.
-        let asset_patterns_active = !self.asset_filters.is_empty();
-        if !tag_prefix_active && !asset_patterns_active {
-            return None;
-        }
-        let window_note = if window_exhausted {
-            format!(
-                "the fetch window ({MAX_PAGES} pages x {PER_PAGE} releases = newest {}) was \
-                 exhausted, so matching releases may exist beyond it",
-                MAX_PAGES * PER_PAGE
-            )
-        } else {
-            "every upstream release was fetched, so nothing upstream matches the filters"
-                .to_string()
-        };
-        Some(format!(
-            "no releases survive the configured filters (tag_prefix={:?}, asset_patterns={:?}): \
-             {baseline_count} of {raw_count} fetched releases passed draft/prerelease checks but \
-             all were filtered out; {window_note}. These filters come from the assignment's \
-             effective config — a plugin config profile or a per-host config_override (e.g. one \
-             written by autodiscovery). To recover, edit or clear tag_prefix on this item's \
-             fetch_releases assignment and version_strip_prefix on its detect_version \
-             assignment (an upstream series rename stales both together). Do not set \
-             tag_strip_prefix to the full series prefix: it strips without filtering and \
-             recreates cross-series phantom updates.",
-            self.config.tag_prefix, self.config.asset_patterns,
-        ))
+        .message()
     }
 
     /// Convert a GitHub API release to an `UpstreamRelease`, applying filters.
@@ -954,10 +930,8 @@ mod tests {
     use super::*;
     use crate::api_types::{GitHubAsset, GitHubRelease};
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, PluginCapability, StandardHostRuntime, UpdateExecutor as _,
-    };
-    use uptrakit_plugin_infrastructure_core::{
-        PluginHttpClientConfig, ReleaseFetcher, SsrfMode, build_plugin_http_client,
+        HostCapabilities, PluginCapability, PluginHttpClientConfig, ReleaseFetcher, SsrfMode,
+        StandardHostRuntime, UpdateExecutor as _, build_plugin_http_client,
     };
 
     fn test_config() -> GitHubConfig {

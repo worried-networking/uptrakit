@@ -79,9 +79,12 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for ShellPlugin {
             .lines()
             .map(str::trim)
             .find(|l| !l.is_empty())
-            .map(|line| match self.config.version_strip_prefix.as_deref() {
-                Some(prefix) => line.strip_prefix(prefix).unwrap_or(line),
-                None => line,
+            .map(|line| {
+                self.config
+                    .version_strip_prefix
+                    .as_deref()
+                    .and_then(|prefix| line.strip_prefix(prefix))
+                    .unwrap_or(line)
             })
             // Stripping can expose whitespace the outer trim couldn't see
             // ("myapp-v 1.2.3" with prefix "myapp-v" leaves " 1.2.3").
