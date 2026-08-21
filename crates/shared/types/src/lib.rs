@@ -29,6 +29,7 @@ mod severity;
 pub mod ssrf;
 mod update_category;
 mod update_status;
+pub mod version_prefix;
 
 pub use batch_status::{BatchStatus, ParseBatchStatusError};
 pub use config_test_kind::ConfigTestKind;
