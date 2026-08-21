@@ -23,6 +23,7 @@ rustix = { workspace = true, features = ["pty", "process", "termios", "stdio", "
 parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
+futures = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 rustix = { workspace = true, features = ["pty", "process", "termios", "stdio", "alloc", "std"] }

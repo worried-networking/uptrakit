@@ -60,6 +60,25 @@ re-running. Grouping helpers — `unfinished()` = [Queued, Pending, InProgress, 
 AwaitingRestart] (occupies host execution slot; excludes Queued). Terminal statuses appear in
 neither helper set.
 
+**Command Deadline**:
+The bound on a single command execution inside the `CommandExecutor` implementation. Resolves to
+`DEFAULT_COMMAND_TIMEOUT` (600s) at the execution decision point when a `CommandSpec` carries no
+explicit `timeout`; the default is never written back into the spec.
+_Avoid_: timeout (too generic — this is specifically the in-executor resolved bound)
+
+**Abandonment Policy**:
+Per-`CommandSpec` behavior (`CloseOnAbandon` / `DrainOnAbandon`) governing what happens if the
+execution future is dropped externally before the command finishes. `CloseOnAbandon` (default)
+kills the child immediately; `DrainOnAbandon` lets it run to completion with output drained,
+used for Update commands that must not be interrupted mid-flight.
+_Avoid_: cancellation policy (this is about the future being dropped, not an explicit cancel call)
+
+**Update Budget**:
+The dispatch payload's `timeout` (7200s default), forwarded into a non-interactive Update's
+`CommandSpec` via `BudgetForwardingExecutor` whenever the plugin did not already set its own
+timeout. Plugin-set timeouts are always respected over the budget.
+_Avoid_: update timeout (ambiguous with the outer pipeline timeout that races it)
+
 **Controller**:
 The central server that coordinates all Services.
 _Avoid_: backend, server, hub

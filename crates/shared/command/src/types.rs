@@ -53,6 +53,33 @@ pub enum CommandMode {
     },
 }
 
+/// Default command timeout applied by executors when a [`CommandSpec`]
+/// carries no explicit timeout.
+///
+/// Resolved at the execution decision point (executor method entry) — never
+/// written into the spec itself, so downstream wrappers (interactive
+/// promotion, update-budget forwarding) still observe `timeout: None` and
+/// can substitute their own budgets.
+pub const DEFAULT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// What happens to a running command when the executor future is dropped
+/// before the command completes (external cancellation: an operation-level
+/// deadline fired, or the task driving the update was dropped).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AbandonmentPolicy {
+    /// Kill the child and abort the pipe readers immediately. The child is
+    /// spawned with `kill_on_drop(true)`, so dropping its handle delivers
+    /// `SIGKILL`. Correct for read-only commands (version detection, index
+    /// refresh) — the default.
+    #[default]
+    CloseOnAbandon,
+    /// Let the child run to completion and keep draining its output pipes,
+    /// bounded by the command's own timeout budget. For mutating update
+    /// commands, where a mid-flight `SIGKILL` can corrupt package-manager
+    /// state.
+    DrainOnAbandon,
+}
+
 /// Specification for a command to execute.
 ///
 /// Plugins build a `CommandSpec` describing *what* to run, and the injected
@@ -87,6 +114,9 @@ pub struct CommandSpec {
     /// the program name (`sudo NAME=VALUE PROG …`); the sudoers entry must
     /// carry `SETENV:` for sudo to accept this form.
     pub envs: Vec<(String, String)>,
+    /// What happens to the running command if the executor future is dropped
+    /// before completion. See [`AbandonmentPolicy`].
+    pub abandonment: AbandonmentPolicy,
 }
 
 /// Output captured from a command execution.
@@ -114,6 +144,7 @@ impl CommandSpec {
             timeout: None,
             privileged: false,
             envs: vec![],
+            abandonment: AbandonmentPolicy::CloseOnAbandon,
         }
     }
 
@@ -128,6 +159,7 @@ impl CommandSpec {
             timeout: None,
             privileged: false,
             envs: vec![],
+            abandonment: AbandonmentPolicy::CloseOnAbandon,
         }
     }
 
@@ -142,6 +174,7 @@ impl CommandSpec {
             timeout: None,
             privileged: false,
             envs: vec![],
+            abandonment: AbandonmentPolicy::CloseOnAbandon,
         }
     }
 
@@ -179,13 +212,19 @@ impl CommandSpec {
     /// Set a maximum execution time for the command (builder pattern).
     ///
     /// When the deadline is reached the executor returns
-    /// [`CommandError::TimedOut`]. The child process is sent `SIGKILL` via
-    /// `kill_on_drop(true)`, which fires automatically when the
-    /// `tokio::process::Child` handle is dropped as the timed-out future is
-    /// cancelled.
+    /// [`crate::error::CommandError::TimedOut`] and kills the child process.
+    /// Executors apply [`DEFAULT_COMMAND_TIMEOUT`] when no timeout is set.
     #[must_use]
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    /// Let the command survive abandonment of the executor future
+    /// (builder pattern). See [`AbandonmentPolicy::DrainOnAbandon`].
+    #[must_use]
+    pub fn drain_on_abandon(mut self) -> Self {
+        self.abandonment = AbandonmentPolicy::DrainOnAbandon;
         self
     }
 

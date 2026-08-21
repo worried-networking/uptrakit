@@ -19,9 +19,7 @@ use std::sync::Arc;
 use rootcause::prelude::*;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
-#[cfg(feature = "interactive")]
-use uptrakit_command::CommandExecutor;
-use uptrakit_command::UpdateOutputLine;
+use uptrakit_command::{CommandExecutor, UpdateOutputLine};
 use uptrakit_plugin_infrastructure_registry::{
     ExecuteUpdateResult, HostRuntime, PluginError, UpdateLifecycleContext, get_descriptor,
 };
@@ -1067,6 +1065,84 @@ pub struct InteractiveUpdateHandle {
 #[cfg(feature = "interactive")]
 pub type InteractiveChannels = (mpsc::Sender<Vec<u8>>, mpsc::Sender<i32>, mpsc::Receiver<()>);
 
+/// Fill the dispatch payload's update timeout into a spec that carries no
+/// plugin-set timeout, and mark it drain-on-abandon (update commands mutate
+/// host state — a dropped update task must not SIGKILL them mid-flight).
+/// Plugin-set timeouts are always respected.
+fn apply_update_budget(
+    spec: &uptrakit_command::CommandSpec,
+    update_timeout: std::time::Duration,
+) -> uptrakit_command::CommandSpec {
+    let mut spec = spec.clone();
+    if spec.timeout.is_none() {
+        spec.timeout = Some(update_timeout);
+    }
+    spec.abandonment = uptrakit_command::AbandonmentPolicy::DrainOnAbandon;
+    spec
+}
+
+/// Wraps the runtime executor for **non-interactive** updates so that every
+/// command the update plugin runs carries the update budget from the
+/// dispatch payload (see [`apply_update_budget`]). Installed as
+/// `update_exec_runtime` by `spawn_update_task` (single updates) and around
+/// the per-item updater construction in `run_execute_batch_update` (batch
+/// updates), so only update-command execution routes through it — hooks and
+/// version detection keep the plain runtime (hooks get their own deadline;
+/// detection uses the executor default).
+pub(crate) struct BudgetForwardingExecutor {
+    pub(crate) inner: Arc<dyn CommandExecutor>,
+    pub(crate) update_timeout: std::time::Duration,
+}
+
+#[async_trait::async_trait]
+impl CommandExecutor for BudgetForwardingExecutor {
+    async fn execute(
+        &self,
+        spec: &uptrakit_command::CommandSpec,
+        output_tx: &mpsc::Sender<uptrakit_command::UpdateOutputLine>,
+    ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+        self.inner
+            .execute(&apply_update_budget(spec, self.update_timeout), output_tx)
+            .await
+    }
+
+    async fn execute_quiet(
+        &self,
+        spec: &uptrakit_command::CommandSpec,
+    ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+        self.inner
+            .execute_quiet(&apply_update_budget(spec, self.update_timeout))
+            .await
+    }
+}
+
+/// Wrap `runtime`'s executor in [`BudgetForwardingExecutor`] for update
+/// execution, downcast-gated to `StandardHostRuntime`.
+///
+/// Plugin construction downcasts the runtime it is handed (RouterOsPlugin →
+/// `RouterOsHostRuntime`), so only the one runtime type we can faithfully
+/// rebuild is wrapped; any other runtime returns `None` and callers keep the
+/// original. RouterOS commands never use the generic `CommandExecutor` (its
+/// `executor()` is a Noop), so nothing is lost by the pass-through.
+pub(crate) fn budget_runtime_for_update(
+    runtime: &Arc<dyn HostRuntime>,
+    update_timeout: std::time::Duration,
+) -> Option<Arc<dyn HostRuntime>> {
+    use uptrakit_plugin_infrastructure_registry::{StandardHostRuntime, construct_host_runtime};
+    runtime
+        .as_any()
+        .downcast_ref::<StandardHostRuntime>()
+        .is_some()
+        .then(|| {
+            let budget_executor: Arc<dyn uptrakit_command::CommandExecutor> =
+                Arc::new(BudgetForwardingExecutor {
+                    inner: runtime.executor(),
+                    update_timeout,
+                });
+            construct_host_runtime(budget_executor, runtime.capabilities().clone())
+        })
+}
+
 /// A [`CommandExecutor`] wrapper that intercepts the first `execute()` call
 /// and promotes it to `execute_interactive()`.
 ///
@@ -1142,10 +1218,7 @@ impl CommandExecutor for ForwardingInteractiveExecutor {
             // Propagate the update deadline into the PTY session when the plugin
             // didn't set its own timeout — otherwise an interactive command could
             // run unbounded. Plugin-set timeouts are always respected.
-            let mut promoted_spec = spec.clone();
-            if promoted_spec.timeout.is_none() {
-                promoted_spec.timeout = Some(self.update_timeout);
-            }
+            let promoted_spec = apply_update_budget(spec, self.update_timeout);
             match self
                 .inner
                 .execute_interactive(&promoted_spec, output_tx)
@@ -1184,7 +1257,7 @@ impl CommandExecutor for ForwardingInteractiveExecutor {
                         error = %e,
                         "interactive execution unavailable, falling back to non-interactive"
                     );
-                    self.inner.execute(spec, output_tx).await
+                    self.inner.execute(&promoted_spec, output_tx).await
                 }
             }
         } else {
@@ -1196,7 +1269,9 @@ impl CommandExecutor for ForwardingInteractiveExecutor {
         &self,
         spec: &uptrakit_command::CommandSpec,
     ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
-        self.inner.execute_quiet(spec).await
+        self.inner
+            .execute_quiet(&apply_update_budget(spec, self.update_timeout))
+            .await
     }
 
     fn supports_interactive(&self) -> bool {
@@ -1517,6 +1592,160 @@ mod tests {
         }
         assert!(found);
     }
+
+    // ── Update-budget forwarding tests ──────────────────────────────────────
+
+    /// `CommandExecutor` stub that records the last spec passed to `execute`
+    /// or `execute_quiet`, and always succeeds. Mirrors
+    /// `interactive_lifecycle_tests::RecordingExecutor` but for the
+    /// non-interactive path (no `execute_interactive` override needed).
+    struct RecordingExecutor {
+        recorded: parking_lot::Mutex<Option<uptrakit_command::CommandSpec>>,
+    }
+
+    #[async_trait::async_trait]
+    impl CommandExecutor for RecordingExecutor {
+        async fn execute(
+            &self,
+            spec: &uptrakit_command::CommandSpec,
+            _output_tx: &mpsc::Sender<UpdateOutputLine>,
+        ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+            *self.recorded.lock() = Some(spec.clone());
+            Ok(uptrakit_command::CommandOutput {
+                output: String::new(),
+                exit_code: 0,
+            })
+        }
+
+        async fn execute_quiet(
+            &self,
+            spec: &uptrakit_command::CommandSpec,
+        ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+            *self.recorded.lock() = Some(spec.clone());
+            Ok(uptrakit_command::CommandOutput {
+                output: String::new(),
+                exit_code: 0,
+            })
+        }
+    }
+
+    /// A plugin-unbudgeted spec gets the dispatch payload's update timeout
+    /// and `DrainOnAbandon` — update commands mutate host state, so a dropped
+    /// update task must not SIGKILL them mid-flight. Uses
+    /// `uptrakit_wire::DEFAULT_UPDATE_TIMEOUT` directly rather than
+    /// hand-writing 7200.
+    #[tokio::test]
+    async fn budget_forwarding_fills_timeout_and_drain_policy() {
+        let stub = Arc::new(RecordingExecutor {
+            recorded: parking_lot::Mutex::new(None),
+        });
+        let forwarding = BudgetForwardingExecutor {
+            inner: stub.clone(),
+            update_timeout: uptrakit_wire::DEFAULT_UPDATE_TIMEOUT,
+        };
+        let (output_tx, _output_rx) = mpsc::channel(10);
+        let spec = uptrakit_command::CommandSpec::shell("true");
+        let _ = forwarding.execute(&spec, &output_tx).await;
+
+        let got = stub
+            .recorded
+            .lock()
+            .take()
+            .expect("stub should record spec");
+        assert_eq!(got.timeout, Some(uptrakit_wire::DEFAULT_UPDATE_TIMEOUT));
+        assert_eq!(
+            got.abandonment,
+            uptrakit_command::AbandonmentPolicy::DrainOnAbandon
+        );
+    }
+
+    /// A plugin-set timeout survives budget forwarding untouched; the drain
+    /// policy is still applied.
+    #[tokio::test]
+    async fn budget_forwarding_respects_plugin_set_timeout() {
+        let stub = Arc::new(RecordingExecutor {
+            recorded: parking_lot::Mutex::new(None),
+        });
+        let forwarding = BudgetForwardingExecutor {
+            inner: stub.clone(),
+            update_timeout: uptrakit_wire::DEFAULT_UPDATE_TIMEOUT,
+        };
+        let (output_tx, _output_rx) = mpsc::channel(10);
+        let spec = uptrakit_command::CommandSpec::shell("true")
+            .with_timeout(std::time::Duration::from_secs(5));
+        let _ = forwarding.execute(&spec, &output_tx).await;
+
+        let got = stub
+            .recorded
+            .lock()
+            .take()
+            .expect("stub should record spec");
+        assert_eq!(got.timeout, Some(std::time::Duration::from_secs(5)));
+        assert_eq!(
+            got.abandonment,
+            uptrakit_command::AbandonmentPolicy::DrainOnAbandon
+        );
+    }
+
+    /// `budget_runtime_for_update` wraps a `StandardHostRuntime` (forwarding
+    /// the budget through its executor) but returns `None` for any other
+    /// `HostRuntime` impl. Red check for the RouterOS downcast hazard: make
+    /// the helper wrap unconditionally and the second half of this test
+    /// fails.
+    #[tokio::test]
+    async fn budget_runtime_for_update_gates_on_standard_runtime() {
+        use uptrakit_plugin_infrastructure_core::{HostCapabilities, StandardHostRuntime};
+
+        // StandardHostRuntime: wrapping succeeds, executor forwards the budget.
+        let stub = Arc::new(RecordingExecutor {
+            recorded: parking_lot::Mutex::new(None),
+        });
+        let standard: Arc<dyn HostRuntime> = Arc::new(StandardHostRuntime::new(
+            stub.clone(),
+            HostCapabilities::default(),
+        ));
+        let wrapped = budget_runtime_for_update(&standard, uptrakit_wire::DEFAULT_UPDATE_TIMEOUT)
+            .expect("StandardHostRuntime must be wrapped");
+        let (output_tx, _output_rx) = mpsc::channel(10);
+        let spec = uptrakit_command::CommandSpec::shell("true");
+        let _ = wrapped.executor().execute(&spec, &output_tx).await;
+
+        let got = stub
+            .recorded
+            .lock()
+            .take()
+            .expect("stub should record spec");
+        assert_eq!(got.timeout, Some(uptrakit_wire::DEFAULT_UPDATE_TIMEOUT));
+        assert_eq!(
+            got.abandonment,
+            uptrakit_command::AbandonmentPolicy::DrainOnAbandon
+        );
+
+        // A non-StandardHostRuntime impl must pass through unwrapped.
+        struct OtherRuntime {
+            executor: Arc<dyn CommandExecutor>,
+            capabilities: HostCapabilities,
+        }
+        impl HostRuntime for OtherRuntime {
+            fn capabilities(&self) -> &HostCapabilities {
+                &self.capabilities
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+            fn executor(&self) -> Arc<dyn CommandExecutor> {
+                Arc::clone(&self.executor)
+            }
+        }
+        let other: Arc<dyn HostRuntime> = Arc::new(OtherRuntime {
+            executor: Arc::new(uptrakit_command::NoopCommandExecutor),
+            capabilities: HostCapabilities::default(),
+        });
+        assert!(
+            budget_runtime_for_update(&other, uptrakit_wire::DEFAULT_UPDATE_TIMEOUT).is_none(),
+            "non-StandardHostRuntime must pass through unwrapped"
+        );
+    }
 }
 
 #[cfg(all(test, feature = "interactive"))]
@@ -1629,6 +1858,131 @@ mod interactive_lifecycle_tests {
             .take()
             .expect("stub should record spec");
         assert_eq!(got2.timeout, Some(Duration::from_secs(5)));
+    }
+
+    /// Red check for the :1187-equivalent fix: when `execute_interactive`
+    /// fails, the non-interactive fallback must run the *promoted* spec
+    /// (timeout filled from `update_timeout`), not the plugin's original
+    /// unbudgeted spec. Revert that fix and this test fails.
+    #[tokio::test]
+    async fn interactive_fallback_uses_promoted_spec() {
+        struct FallbackRecordingExecutor {
+            recorded: parking_lot::Mutex<Option<CommandSpec>>,
+        }
+
+        #[async_trait::async_trait]
+        impl CommandExecutor for FallbackRecordingExecutor {
+            async fn execute(
+                &self,
+                spec: &CommandSpec,
+                _output_tx: &mpsc::Sender<UpdateOutputLine>,
+            ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+                *self.recorded.lock() = Some(spec.clone());
+                Ok(uptrakit_command::CommandOutput {
+                    output: String::new(),
+                    exit_code: 0,
+                })
+            }
+
+            async fn execute_quiet(
+                &self,
+                _spec: &CommandSpec,
+            ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+                Ok(uptrakit_command::CommandOutput {
+                    output: String::new(),
+                    exit_code: 0,
+                })
+            }
+
+            fn supports_interactive(&self) -> bool {
+                true
+            }
+
+            async fn execute_interactive(
+                &self,
+                _spec: &CommandSpec,
+                _output_tx: &mpsc::Sender<UpdateOutputLine>,
+            ) -> uptrakit_command::Result<InteractiveHandle> {
+                Err(rootcause::report!(
+                    uptrakit_command::CommandError::UnsupportedOperation(
+                        "interactive unavailable in test".to_string()
+                    )
+                ))
+            }
+        }
+
+        let stub = Arc::new(FallbackRecordingExecutor {
+            recorded: parking_lot::Mutex::new(None),
+        });
+        let (channels_tx, _channels_rx) = tokio::sync::oneshot::channel();
+        let forwarding = ForwardingInteractiveExecutor {
+            inner: stub.clone(),
+            channels_tx: parking_lot::Mutex::new(Some(channels_tx)),
+            update_timeout: Duration::from_secs(123),
+        };
+        let (output_tx, _output_rx) = mpsc::channel(10);
+        let spec = CommandSpec::shell("true");
+        let _ = forwarding.execute(&spec, &output_tx).await;
+
+        let got = stub
+            .recorded
+            .lock()
+            .take()
+            .expect("fallback should record spec");
+        assert_eq!(got.timeout, Some(Duration::from_secs(123)));
+    }
+
+    /// Red check for the `execute_quiet` fix: quiet execution through
+    /// `ForwardingInteractiveExecutor` must also apply the update budget.
+    #[tokio::test]
+    async fn forwarding_execute_quiet_promotes_timeout() {
+        struct QuietRecordingExecutor {
+            recorded: parking_lot::Mutex<Option<CommandSpec>>,
+        }
+
+        #[async_trait::async_trait]
+        impl CommandExecutor for QuietRecordingExecutor {
+            async fn execute(
+                &self,
+                _spec: &CommandSpec,
+                _output_tx: &mpsc::Sender<UpdateOutputLine>,
+            ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+                Ok(uptrakit_command::CommandOutput {
+                    output: String::new(),
+                    exit_code: 0,
+                })
+            }
+
+            async fn execute_quiet(
+                &self,
+                spec: &CommandSpec,
+            ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+                *self.recorded.lock() = Some(spec.clone());
+                Ok(uptrakit_command::CommandOutput {
+                    output: String::new(),
+                    exit_code: 0,
+                })
+            }
+        }
+
+        let stub = Arc::new(QuietRecordingExecutor {
+            recorded: parking_lot::Mutex::new(None),
+        });
+        let (channels_tx, _channels_rx) = tokio::sync::oneshot::channel();
+        let forwarding = ForwardingInteractiveExecutor {
+            inner: stub.clone(),
+            channels_tx: parking_lot::Mutex::new(Some(channels_tx)),
+            update_timeout: Duration::from_secs(123),
+        };
+        let spec = CommandSpec::shell("true");
+        let _ = forwarding.execute_quiet(&spec).await;
+
+        let got = stub
+            .recorded
+            .lock()
+            .take()
+            .expect("stub should record spec");
+        assert_eq!(got.timeout, Some(Duration::from_secs(123)));
     }
 
     /// Through `ForwardingInteractiveExecutor` with a real `LocalCommandExecutor`

@@ -24,4 +24,4 @@ pub use executor::{
 pub use interactive::{KILL_REAP_GRACE, kill_process_group};
 pub use remote_executor::{LocalRemoteExecutor, RemoteCommandResult, RemoteExecutor};
 pub use sudo::{ParseSudoPolicyError, SudoAwareCommandExecutor, SudoContext, SudoPolicy};
-pub use types::UpdateOutputLine;
+pub use types::{AbandonmentPolicy, DEFAULT_COMMAND_TIMEOUT, UpdateOutputLine};

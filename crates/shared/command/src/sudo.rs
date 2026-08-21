@@ -190,6 +190,7 @@ impl SudoAwareCommandExecutor {
                     // Envs have been forwarded as inline sudo assignments; clear to avoid
                     // double-setting by the underlying executor.
                     envs: vec![],
+                    abandonment: spec.abandonment,
                 }
             }
             CommandMode::Shell { .. } => {

@@ -92,9 +92,22 @@ async fn spawn_update_task(
         };
     }
 
-    // Non-interactive fallback (always compiled, always reachable without the feature).
+    // Non-interactive fallback (always compiled, always reachable without the
+    // feature). Wrap the executor so every plugin update command carries the
+    // dispatch payload's update budget (M1.2) — mirrors the interactive
+    // path's ForwardingInteractiveExecutor construction. Downcast-gated via
+    // budget_runtime_for_update: update_exec_runtime feeds plugin
+    // construction (update.rs:169 → :464 `(slot.create)`), and
+    // RouterOsPlugin downcasts its runtime to RouterOsHostRuntime
+    // (`ros_runtime()`); rebuilding a non-Standard runtime through
+    // construct_host_runtime would break that downcast and fail every
+    // RouterOS update. RouterOS commands never flow through the generic
+    // CommandExecutor (its executor() is a Noop), so passing the original
+    // runtime through unwrapped loses nothing.
+    let budget_runtime = crate::update::budget_runtime_for_update(&runtime, payload.timeout);
     let handle = tokio::spawn(async move {
-        crate::update::execute_update(payload, runtime, output_tx, early_result_tx, None).await
+        crate::update::execute_update(payload, runtime, output_tx, early_result_tx, budget_runtime)
+            .await
     });
     SpawnedUpdate {
         handle,
@@ -531,6 +544,12 @@ async fn batch_update_inner(
 
     // Execute with timeout
     let timeout_duration = payload.timeout;
+    // Wrap the executor so every plugin update command carries the dispatch
+    // payload's update budget (M1.2) — same downcast gate as the
+    // single-update path (spawn_update_task); non-StandardHostRuntime
+    // runtimes (RouterOS included) pass through unwrapped.
+    let updater_runtime = crate::update::budget_runtime_for_update(&runtime, payload.timeout)
+        .unwrap_or_else(|| Arc::clone(&runtime));
     let batch_results = tokio::time::timeout(timeout_duration, async {
         // Apply connection context to the plugin config before creating plugin
         let desc = get_descriptor(payload.plugin_type.as_str()).ok_or_else(|| {
@@ -575,11 +594,12 @@ async fn batch_update_inner(
             return Err(msg);
         }
 
-        let updater = (slot.create)(&effective_config, Arc::clone(&runtime)).map_err(|e| {
-            let msg = format!("Failed to create plugin: {e}");
-            tracing::error!(error = %e, "failed to create plugin for batch update");
-            msg
-        })?;
+        let updater =
+            (slot.create)(&effective_config, Arc::clone(&updater_runtime)).map_err(|e| {
+                let msg = format!("Failed to create plugin: {e}");
+                tracing::error!(error = %e, "failed to create plugin for batch update");
+                msg
+            })?;
 
         // Run pre-update hook plugins
         let pre_ctx = UpdateLifecycleContext::for_pre_hook(

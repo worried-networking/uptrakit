@@ -117,27 +117,24 @@ impl PosixSshCommandExecutor {
             .session
             .exec_command_streaming(&remote_cmd, output_tx);
 
-        let result = if let Some(dur) = spec.timeout {
-            #[expect(
-                clippy::map_err_ignore,
-                reason = "tokio Elapsed carries no additional context beyond the timeout duration already logged"
-            )]
-            let timed = tokio::time::timeout(dur, fut).await.map_err(|_| {
+        let dur = spec
+            .timeout
+            .unwrap_or(uptrakit_command::DEFAULT_COMMAND_TIMEOUT);
+        #[expect(
+            clippy::map_err_ignore,
+            reason = "tokio Elapsed carries no additional context beyond the timeout duration already logged"
+        )]
+        let result = tokio::time::timeout(dur, fut)
+            .await
+            .map_err(|_| {
                 tracing::warn!(timeout = ?dur, "SSH command timed out");
                 report!(CommandError::TimedOut)
+            })?
+            .map_err(|e| {
+                report!(CommandError::CommandSpawn(std::io::Error::other(
+                    e.to_string()
+                )))
             })?;
-            timed.map_err(|e| {
-                report!(CommandError::CommandSpawn(std::io::Error::other(
-                    e.to_string()
-                )))
-            })?
-        } else {
-            fut.await.map_err(|e| {
-                report!(CommandError::CommandSpawn(std::io::Error::other(
-                    e.to_string()
-                )))
-            })?
-        };
 
         if result.exit_code != 0 {
             let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);

@@ -82,7 +82,7 @@ pub use uptrakit_plugin_infrastructure_core::{
     HostCapabilities, HostCompatibility, InfraBundle, InstalledVersionDisplay,
     InstalledVersionEnricher, InstalledVersionEnricherSlot, InstalledVersionEnrichmentContext,
     InstalledVersionItem, PluginError, RouterOsExecutor, RouterOsHostRuntime,
-    ServiceMetadataProvider, UpdateLifecycleContext, construct_host_runtime,
+    ServiceMetadataProvider, StandardHostRuntime, UpdateLifecycleContext, construct_host_runtime,
     construct_routeros_host_runtime,
 };
 pub use uptrakit_plugin_infrastructure_core::{HostCompatibilityError, HostRequirements};

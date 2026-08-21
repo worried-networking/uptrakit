@@ -28,6 +28,7 @@ pub struct CommandSpec {
     pub timeout: Option<std::time::Duration>,
     pub privileged: bool,
     pub envs: Vec<(String, String)>,
+    pub abandonment: AbandonmentPolicy,
 }
 ```
 
@@ -42,6 +43,29 @@ Convenience constructors:
 | `.privileged()`                           | Mark the command as requiring elevated privileges (used with `SudoAwareCommandExecutor`).                                                              |
 | `.with_timeout(duration)`                 | Set a maximum execution time; on expiry the executor returns `CommandError::TimedOut`.                                                                 |
 | `.with_env(name, value)`                  | Add an environment variable (local: set on the process; SSH: `NAME='VALUE'` prefix; sudo: inline `NAME=VALUE` before the program, requires `SETENV:`). |
+| `.drain_on_abandon()`                     | Set `abandonment` to `AbandonmentPolicy::DrainOnAbandon` (see below).                                                                                  |
+
+#### Command deadline and abandonment
+
+Every execution path is bounded by a deadline. When `spec.timeout` is `None`, the executor resolves
+`DEFAULT_COMMAND_TIMEOUT` (600s) **at the execution decision point** inside `run_command_exec_impl`
+— the default is never written back into the `CommandSpec` itself, so callers that inspect the spec
+after dispatch (promotion, update-budget forwarding) still observe `timeout: None` and can substitute
+their own budget before execution. At 80% of the resolved budget a structured `tracing::warn!` fires;
+at the deadline the command returns `CommandError::TimedOut` and the child is killed via
+`child.start_kill()`.
+
+`abandonment: AbandonmentPolicy` governs what happens if the execution future itself is dropped
+before completion (e.g. the caller's task is cancelled) — orthogonal to the timeout above:
+
+- `AbandonmentPolicy::CloseOnAbandon` (default): `kill_on_drop(true)` is set on the spawned child, so
+  dropping the future SIGKILLs it immediately. Correct for read-only commands (version checks,
+  detection) where a half-finished side effect is harmless.
+- `AbandonmentPolicy::DrainOnAbandon` (via `.drain_on_abandon()`): the child is left to run to
+  completion in the background; its stdout/stderr pipes are drained by a detached
+  `ReaderAbandonGuard` so it never blocks on a full pipe, bounded by one full command budget measured
+  from the moment of abandonment. Used for update commands, which mutate host state and must not be
+  interrupted mid-flight by a dropped task.
 
 #### The `privileged` flag
 

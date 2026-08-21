@@ -10,7 +10,7 @@ use crate::command::run_command_exec_impl;
 use crate::error::CommandError;
 use rootcause::prelude::*;
 
-use crate::types::UpdateOutputLine;
+use crate::types::{DEFAULT_COMMAND_TIMEOUT, UpdateOutputLine};
 
 // Re-export types that were previously defined here, so that existing
 // `use crate::executor::{CommandOutput, CommandSpec, …}` paths keep working.
@@ -128,29 +128,6 @@ pub fn build_remote_command_string(spec: &CommandSpec) -> crate::Result<String> 
     })
 }
 
-/// Apply an optional timeout to a command execution future.
-///
-/// If `timeout` is `Some(dur)`, the future is wrapped with
-/// [`tokio::time::timeout`]. On expiry a [`CommandError::TimedOut`] is
-/// returned. If `timeout` is `None` the future is awaited directly.
-#[expect(
-    clippy::map_err_ignore,
-    reason = "tokio::time::error::Elapsed carries no additional context beyond the fact that the timeout expired"
-)]
-async fn apply_timeout(
-    fut: impl std::future::Future<Output = crate::Result<(String, i32)>>,
-    timeout: Option<std::time::Duration>,
-) -> crate::Result<(String, i32)> {
-    if let Some(dur) = timeout {
-        tokio::time::timeout(dur, fut).await.map_err(|_| {
-            tracing::warn!(timeout = ?dur, "command timed out");
-            report!(CommandError::TimedOut)
-        })?
-    } else {
-        fut.await
-    }
-}
-
 /// A [`CommandExecutor`] that returns an error on use.
 ///
 /// The controller process never executes local commands directly for
@@ -192,31 +169,37 @@ impl CommandExecutor for LocalCommandExecutor {
         spec: &CommandSpec,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> crate::Result<CommandOutput> {
-        tracing::debug!(timeout = ?spec.timeout, "executing command");
+        let timeout = spec.timeout.unwrap_or(DEFAULT_COMMAND_TIMEOUT);
+        tracing::debug!(timeout = ?timeout, "executing command");
         let (program, args) = spec.resolve()?;
-        let fut = run_command_exec_impl(
+        let (output, exit_code) = run_command_exec_impl(
             &program,
             &args,
             spec.working_dir.as_deref(),
             &spec.envs,
             Some(output_tx),
-        );
-        let (output, exit_code) = apply_timeout(fut, spec.timeout).await?;
+            timeout,
+            spec.abandonment,
+        )
+        .await?;
         tracing::debug!(exit_code, "command completed");
         Ok(CommandOutput { output, exit_code })
     }
 
     async fn execute_quiet(&self, spec: &CommandSpec) -> crate::Result<CommandOutput> {
-        tracing::debug!("executing command (quiet)");
+        let timeout = spec.timeout.unwrap_or(DEFAULT_COMMAND_TIMEOUT);
+        tracing::debug!(timeout = ?timeout, "executing command (quiet)");
         let (program, args) = spec.resolve()?;
-        let fut = run_command_exec_impl(
+        let (output, exit_code) = run_command_exec_impl(
             &program,
             &args,
             spec.working_dir.as_deref(),
             &spec.envs,
             None,
-        );
-        let (output, exit_code) = apply_timeout(fut, spec.timeout).await?;
+            timeout,
+            spec.abandonment,
+        )
+        .await?;
         tracing::debug!(exit_code, "command completed");
         Ok(CommandOutput { output, exit_code })
     }
@@ -403,15 +386,15 @@ mod tests {
         assert_eq!(spec.timeout, Some(Duration::from_secs(5)));
     }
 
-    #[tokio::test(start_paused = true)]
+    /// Kill-path test: real child + real short timeout (documented exception
+    /// in docs/development/testing.md — a paused clock auto-advances while
+    /// the runtime waits on real process I/O).
+    #[tokio::test]
     async fn execute_quiet_timeout_fires() {
-        let spec =
-            CommandSpec::exec("sleep", ["100".to_string()]).with_timeout(Duration::from_secs(5));
+        let spec = CommandSpec::exec("sleep", ["100".to_string()])
+            .with_timeout(Duration::from_millis(200));
         let executor = LocalCommandExecutor;
-        let handle = tokio::spawn(async move { executor.execute_quiet(&spec).await });
-        tokio::task::yield_now().await;
-        tokio::time::advance(Duration::from_secs(10)).await;
-        let result = handle.await.expect("join");
+        let result = executor.execute_quiet(&spec).await;
         assert!(
             matches!(
                 result.unwrap_err().current_context(),
@@ -421,16 +404,16 @@ mod tests {
         );
     }
 
-    #[tokio::test(start_paused = true)]
+    /// Kill-path test: real child + real short timeout (documented exception
+    /// in docs/development/testing.md — a paused clock auto-advances while
+    /// the runtime waits on real process I/O).
+    #[tokio::test]
     async fn execute_timeout_fires() {
-        let spec =
-            CommandSpec::exec("sleep", ["100".to_string()]).with_timeout(Duration::from_secs(5));
+        let spec = CommandSpec::exec("sleep", ["100".to_string()])
+            .with_timeout(Duration::from_millis(200));
         let executor = LocalCommandExecutor;
         let (tx, mut rx) = mpsc::channel(100);
-        let handle = tokio::spawn(async move { executor.execute(&spec, &tx).await });
-        tokio::task::yield_now().await;
-        tokio::time::advance(Duration::from_secs(10)).await;
-        let result = handle.await.expect("join");
+        let result = executor.execute(&spec, &tx).await;
         assert!(
             matches!(
                 result.unwrap_err().current_context(),
