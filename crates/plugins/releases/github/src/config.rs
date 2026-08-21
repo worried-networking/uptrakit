@@ -47,6 +47,17 @@ pub struct GitHubConfig {
     /// Prefix to strip from tags when extracting version strings (e.g. `"v"`).
     #[serde(default = "default_tag_strip_prefix")]
     pub tag_strip_prefix: String,
+    /// Literal tag prefix selecting a release series (e.g.
+    /// `"uptrakit-controller-standalone-"`).
+    ///
+    /// When set, only releases whose tag starts with this prefix are
+    /// considered; the prefix is stripped before `tag_strip_prefix` applies.
+    /// Unlike `tag_strip_prefix` (which only strips), this field *filters*:
+    /// releases from other series in the same repository are excluded
+    /// entirely, which is what prevents cross-series phantom updates in
+    /// monorepos that tag per component.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_prefix: Option<String>,
     /// Regex patterns to filter release assets.
     ///
     /// Only assets whose names match at least one pattern are included.
@@ -113,6 +124,7 @@ impl Default for GitHubConfig {
             api_base_url: None,
             include_prereleases: false,
             tag_strip_prefix: default_tag_strip_prefix(),
+            tag_prefix: None,
             asset_patterns: vec![],
             verify_attestation: default_verify_attestation(),
             require_attestation: false,
@@ -149,6 +161,12 @@ impl GitHubConfig {
                     "must not point to private/loopback addresses",
                 ));
             }
+        }
+        if let Some(ref prefix) = self.tag_prefix
+            && let Err(e) =
+                uptrakit_shared_types::version_prefix::validate_version_prefix(prefix, "tag_prefix")
+        {
+            return Err(PluginConfigValidationError::invalid_field("tag_prefix", e));
         }
         for pattern in &self.asset_patterns {
             regex::Regex::new(pattern).map_err(|e| {
@@ -349,6 +367,7 @@ mod tests {
             api_base_url: Some("https://ghe.corp.com/api/v3".to_string()),
             include_prereleases: true,
             tag_strip_prefix: "release-".to_string(),
+            tag_prefix: Some("uptrakit-controller-standalone-".to_string()),
             asset_patterns: vec![r".*\.deb$".to_string()],
             verify_attestation: false,
             require_attestation: true,
@@ -361,6 +380,7 @@ mod tests {
         assert_eq!(deserialized.api_base_url, config.api_base_url);
         assert_eq!(deserialized.include_prereleases, config.include_prereleases);
         assert_eq!(deserialized.tag_strip_prefix, config.tag_strip_prefix);
+        assert_eq!(deserialized.tag_prefix, config.tag_prefix);
         assert_eq!(deserialized.asset_patterns, config.asset_patterns);
         assert_eq!(deserialized.verify_attestation, config.verify_attestation);
         assert_eq!(deserialized.require_attestation, config.require_attestation);
@@ -446,5 +466,45 @@ mod tests {
         let config = GitHubConfig::default();
         let json = serde_json::to_string(&config).expect("serialize");
         assert!(!json.contains("install_path"));
+    }
+
+    // ── tag_prefix validation tests ────────────────────────────────────
+
+    #[test]
+    fn tag_prefix_defaults_to_none() {
+        let config: GitHubConfig = serde_json::from_str("{}").expect("deserialize");
+        assert!(config.tag_prefix.is_none());
+    }
+
+    #[test]
+    fn validation_rejects_empty_tag_prefix() {
+        let config = GitHubConfig {
+            tag_prefix: Some(String::new()),
+            ..GitHubConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("tag_prefix"));
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn validation_rejects_overlong_tag_prefix() {
+        let config = GitHubConfig {
+            tag_prefix: Some(
+                "x".repeat(uptrakit_shared_types::version_prefix::MAX_VERSION_PREFIX_LENGTH + 1),
+            ),
+            ..GitHubConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn validation_passes_with_tag_prefix() {
+        let config = GitHubConfig {
+            tag_prefix: Some("uptrakit-controller-standalone-".to_string()),
+            ..GitHubConfig::default()
+        };
+        assert!(config.validate().is_ok());
     }
 }
