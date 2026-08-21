@@ -3,6 +3,9 @@
 //!
 //! # Validation (every write, in order)
 //!
+//! 0. **Canonicalize** — [`insert_grant`]/[`update_grant`] call
+//!    [`Selector::canonicalize`] on their own copy before any check runs, so
+//!    every rule below sees sorted, deduped id lists.
 //! 1. **Rule 1** — [`validate_patterns`]: count bound + per-pattern
 //!    `can_match_any` against the live catalog.
 //! 2. **Plane purity** — a grant's patterns are ALL system-plane or ALL
@@ -15,15 +18,20 @@
 //! 3. **Rule 2 (single encoding per subject type)** — system-plane ⇒
 //!    `tenant_id IS NULL` (any subject); role subject ⇒ NULL always;
 //!    user-subject tenant-plane ⇒ non-NULL.
-//! 4. Canonicalize — selector id lists sorted + deduped before any check.
-//! 5. Bounds — description length, selector id bounds incl. min-1
-//!    (`EmptyIds`), `MAX_GRANTS_PER_SUBJECT` on insert.
-//! 6. Capability level (rule 3) — every action reachable by every pattern
-//!    must admit the selector's axis.
-//! 7. Referent existence (rule 4) — selector ids must name active rows in
-//!    the grant's tenant; global-role grants reject non-`All` outright.
-//! 8. **B9 phase gate (last)** — valid non-`All` selectors still rejected;
-//!    lifts with M2.3 site-complete enforcement.
+//! 4. **Rule 5 (+5b)** — selector id bounds and the min-1 non-empty check
+//!    (`EmptyIds`), on the already-canonicalized list.
+//! 5. **Rule 3 (capability level)** — every action reachable by every
+//!    pattern must admit the selector's axis.
+//! 6. **Rule 4 (referent existence)** — selector ids must name active rows
+//!    in the grant's tenant; global-role grants reject non-`All` outright.
+//! 7. **B9 phase gate (last selector check)** — valid non-`All` selectors
+//!    are still rejected; lifts with M2.3 site-complete enforcement.
+//! 8. **Description length** — checked after the gate, so a non-`All`
+//!    selector reports [`AccessGrantError::SelectorPhaseGate`] first.
+//!
+//! Two bounds sit outside `validate_write`: [`MAX_GRANTS_PER_SUBJECT`] is
+//! counted in [`insert_grant`] *after* validation returns `Ok` (count-then-insert,
+//! TOCTOU note below), and canonicalization is step 0 above.
 //!
 //! # Resolution safety argument (06 §Storage schema)
 //!
