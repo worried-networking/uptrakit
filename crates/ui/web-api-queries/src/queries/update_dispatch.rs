@@ -1327,6 +1327,27 @@ mod hook_dispatch_tests {
 mod tests {
     use sea_orm::DatabaseConnection;
 
+    #[test]
+    fn reconstruction_preserves_prefixed_tag() {
+        // Round-trip seam: fetch_releases stores the full series-prefixed tag
+        // in latest_release_metadata; dispatch must reconstruct ReleaseInfo
+        // with that exact tag (the {tag} placeholder and asset updates depend
+        // on it — the bare version must never be substituted back in).
+        let metadata = serde_json::json!({
+            "tag": "uptrakit-controller-standalone-v0.0.8",
+            "release_url":
+                "https://github.com/o/r/releases/tag/uptrakit-controller-standalone-v0.0.8",
+            "assets": []
+        });
+        let ri = super::enrich_release_info_with_attestation(None, Some(&metadata), None)
+            .expect("reconstruction should succeed");
+        assert_eq!(ri.tag, "uptrakit-controller-standalone-v0.0.8");
+        assert_eq!(
+            ri.release_url,
+            "https://github.com/o/r/releases/tag/uptrakit-controller-standalone-v0.0.8"
+        );
+    }
+
     /// Insert the minimum parent rows required by the `update_history` FK constraints.
     ///
     /// Returns `(tenant_id, host_id, software_item_id)`.

@@ -1090,6 +1090,13 @@ mod tests {
         assert!(!host_update_available(None, Some("2.0.0")));
         assert!(!host_update_available(Some("1.0.0"), None));
         assert!(!host_update_available(None, None));
+
+        // D1 pin (tag-series spec): comparison is string !=, NOT version
+        // ordering — 2.9.0 vs 2.10.0 must read as "update available" purely
+        // because the strings differ. Version-aware ordering is a tracked
+        // follow-up, not silently in scope.
+        assert!(host_update_available(Some("2.9.0"), Some("2.10.0")));
+        assert!(!host_update_available(Some("2.10.0"), Some("2.10.0")));
     }
 
     #[test]
