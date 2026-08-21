@@ -34,7 +34,8 @@ pub struct CreateAccessGrantRequest {
     pub subject_id: Uuid,
     /// Action patterns in string form (`"hosts:read"`, `"settings.*:manage"`).
     pub patterns: Vec<String>,
-    /// Defaults to `All`; non-`All` selectors are rejected until M2.
+    /// Defaults to `All`; non-`All` selectors validate fully on write but
+    /// are rejected until M2.3 enforcement ships.
     #[serde(default = "default_selector")]
     pub selector: Selector,
     pub description: Option<String>,

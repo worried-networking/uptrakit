@@ -242,9 +242,9 @@ Each grant carries a set of `ActionPattern`s (`ResourcePattern` × `VerbPattern`
 resource, an exact resource string, or a `<stem>.*` subtree match, each paired with `*` or a single closed-set
 verb. `system.`-prefixed resources are excluded from the resource-side `*` wildcard (the verb-side `*` matches
 unconditionally) — a pattern must name the `system.` plane explicitly to match it. Every grant also carries a
-`Selector`; the type already models host- and software-scoped narrowing (tags, hosts, software items, item pairs),
-but the write path accepts only
-`Selector::All` until M2 — the narrowing variants are validated code today with no admission path yet.
+`Selector` (`crates/shared/types/src/access/selector.rs`): `All` (no narrowing) or one narrowing axis — `Tags`,
+`Hosts`, `Software`, or `Items` (host-software links). Selectors validate fully on write (see [Selector-scoped
+grants](#selector-scoped-grants) below) but stay write-gated to `All` until M2.3 lifts targeted enforcement.
 
 Roles are data, not code: `roles.tenant_id` is `NULL` for the global built-in roles and non-`NULL` for
 tenant-defined custom roles, with per-scope name uniqueness enforced by a partial-unique index pair rather than a
@@ -255,11 +255,62 @@ The built-in roles' seed grants are frozen literal pattern strings, guarded by t
 `seed_patterns_stay_valid_against_live_catalog` test — a catalog rename must never edit a seed literal in place;
 it ships a forward data migration instead, so historical seed rows keep meaning what they meant when written.
 
+### Selector-scoped grants
+
+A catalog action's `SelectorSupport` level (`None`, `Host`, `HostAndSoftware`) bounds which selector axes it
+admits — each level admits the previous levels' kinds too, so `HostAndSoftware` also accepts `Tags`/`Hosts`.
+Writing a grant runs its selector through the shared validation chain in `crates/shared/db/src/access_grants.rs`
+(`validate_write`), in order, after plane purity and the tenant-encoding rule (rule 2):
+
+- **Rule 5 (+5b)** — bounds on the canonicalized id list (`Selector::canonicalize()` sorts and dedups before
+  `validate()` runs) plus a minimum of one id: an empty narrowing list matches nothing, so it is rejected
+  (`SelectorValidationError::EmptyIds`) rather than stored as a dead grant.
+- **Rule 3 (capability level)** — every catalog action reachable by every one of the grant's patterns must admit
+  the selector's axis (`validate_selector_level`); a pattern reaching a dynamically-registered action
+  (`plugin.*`/`surface.*`) never admits a non-`All` selector.
+- **Rule 4 (referent existence)** — every selector id must name a non-deactivated row in the grant's tenant
+  (`validate_selector_referents`). This is an authoring typo-catcher, not a safety boundary — ergonomics, not
+  safety: the decision-time matcher (`Selector::covers`) never re-checks it, so a referent later deactivated
+  cannot retroactively widen or corrupt an already-stored grant's meaning. Global-role grants
+  (`roles.tenant_id IS NULL`) have no tenant to resolve referents in and reject any non-`All` selector outright
+  (`AccessGrantError::SelectorOnGlobalRole`) — narrow authority via a direct user-subject grant instead; never by
+  adding a selector to a seed or other global role.
+- **Gate (last)** — a selector that passes every rule above still hits `SelectorPhaseGate` as the final check in
+  `validate_write`, because the M2.3 series invariant requires target-aware enforcement to be site-complete
+  before the gate can lift: `ci/verify_access_enforcement_sites.sh` pins that while any production `.authorize(`
+  call site is still classified `needs-fine-check` (not yet routed through `authorize_target`) in
+  `ci/verify_access_enforcement_sites_inventory.txt`, `SelectorPhaseGate` must still exist in
+  `access_grants.rs`. M2.3 deletes the gate arm (and its HTTP mapping) in the same change that converts every
+  remaining site to `fine-checked`.
+
+`Visibility::from_selectors` (`crates/shared/types/src/access/decision.rs`) unions the selector axes of every
+grant matching an action into a read-scope verdict — `Full` if any matching grant is `All`, `None` if no grant
+matches, otherwise a per-axis `Filter` (`tags`/`hosts`/`software`/`items` id sets) — consumed by
+`AccessEngine::visibility()`.
+
 ### AccessEngine
 
-`AccessEngine` (`crates/ui/controller-core/src/access/mod.rs`) is the single access decision point. A decision
-runs, in order: dynamic-action registry lookup (for `plugin.*`/`surface.*` actions) → grant match against the
-principal's resolved authority → token scope ceiling → target/selector check. All four must pass for `Allow`.
+`AccessEngine` (`crates/ui/controller-core/src/access/mod.rs`) is the single access decision point, split (M2.1)
+into a coarse and a fine call that share one internal `decide()` core:
+
+- **`authorize(ctx, action)`** — sync, targetless. Runs, in order: dynamic-action registry lookup (for
+  `plugin.*`/`surface.*` actions) → grant match against the principal's resolved authority → token scope ceiling.
+  Selector coverage is **not** evaluated here — a principal whose only matching grant carries a non-`All`
+  selector is allowed at this gate. Most enforcement sites still call this coarse gate today; per the M2.3 series
+  invariant, each production call site is classified `needs-fine-check` or `fine-checked` in
+  `ci/verify_access_enforcement_sites_inventory.txt`.
+- **`authorize_target(ctx, action, target)`** — async, target-aware. Runs the same three checks plus a fourth:
+  selector coverage against a `TargetRef` (`Host` or `HostSoftwareItem`). Host-tag membership for `Selector::Tags`
+  grants is resolved **at decision time**, not stored on the grant or cached — `load_host_tags` queries live
+  `host_tag_assignment` rows through `TenantDb`, so a tag added to or removed from a host takes effect on the very
+  next decision. The lookup only runs when a matching grant actually carries `Selector::Tags`; every other
+  selector shape decides purely from ids already in memory. Fail-closed: a DB error during tag resolution
+  propagates as `Err`, never silently degrades to an empty tag set. Callers MUST load `target` through `TenantDb`
+  (or an equivalently tenant-scoped path) — only the `Tags` axis is itself tenant-scoped inside the engine; every
+  other axis (`Hosts`/`Software`/`Items`, and `All`) trusts the caller's tenant scoping.
+
+All four checks (dynamic registry, grant match, scope, and — for `authorize_target` — selector coverage) must
+pass for `Allow`.
 
 Resolved per-principal authority is cached (`moka::sync::Cache`, keyed by `(tenant_id, user_id)`), bounded by
 entry count, with a first-party read-time staleness check against a 60-second TTL backstop rather than relying on

@@ -162,6 +162,15 @@ a User or role subject.
 _Avoid_: bare "permission" (deleted RBAC concept); "Consent Grant" (distinct OAuth-scope-approval
 concept, see below).
 
+**Selector**:
+Grant-scoping axis on an access grant: `All` (no narrowing) or a narrowing id list over one
+axis — `Tags`, `Hosts`, `Software`, or `Items` (host-software links).
+_Avoid_: scope (means OAuth token scope), filter (Visibility variant)
+
+**Visibility**:
+The read-scope result of a principal's grants for one action: `Full`, `Filter` (per-axis id
+sets), or `None`.
+
 **MQTT Service**:
 The Service that exposes an MQTT interface for third-party integrations (e.g. Home Assistant).
 Not the core Controller↔Service transport (which is WSS).

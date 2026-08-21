@@ -406,7 +406,8 @@ export type CreateAccessGrantRequest = {
      */
     patterns: Array<string>;
     /**
-     * Defaults to `All`; non-`All` selectors are rejected until M2.
+     * Defaults to `All`; non-`All` selectors validate fully on write but
+     * are rejected until M2.3 enforcement ships.
      */
     selector?: Selector;
     subject_id: string;
@@ -2472,8 +2473,9 @@ export type SecretString = string;
 /**
  * Resource selector on a grant: which hosts / software items a
  * selector-capable action may target. `All` is the M1 default; write-path
- * acceptance of the narrowing variants lands in M2 (grant validation, not
- * this type).
+ * validation (rules 3–5) lives in this module plus
+ * `uptrakit-shared-db::access_grants`. Non-`All` selectors validate fully
+ * but stay write-gated until M2.3 lifts `SelectorPhaseGate`.
  *
  * Serialized form is the `access_grants.selector` storage JSON
  * (`06-grant-model.md` §Storage schema): `{"type":"all"}`,

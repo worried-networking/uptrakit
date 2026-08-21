@@ -54,11 +54,11 @@ grant whose patterns stay in the tenant plane gets the caller's active tenant.
 
 ### Create/update request bounds (`CreateAccessGrantRequest` / `UpdateAccessGrantRequest`)
 
-| Field         | Bound                                                     |
-| ------------- | --------------------------------------------------------- |
-| `patterns`    | 1-16 entries; each 1-64 bytes                             |
-| `selector`    | defaults to `"all"`; any other value is rejected until M2 |
-| `description` | optional, at most 500 characters                          |
+| Field         | Bound                                                                                                                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `patterns`    | 1-16 entries; each 1-64 bytes                                                                                                                                                         |
+| `selector`    | defaults to `"all"`; a non-`"all"` selector now validates fully on write (capability level, referent existence, bounds) but is still rejected until targeted enforcement ships (M2.3) |
+| `description` | optional, at most 500 characters                                                                                                                                                      |
 
 ### Immutable encoding
 

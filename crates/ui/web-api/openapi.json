@@ -11596,7 +11596,7 @@
           },
           "selector": {
             "$ref": "#/components/schemas/Selector",
-            "description": "Defaults to `All`; non-`All` selectors are rejected until M2."
+            "description": "Defaults to `All`; non-`All` selectors validate fully on write but\nare rejected until M2.3 enforcement ships."
           },
           "subject_id": {
             "type": "string",
@@ -16667,7 +16667,7 @@
             }
           }
         ],
-        "description": "Resource selector on a grant: which hosts / software items a\nselector-capable action may target. `All` is the M1 default; write-path\nacceptance of the narrowing variants lands in M2 (grant validation, not\nthis type).\n\nSerialized form is the `access_grants.selector` storage JSON\n(`06-grant-model.md` §Storage schema): `{\"type\":\"all\"}`,\n`{\"type\":\"tags\",\"ids\":[…]}`, … — uniform `ids` field. Unknown extra\nkeys are ignored on deserialize (serde internally-tagged enums cannot\n`deny_unknown_fields`); that is safe because an ignored key can never\nbroaden authority and a missing/mistyped `ids` still fails as a\nmissing field."
+        "description": "Resource selector on a grant: which hosts / software items a\nselector-capable action may target. `All` is the M1 default; write-path\nvalidation (rules 3–5) lives in this module plus\n`uptrakit-shared-db::access_grants`. Non-`All` selectors validate fully\nbut stay write-gated until M2.3 lifts `SelectorPhaseGate`.\n\nSerialized form is the `access_grants.selector` storage JSON\n(`06-grant-model.md` §Storage schema): `{\"type\":\"all\"}`,\n`{\"type\":\"tags\",\"ids\":[…]}`, … — uniform `ids` field. Unknown extra\nkeys are ignored on deserialize (serde internally-tagged enums cannot\n`deny_unknown_fields`); that is safe because an ignored key can never\nbroaden authority and a missing/mistyped `ids` still fails as a\nmissing field."
       },
       "SelectorSupport": {
         "type": "string",
