@@ -1,7 +1,10 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::bounds;
+use super::decision::TargetRef;
 
 /// Resource selector on a grant: which hosts / software items a
 /// selector-capable action may target. `All` is the M1 default; write-path
@@ -102,6 +105,33 @@ impl Selector {
             });
         }
         Ok(())
+    }
+
+    /// Decision-time matcher: does this selector cover `target`?
+    ///
+    /// Pure — `host_tags` is the caller-resolved set of tag ids assigned to
+    /// the target's host (`Selector::Tags` is the only variant that reads
+    /// it). Fail-closed: axes that do not apply to the target's shape deny
+    /// (`Software`/`Items` never cover a bare `TargetRef::Host`), and both
+    /// matches are exhaustive so a future variant of either enum forces a
+    /// reviewed decision here instead of a silent allow.
+    #[must_use]
+    pub fn covers(&self, target: &TargetRef, host_tags: &BTreeSet<Uuid>) -> bool {
+        match self {
+            Self::All => true,
+            Self::Tags { ids } => ids.iter().any(|id| host_tags.contains(id)),
+            Self::Hosts { ids } => ids.contains(&target.host_id()),
+            Self::Software { ids } => match target {
+                TargetRef::Host(_) => false,
+                TargetRef::HostSoftwareItem {
+                    software_item_id, ..
+                } => ids.contains(software_item_id),
+            },
+            Self::Items { ids } => match target {
+                TargetRef::Host(_) => false,
+                TargetRef::HostSoftwareItem { id, .. } => ids.contains(id),
+            },
+        }
     }
 }
 
@@ -234,6 +264,129 @@ mod tests {
         for (at_bound, over_bound) in cases {
             assert!(at_bound.validate().is_ok(), "{at_bound:?} at bound");
             assert!(over_bound.validate().is_err(), "{over_bound:?} over bound");
+        }
+    }
+
+    #[test]
+    fn covers_full_matrix() {
+        let tag = Uuid::from_u128(1);
+        let host_a = Uuid::from_u128(2);
+        let host_b = Uuid::from_u128(3);
+        let sw_x = Uuid::from_u128(4);
+        let sw_y = Uuid::from_u128(5);
+        let t_host_a = TargetRef::Host(host_a);
+        let t_host_b = TargetRef::Host(host_b);
+        let t_ax = TargetRef::HostSoftwareItem {
+            id: Uuid::from_u128(6),
+            host_id: host_a,
+            software_item_id: sw_x,
+        };
+        let t_ay = TargetRef::HostSoftwareItem {
+            id: Uuid::from_u128(7),
+            host_id: host_a,
+            software_item_id: sw_y,
+        };
+        let t_bx = TargetRef::HostSoftwareItem {
+            id: Uuid::from_u128(8),
+            host_id: host_b,
+            software_item_id: sw_x,
+        };
+        let link_ax = Uuid::from_u128(6);
+        let tagged = BTreeSet::from([tag]);
+        let untagged = BTreeSet::new();
+
+        let cases: &[(Selector, &TargetRef, &BTreeSet<Uuid>, bool)] = &[
+            (Selector::All, &t_host_a, &untagged, true),
+            (Selector::All, &t_ax, &untagged, true),
+            (Selector::Tags { ids: vec![tag] }, &t_host_a, &tagged, true),
+            (
+                Selector::Tags { ids: vec![tag] },
+                &t_host_a,
+                &untagged,
+                false,
+            ),
+            (Selector::Tags { ids: vec![tag] }, &t_ax, &tagged, true),
+            (Selector::Tags { ids: vec![tag] }, &t_bx, &untagged, false),
+            (Selector::Tags { ids: vec![] }, &t_host_a, &tagged, false),
+            (
+                Selector::Hosts { ids: vec![host_a] },
+                &t_host_a,
+                &untagged,
+                true,
+            ),
+            (
+                Selector::Hosts { ids: vec![host_a] },
+                &t_host_b,
+                &untagged,
+                false,
+            ),
+            (
+                Selector::Hosts { ids: vec![host_a] },
+                &t_ax,
+                &untagged,
+                true,
+            ),
+            (
+                Selector::Hosts { ids: vec![host_a] },
+                &t_bx,
+                &untagged,
+                false,
+            ),
+            (
+                Selector::Software { ids: vec![sw_x] },
+                &t_ax,
+                &untagged,
+                true,
+            ),
+            (
+                Selector::Software { ids: vec![sw_x] },
+                &t_ay,
+                &untagged,
+                false,
+            ),
+            (
+                Selector::Software { ids: vec![sw_x] },
+                &t_bx,
+                &untagged,
+                true,
+            ),
+            (
+                Selector::Software { ids: vec![sw_x] },
+                &t_host_a,
+                &untagged,
+                false,
+            ),
+            (
+                Selector::Items { ids: vec![link_ax] },
+                &t_ax,
+                &untagged,
+                true,
+            ),
+            (
+                Selector::Items { ids: vec![link_ax] },
+                &t_ay,
+                &untagged,
+                false,
+            ),
+            (
+                Selector::Items { ids: vec![link_ax] },
+                &t_bx,
+                &untagged,
+                false,
+            ),
+            (
+                Selector::Items { ids: vec![link_ax] },
+                &t_host_a,
+                &untagged,
+                false,
+            ),
+        ];
+        for (selector, target, host_tags, expected) in cases {
+            assert_eq!(
+                selector.covers(target, host_tags),
+                *expected,
+                "{selector:?} covering {target:?}"
+            );
         }
     }
 }

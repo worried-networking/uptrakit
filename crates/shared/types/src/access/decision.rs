@@ -1,7 +1,8 @@
 //! Pure decision types returned by the controller's `AccessEngine` (M1.3).
 //!
-//! No DB dependencies — consumable by M2's `TenantDb` visibility integration
-//! and by tests. Design record:
+//! No DB dependencies — consumable by tests and by the engine's decision-time
+//! target resolution, which resolves host tags at call time
+//! (`authorize_target`, M2.1). Design record:
 //! `docs/superpowers/specs/2026-07-28-access-engine-design.md`.
 
 use std::collections::BTreeSet;
@@ -10,12 +11,31 @@ use uuid::Uuid;
 
 /// A concrete object an action is evaluated against.
 ///
-/// M1 carries only `Host`; `HostSoftwareItem` lands in M2.1.
+/// Carries `Host` and, since M2.1, `HostSoftwareItem`.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetRef {
     /// A managed host, by id.
     Host(Uuid),
+    /// A `(host, software item)` link row, by its `host_software_items` ids.
+    HostSoftwareItem {
+        /// The `host_software_items.id` link-row id.
+        id: Uuid,
+        /// The owning host's id.
+        host_id: Uuid,
+        /// The linked software item's id.
+        software_item_id: Uuid,
+    },
+}
+
+impl TargetRef {
+    /// The host every target ultimately belongs to.
+    #[must_use]
+    pub fn host_id(&self) -> Uuid {
+        match self {
+            Self::Host(host_id) | Self::HostSoftwareItem { host_id, .. } => *host_id,
+        }
+    }
 }
 
 /// Outcome of an `authorize()` call.
@@ -87,6 +107,21 @@ mod tests {
             assert_eq!(reason.as_str(), label);
             assert_eq!(reason.to_string(), label);
         }
+    }
+
+    #[test]
+    fn host_id_resolves_for_both_variants() {
+        let host = Uuid::from_u128(1);
+        assert_eq!(TargetRef::Host(host).host_id(), host);
+        assert_eq!(
+            TargetRef::HostSoftwareItem {
+                id: Uuid::from_u128(2),
+                host_id: host,
+                software_item_id: Uuid::from_u128(3),
+            }
+            .host_id(),
+            host
+        );
     }
 }
 
