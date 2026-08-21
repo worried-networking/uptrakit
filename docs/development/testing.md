@@ -125,6 +125,18 @@ the paused state.
   Tokio's virtual clock) cannot use `start_paused = true` — it has no
   effect on `time::OffsetDateTime`. See
   [**Wall-Clock Time Injection**](#wall-clock-time-injection) below.
+- Kill-path tests that spawn a **real child process** and assert the
+  deadline or abandonment behaviour around it (`uptrakit-command`'s
+  `execute`/`execute_quiet` timeout and `AbandonmentPolicy` tests) must use
+  real short timeouts. With time paused the runtime auto-advances to the
+  next pending timer whenever it has nothing else to poll — and waiting on
+  a real child's pipes and exit status is not something the virtual clock
+  can see — so the deadline fires before the child has done any work and
+  the test asserts nothing. These tests pay real wall-clock time (a few
+  hundred milliseconds for a deadline to fire, a second or two to prove an
+  abandoned child did or did not run to completion); keep every delay the
+  shortest one the assertion tolerates, and comment the exception at the
+  test.
 
 ## Wall-Clock Time Injection
 
