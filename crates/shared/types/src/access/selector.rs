@@ -9,8 +9,9 @@ use super::pattern::ActionPattern;
 
 /// Resource selector on a grant: which hosts / software items a
 /// selector-capable action may target. `All` is the M1 default; write-path
-/// acceptance of the narrowing variants lands in M2 (grant validation, not
-/// this type).
+/// validation (rules 3–5) lives in this module plus
+/// `uptrakit-shared-db::access_grants`. Non-`All` selectors validate fully
+/// but stay write-gated until M2.3 lifts `SelectorPhaseGate`.
 ///
 /// Serialized form is the `access_grants.selector` storage JSON
 /// (`06-grant-model.md` §Storage schema): `{"type":"all"}`,
@@ -164,9 +165,28 @@ pub enum SelectorValidationError {
         max: usize,
         actual: usize,
     },
+    /// A narrowing selector with an empty id list matches nothing — reject
+    /// at write time rather than storing a dead grant.
+    #[error("empty {kind} id list — a narrowing selector must name at least one id")]
+    EmptyIds { kind: &'static str },
 }
 
 impl Selector {
+    /// Canonicalize in place: sort and dedup each id list. The write path
+    /// calls this before `validate()` so bounds apply to the deduped list.
+    pub fn canonicalize(&mut self) {
+        match self {
+            Self::All => {}
+            Self::Tags { ids }
+            | Self::Hosts { ids }
+            | Self::Software { ids }
+            | Self::Items { ids } => {
+                ids.sort_unstable();
+                ids.dedup();
+            }
+        }
+    }
+
     /// Enforces the per-variant ID count bounds ([`bounds`]).
     pub fn validate(&self) -> Result<(), SelectorValidationError> {
         let (len, max, kind) = match self {
@@ -184,6 +204,9 @@ impl Selector {
                 "host software item",
             ),
         };
+        if len == 0 {
+            return Err(SelectorValidationError::EmptyIds { kind });
+        }
         if len > max {
             return Err(SelectorValidationError::TooManyIds {
                 kind,
@@ -352,6 +375,68 @@ mod tests {
             assert!(at_bound.validate().is_ok(), "{at_bound:?} at bound");
             assert!(over_bound.validate().is_err(), "{over_bound:?} over bound");
         }
+    }
+
+    #[test]
+    fn canonicalize_sorts_and_dedups() {
+        let mut selector = Selector::Hosts {
+            ids: vec![
+                Uuid::from_u128(3),
+                Uuid::from_u128(1),
+                Uuid::from_u128(3),
+                Uuid::from_u128(2),
+            ],
+        };
+        selector.canonicalize();
+        assert_eq!(
+            selector,
+            Selector::Hosts {
+                ids: vec![Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3)],
+            }
+        );
+        let mut all = Selector::All;
+        all.canonicalize();
+        assert_eq!(all, Selector::All);
+    }
+
+    #[test]
+    fn validate_rejects_empty_id_lists() {
+        let cases: &[(Selector, &'static str)] = &[
+            (Selector::Tags { ids: vec![] }, "tag"),
+            (Selector::Hosts { ids: vec![] }, "host"),
+            (Selector::Software { ids: vec![] }, "software item"),
+            (Selector::Items { ids: vec![] }, "host software item"),
+        ];
+        for (selector, kind) in cases {
+            assert_eq!(
+                selector.validate(),
+                Err(SelectorValidationError::EmptyIds { kind }),
+                "{selector:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn canonicalization_applies_before_bounds() {
+        // MAX distinct ids plus one duplicate: over the bound raw, inside
+        // it after canonicalize().
+        let mut ids: Vec<Uuid> = (0..bounds::MAX_SELECTOR_TAG_IDS)
+            .map(|i| Uuid::from_u128(i as u128))
+            .collect();
+        ids.push(Uuid::from_u128(0));
+        let mut selector = Selector::Tags { ids };
+        selector.canonicalize();
+        assert_eq!(selector.validate(), Ok(()));
+
+        let over: Vec<Uuid> = (0..=bounds::MAX_SELECTOR_TAG_IDS)
+            .map(|i| Uuid::from_u128(i as u128))
+            .collect();
+        let mut selector = Selector::Tags { ids: over };
+        selector.canonicalize();
+        assert!(matches!(
+            selector.validate(),
+            Err(SelectorValidationError::TooManyIds { .. })
+        ));
     }
 
     #[test]
