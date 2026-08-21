@@ -55,6 +55,7 @@ The `owner` and `repo` are **not** configuration fields — they are expressed a
 | `api_base_url`        | No       | Custom API base URL for GitHub Enterprise (must use HTTPS). Defaults to `https://api.github.com`.                                                                                                                                                                                                                                                             |
 | `include_prereleases` | No       | Include pre-release tags when resolving latest (default: `false`).                                                                                                                                                                                                                                                                                            |
 | `tag_strip_prefix`    | No       | Prefix to strip from tag names when extracting version strings (default: `"v"`).                                                                                                                                                                                                                                                                              |
+| `tag_prefix`          | No       | Literal tag prefix selecting a release series in a monorepo (e.g. `uptrakit-controller-standalone-`). Unlike `tag_strip_prefix`, this **filters**: releases from other series are excluded entirely, then the prefix is stripped before `tag_strip_prefix` applies.                                                                                           |
 | `asset_patterns`      | No       | List of regex patterns to filter release assets. Only assets whose names match at least one pattern are included. An empty list includes all assets. Used by both `fetch_releases` (controller) and `execute_update` (agent).                                                                                                                                 |
 | `install_path`        | No       | Absolute destination path for the downloaded asset (e.g. `/usr/local/bin/pocket-id`). Required for `execute_update`. Must not contain `..` or null bytes. Max 4096 characters.                                                                                                                                                                                |
 | `make_executable`     | No       | Set the executable bit on the installed file (default: `true`). When `false`, the file is installed with mode `0644`.                                                                                                                                                                                                                                         |
@@ -75,6 +76,19 @@ OS/architecture).
 **Sudoers entries:** When `install_path` is configured, the plugin declares `install` as a
 required sudo command. For systemd service management around updates, use a `hook.systemd`
 lifecycle plugin assignment instead (see below).
+
+**Filter semantics:** `tag_prefix` and `asset_patterns` both filter at fetch time, not just at
+display time:
+
+- A release whose assets all fail `asset_patterns` is dropped at fetch time — it no longer
+  appears as the latest release (previously it appeared but was un-updatable).
+- If the configured filters (`tag_prefix`, `asset_patterns`) drop every fetched release while at
+  least one release passed the draft/prerelease checks, the version check fails with a
+  configuration error naming the filters and how to recover, instead of silently reporting "no
+  releases". The error is visible in the controller logs (journald); it does not surface in the
+  Web UI.
+- A repository with no releases at all, or only prereleases while `include_prereleases` is off,
+  is still an empty success, not an error.
 
 ### `releases.gitlab` configuration fields
 
@@ -106,16 +120,20 @@ the Forgejo/Gitea API. The `owner` and `repo` are **not** configuration fields �
 as the `package_identifier` of the software item (format: `"owner/repo"`). A single
 `releases.forgejo` config can therefore serve any number of tracked repositories on the same instance.
 
-| Field                 | Required | Description                                                                                                                                          |
-| --------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api_base_url`        | **Yes**  | Root URL of the Forgejo/Gitea instance (e.g. `https://codeberg.org`). Must use HTTPS and must not point to a private/loopback host.                  |
-| `auth_token`          | No       | Personal access token for authentication. Stored encrypted at rest.                                                                                  |
-| `include_prereleases` | No       | Include pre-release tags when resolving latest (default: `false`).                                                                                   |
-| `tag_strip_prefix`    | No       | Prefix to strip from tag names when extracting version strings (default: `"v"`).                                                                     |
-| `asset_patterns`      | No       | List of regex patterns to filter release assets. Only assets whose names match at least one pattern are included. An empty list includes all assets. |
+| Field                 | Required | Description                                                                                                                                                                                                                |
+| --------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api_base_url`        | **Yes**  | Root URL of the Forgejo/Gitea instance (e.g. `https://codeberg.org`). Must use HTTPS and must not point to a private/loopback host.                                                                                        |
+| `auth_token`          | No       | Personal access token for authentication. Stored encrypted at rest.                                                                                                                                                        |
+| `include_prereleases` | No       | Include pre-release tags when resolving latest (default: `false`).                                                                                                                                                         |
+| `tag_strip_prefix`    | No       | Prefix to strip from tag names when extracting version strings (default: `"v"`).                                                                                                                                           |
+| `tag_prefix`          | No       | Literal tag prefix selecting a release series in a monorepo. Unlike `tag_strip_prefix`, this **filters**: releases from other series are excluded entirely, then the prefix is stripped before `tag_strip_prefix` applies. |
+| `asset_patterns`      | No       | List of regex patterns to filter release assets. Only assets whose names match at least one pattern are included. An empty list includes all assets.                                                                       |
 
 **Package identifier:** Must be set to `"owner/repo"` (e.g. `"readeck/readeck"`). This value is
 validated when a software item is saved.
+
+**Filter semantics:** `tag_prefix` and `asset_patterns` behave identically to the GitHub plugin —
+see [Filter semantics](#releases-github-configuration-fields) above.
 
 **PHS auto-discovery:** Proxmox Helper Scripts containers managed via `check_for_codeberg_release`
 or `CODEBERG_REPO=` are automatically detected by the `discovery.proxmox-helper-scripts` plugin,
@@ -125,13 +143,14 @@ and the corresponding Shell target automatically.
 ### `generic.shell` configuration fields
 
 The Shell plugin provides generic agent-side operations using user-supplied shell commands.
-Both fields are independently optional, but at least one must be set.
+The two command fields are independently optional, but at least one of them must be set.
 
-| Field                | Required      | Description                                                                                                                                                                                                                                                                                                                          |
-| -------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `version_command`    | Conditionally | Shell command run on the agent to detect the installed version. The first non-empty trimmed line of stdout is used as the version string. If absent, `detect_version` is not supported. Supports `{package_identifier}` placeholder (shell-escaped).                                                                                 |
-| `update_command`     | Conditionally | Shell command run on the agent to execute an update. If absent, `execute_update` is not supported. Supports `{version}`, `{tag}`, and `{package_identifier}` placeholders (all shell-escaped). `{tag}` falls back to `{version}` when no release metadata is available.                                                              |
-| `prefer_interactive` | No            | Boolean (default `false`). When `true`, the controller requests a PTY-backed interactive session for the update command. This makes `/dev/tty` available inside the update script, enabling interactive prompts (e.g. low-storage warnings in Proxmox Helper Scripts `/usr/bin/update`). Set automatically for PHS-discovered items. |
+| Field                  | Required      | Description                                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `version_command`      | Conditionally | Shell command run on the agent to detect the installed version. The first non-empty trimmed line of stdout is used as the version string. If absent, `detect_version` is not supported. Supports `{package_identifier}` placeholder (shell-escaped).                                                                                 |
+| `version_strip_prefix` | No            | Literal prefix stripped from the detected version line when present (e.g. `myapp-v` turns `myapp-v1.2.3` into `1.2.3`). An empty remainder counts as "no version detected".                                                                                                                                                          |
+| `update_command`       | Conditionally | Shell command run on the agent to execute an update. If absent, `execute_update` is not supported. Supports `{version}`, `{tag}`, and `{package_identifier}` placeholders (all shell-escaped). `{tag}` falls back to `{version}` when no release metadata is available.                                                              |
+| `prefer_interactive`   | No            | Boolean (default `false`). When `true`, the controller requests a PTY-backed interactive session for the update command. This makes `/dev/tty` available inside the update script, enabling interactive prompts (e.g. low-storage warnings in Proxmox Helper Scripts `/usr/bin/update`). Set automatically for PHS-discovered items. |
 
 **Placeholder reference:**
 
