@@ -8497,6 +8497,7 @@ name = "uptrakit-plugin-releases-forgejo"
 version = "0.0.3"
 dependencies = [
  "async-trait",
+ "httpmock",
  "parking_lot",
  "regex",
  "reqwest",

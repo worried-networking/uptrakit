@@ -17,6 +17,10 @@ use crate::config::ForgejoConfig;
 use crate::error::{ForgejoError, Result};
 use crate::tag::strip_tag_prefix;
 
+/// Pagination window: at most `MAX_PAGES` pages of `PER_PAGE` releases.
+const MAX_PAGES: usize = 10;
+const PER_PAGE: usize = 50;
+
 /// Parse `"owner/repo"` from a package identifier string.
 ///
 /// Rules:
@@ -145,7 +149,66 @@ impl ForgejoPlugin {
             ))
         })?;
         Ok(format!(
-            "{base}/api/v1/repos/{owner}/{repo}/releases?limit=50"
+            "{base}/api/v1/repos/{owner}/{repo}/releases?limit={PER_PAGE}"
+        ))
+    }
+
+    /// Baseline release checks shared by `convert_release` and the
+    /// filtered-vs-empty diagnostics in `fetch_releases`: drafts are always
+    /// skipped; prereleases are skipped unless `include_prereleases` is set.
+    fn passes_baseline(&self, release: &ForgejoRelease) -> bool {
+        !release.draft && (!release.prerelease || self.config.include_prereleases)
+    }
+
+    /// Decide whether a fully-filtered fetch result is a configuration error.
+    ///
+    /// Returns `Some(message)` when releases passed baseline checks but the
+    /// series/asset filters removed all of them — a misconfigured
+    /// `tag_prefix`/`asset_patterns` would otherwise present as a silent
+    /// "no releases". Returns `None` for genuinely empty results or when no
+    /// filter is active.
+    fn filtered_out_error(
+        &self,
+        raw_count: usize,
+        baseline_count: usize,
+        surviving_count: usize,
+        window_exhausted: bool,
+    ) -> Option<String> {
+        if baseline_count == 0 || surviving_count > 0 {
+            return None;
+        }
+        let tag_prefix_active = self
+            .config
+            .tag_prefix
+            .as_deref()
+            .is_some_and(|p| !p.is_empty());
+        // Compiled filters, not the raw config strings: this check must never
+        // disagree with the gating convert_release actually applies.
+        let asset_patterns_active = !self.asset_filters.is_empty();
+        if !tag_prefix_active && !asset_patterns_active {
+            return None;
+        }
+        let window_note = if window_exhausted {
+            format!(
+                "the fetch window ({MAX_PAGES} pages x {PER_PAGE} releases = newest {}) was \
+                 exhausted, so matching releases may exist beyond it",
+                MAX_PAGES * PER_PAGE
+            )
+        } else {
+            "every upstream release was fetched, so nothing upstream matches the filters"
+                .to_string()
+        };
+        Some(format!(
+            "no releases survive the configured filters (tag_prefix={:?}, asset_patterns={:?}): \
+             {baseline_count} of {raw_count} fetched releases passed draft/prerelease checks but \
+             all were filtered out; {window_note}. These filters come from the assignment's \
+             effective config — a plugin config profile or a per-host config_override (e.g. one \
+             written by autodiscovery). To recover, edit or clear tag_prefix on this item's \
+             fetch_releases assignment and version_strip_prefix on its detect_version \
+             assignment (an upstream series rename stales both together). Do not set \
+             tag_strip_prefix to the full series prefix: it strips without filtering and \
+             recreates cross-series phantom updates.",
+            self.config.tag_prefix, self.config.asset_patterns,
         ))
     }
 
@@ -153,19 +216,34 @@ impl ForgejoPlugin {
     ///
     /// Returns `None` if the release should be skipped (draft, filtered prerelease).
     fn convert_release(&self, release: &ForgejoRelease) -> Option<UpstreamRelease> {
-        // Skip drafts
-        if release.draft {
-            tracing::trace!(tag = %release.tag_name, "skipping draft release");
+        if !self.passes_baseline(release) {
+            tracing::trace!(tag = %release.tag_name, "skipping draft or filtered prerelease");
             return None;
         }
 
-        // Skip prereleases unless configured to include them
-        if release.prerelease && !self.config.include_prereleases {
-            tracing::trace!(tag = %release.tag_name, "skipping prerelease");
+        // Series filter: when tag_prefix is set, the release must belong to
+        // the series (literal prefix match) — other series in the same repo
+        // are excluded entirely, not just stripped.
+        if let Some(prefix) = self.config.tag_prefix.as_deref()
+            && !prefix.is_empty()
+            && !release.tag_name.starts_with(prefix)
+        {
+            tracing::trace!(tag = %release.tag_name, "skipping release outside tag_prefix series");
             return None;
         }
 
-        let version_str = strip_tag_prefix(&release.tag_name, &self.config.tag_strip_prefix);
+        // Strip order: tag_prefix first, then tag_strip_prefix, then parse —
+        // so "…-standalone-" + "v" and "…-standalone-v" + "v" both yield the
+        // same bare version.
+        let after_series = strip_tag_prefix(
+            &release.tag_name,
+            self.config.tag_prefix.as_deref().unwrap_or(""),
+        );
+        let version_str = strip_tag_prefix(after_series, &self.config.tag_strip_prefix);
+        if version_str.is_empty() {
+            tracing::trace!(tag = %release.tag_name, "skipping release: empty version after prefix strip");
+            return None;
+        }
         let version = Version::new(version_str);
 
         let published_at = release.published_at.as_ref().and_then(|s| {
@@ -197,6 +275,14 @@ impl ForgejoPlugin {
                 sha256_digest: None,
             })
             .collect();
+
+        // Asset gating: a configured asset filter that matches nothing means
+        // this release has no installable artifact — drop the release instead
+        // of surfacing an asset-less "update".
+        if !self.asset_filters.is_empty() && assets.is_empty() {
+            tracing::trace!(tag = %release.tag_name, "skipping release: no assets match asset_patterns");
+            return None;
+        }
 
         Some({
             let mut r = UpstreamRelease::new(
@@ -276,9 +362,9 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ForgejoPlugin {
         })?;
         tracing::debug!(url = %initial_url, "fetching Forgejo releases");
 
-        const MAX_PAGES: usize = 10;
         let mut all_releases: Vec<ForgejoRelease> = Vec::new();
         let mut url = initial_url;
+        let mut window_exhausted = true;
 
         'pages: for _ in 0..MAX_PAGES {
             let response = self
@@ -321,14 +407,32 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ForgejoPlugin {
             })?;
 
             if page.is_empty() {
+                window_exhausted = false;
                 break 'pages;
             }
+            let page_full = page.len() >= PER_PAGE;
             all_releases.extend(page);
             match next_url {
                 Some(next) => url = next,
-                None => break 'pages,
+                None => {
+                    // No Link header after a FULL page is ambiguous — the
+                    // listing may end exactly at the page boundary, or an
+                    // intermediary stripped the header. Only a partial page
+                    // proves the listing genuinely ended, so only then is the
+                    // window known to be un-exhausted.
+                    if !page_full {
+                        window_exhausted = false;
+                    }
+                    break 'pages;
+                }
             }
         }
+
+        let raw_count = all_releases.len();
+        let baseline_count = all_releases
+            .iter()
+            .filter(|r| self.passes_baseline(r))
+            .count();
 
         let upstream_releases: Vec<UpstreamRelease> = all_releases
             .iter()
@@ -337,9 +441,19 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ForgejoPlugin {
 
         tracing::debug!(
             count = upstream_releases.len(),
-            total = all_releases.len(),
+            baseline = baseline_count,
+            total = raw_count,
             "fetched Forgejo releases"
         );
+
+        if let Some(msg) = self.filtered_out_error(
+            raw_count,
+            baseline_count,
+            upstream_releases.len(),
+            window_exhausted,
+        ) {
+            bail!(PluginError::Configuration(msg));
+        }
 
         Ok(upstream_releases)
     }
@@ -354,7 +468,8 @@ mod tests {
     use super::*;
     use crate::api_types::{ForgejoAsset, ForgejoRelease};
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, PluginCapability, PluginMeta, StandardHostRuntime,
+        HostCapabilities, PluginCapability, PluginHttpClientConfig, PluginMeta, ReleaseFetcher,
+        SsrfMode, StandardHostRuntime, build_plugin_http_client,
     };
 
     fn test_config() -> ForgejoConfig {
@@ -619,6 +734,151 @@ mod tests {
         assert!(upstream.published_at.is_none());
     }
 
+    // ── tag_prefix series tests ───────────────────────────────────────────────
+
+    fn series_plugin(tag_prefix: &str) -> ForgejoPlugin {
+        let config = ForgejoConfig {
+            tag_prefix: Some(tag_prefix.to_string()),
+            ..test_config()
+        };
+        ForgejoPlugin::new(config, test_runtime()).expect("valid config")
+    }
+
+    #[test]
+    fn tag_prefix_filters_other_series() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        let foreign = make_release("uptrakit-agent-v1.0.0", false, false);
+        assert!(plugin.convert_release(&foreign).is_none());
+        let ours = make_release("uptrakit-controller-standalone-v0.0.7", false, false);
+        assert!(plugin.convert_release(&ours).is_some());
+    }
+
+    #[test]
+    fn strip_composition_prefix_without_v() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        let fj = make_release("uptrakit-controller-standalone-v0.0.7", false, false);
+        let release = plugin.convert_release(&fj).expect("should convert");
+        assert_eq!(release.version.as_str(), "0.0.7");
+        assert_eq!(release.tag, "uptrakit-controller-standalone-v0.0.7");
+    }
+
+    #[test]
+    fn strip_composition_prefix_including_v() {
+        let plugin = series_plugin("uptrakit-controller-standalone-v");
+        let fj = make_release("uptrakit-controller-standalone-v0.0.7", false, false);
+        let release = plugin.convert_release(&fj).expect("should convert");
+        assert_eq!(release.version.as_str(), "0.0.7");
+    }
+
+    #[test]
+    fn tag_equal_to_composed_prefix_dropped() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        let fj = make_release("uptrakit-controller-standalone-v", false, false);
+        assert!(plugin.convert_release(&fj).is_none());
+    }
+
+    // ── asset gating (D3) tests ───────────────────────────────────────────────
+
+    fn release_with_asset(tag: &str, asset_name: &str) -> ForgejoRelease {
+        let mut fj = make_release(tag, false, false);
+        fj.assets = vec![ForgejoAsset {
+            name: asset_name.to_string(),
+            browser_download_url: format!("https://example.com/{asset_name}"),
+            size: 42,
+        }];
+        fj
+    }
+
+    #[test]
+    fn asset_gating_drops_release_without_matching_assets() {
+        let config = ForgejoConfig {
+            asset_patterns: vec![r".*\.deb$".to_string()],
+            ..test_config()
+        };
+        let plugin = ForgejoPlugin::new(config, test_runtime()).expect("valid config");
+        let fj = release_with_asset("v1.0.0", "app.rpm");
+        assert!(plugin.convert_release(&fj).is_none());
+        let fj_ok = release_with_asset("v1.0.0", "app.deb");
+        assert!(plugin.convert_release(&fj_ok).is_some());
+    }
+
+    #[test]
+    fn no_asset_patterns_keeps_assetless_release() {
+        let plugin = test_plugin();
+        let fj = make_release("v1.0.0", false, false);
+        assert!(plugin.convert_release(&fj).is_some());
+    }
+
+    // ── filtered-to-zero diagnostics (D4) tests ───────────────────────────────
+
+    #[test]
+    fn filtered_out_error_fires_when_series_filter_removes_all() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        let msg = plugin
+            .filtered_out_error(120, 100, 0, false)
+            .expect("error expected");
+        assert!(msg.contains("uptrakit-controller-standalone-"));
+        assert!(msg.contains("120"), "raw count must be named");
+        assert!(msg.contains("100"), "baseline count must be named");
+        assert!(msg.contains("tag_prefix"), "fetch recovery lever");
+        assert!(
+            msg.contains("version_strip_prefix"),
+            "detect recovery lever"
+        );
+        assert!(msg.contains("tag_strip_prefix"), "full-prefix warning");
+        assert!(
+            msg.contains("nothing upstream matches"),
+            "non-exhausted window wording"
+        );
+    }
+
+    #[test]
+    fn filtered_out_error_window_exhausted_reads_differently() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        // Counts deliberately distinct from the 10x50=500 window numbers so
+        // no assert can pass by matching the wrong figure.
+        let msg = plugin
+            .filtered_out_error(70, 60, 0, true)
+            .expect("error expected");
+        assert!(msg.contains("exhausted"));
+        assert!(msg.contains("500"), "window bound must be named");
+        assert!(msg.contains("70"), "raw count must be named");
+        assert!(msg.contains("60"), "baseline count must be named");
+    }
+
+    #[test]
+    fn filtered_out_error_silent_without_active_filters() {
+        // tag_strip_prefix eating whole tags is not a *new* filter: stay silent.
+        let plugin = test_plugin();
+        assert!(plugin.filtered_out_error(5, 5, 0, false).is_none());
+    }
+
+    #[test]
+    fn filtered_out_error_silent_when_baseline_empty() {
+        // All-prerelease repo with tag_prefix set: empty success, no error.
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        assert!(plugin.filtered_out_error(5, 0, 0, false).is_none());
+    }
+
+    #[test]
+    fn filtered_out_error_silent_when_survivors_exist() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        assert!(plugin.filtered_out_error(5, 5, 1, false).is_none());
+    }
+
+    #[test]
+    fn filtered_out_error_fires_for_asset_patterns_alone() {
+        let config = ForgejoConfig {
+            asset_patterns: vec![r".*\.deb$".to_string()],
+            ..test_config()
+        };
+        let plugin = ForgejoPlugin::new(config, test_runtime()).expect("valid config");
+        let msg = plugin
+            .filtered_out_error(3, 3, 0, false)
+            .expect("error expected");
+        assert!(msg.contains("asset_patterns"));
+    }
+
     // ── plugin_type_id ──────────────────────────────────────────────────
 
     #[test]
@@ -699,5 +959,81 @@ mod tests {
     fn parse_link_next_absent_when_no_link_header() {
         let headers = reqwest::header::HeaderMap::new();
         assert!(parse_link_next(&headers).is_none());
+    }
+
+    // ── wired fetch_releases seam tests (httpmock) ────────────────────────────
+
+    fn plugin_for_mock(config: ForgejoConfig) -> ForgejoPlugin {
+        let plugin = ForgejoPlugin::new(config, test_runtime()).expect("valid config");
+        // Same-crate test: seed the lazy client cache with a permissive-SSRF
+        // client so the plugin can reach the httpmock server on 127.0.0.1
+        // (idiom from the npm plugin's release tests).
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: "uptrakit-plugin-releases-forgejo-test",
+            ssrf_mode: SsrfMode::Permissive,
+            ..PluginHttpClientConfig::default()
+        })
+        .expect("build test HTTP client");
+        *plugin.client.lock() = Some(client);
+        plugin
+    }
+
+    #[tokio::test]
+    async fn fetch_releases_all_filtered_fails_with_configuration_error() {
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v1/repos/o/r/releases");
+                then.status(200).json_body(serde_json::json!([{
+                    "tag_name": "other-series-v1.0.0",
+                    "name": null,
+                    "draft": false,
+                    "prerelease": false,
+                    "html_url": "https://example.com/r/other-series-v1.0.0",
+                    "body": null,
+                    "published_at": null,
+                    "assets": []
+                }]));
+            })
+            .await;
+        let plugin = plugin_for_mock(ForgejoConfig {
+            api_base_url: Some(server.base_url()),
+            tag_prefix: Some("uptrakit-controller-standalone-".to_string()),
+            ..ForgejoConfig::default()
+        });
+        let err = plugin.fetch_releases("o/r").await.expect_err("must fail");
+        let rendered = format!("{err:?}");
+        assert!(rendered.contains("no releases survive the configured filters"));
+        assert!(rendered.contains("uptrakit-controller-standalone-"));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn fetch_releases_all_prerelease_with_tag_prefix_is_empty_success() {
+        let server = httpmock::MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v1/repos/o/r/releases");
+                then.status(200).json_body(serde_json::json!([{
+                    "tag_name": "uptrakit-controller-standalone-v0.0.7",
+                    "name": null,
+                    "draft": false,
+                    "prerelease": true,
+                    "html_url": "https://example.com/r/t",
+                    "body": null,
+                    "published_at": null,
+                    "assets": []
+                }]));
+            })
+            .await;
+        let plugin = plugin_for_mock(ForgejoConfig {
+            api_base_url: Some(server.base_url()),
+            tag_prefix: Some("uptrakit-controller-standalone-".to_string()),
+            ..ForgejoConfig::default()
+        });
+        let releases = plugin.fetch_releases("o/r").await.expect("empty success");
+        assert!(releases.is_empty());
     }
 }

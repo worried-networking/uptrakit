@@ -158,6 +158,11 @@ impl PluginConfig for ForgejoConfig {
                 .with_help_text(
                     "Prefix to strip from git tags (e.g. \"v\" turns \"v1.0\" into \"1.0\")",
                 ),
+            FormFieldDescriptor::new("tag_prefix", "Tag Series Prefix").with_help_text(
+                "Only consider releases whose tag starts with this literal prefix (e.g. \
+                 \"uptrakit-controller-standalone-\"). Stripped before Tag Strip Prefix applies. \
+                 Use for monorepos that tag multiple components in one repository.",
+            ),
             FormFieldDescriptor::new("asset_patterns", "Asset Patterns")
                 .with_type(FormFieldType::Textarea)
                 .list()
