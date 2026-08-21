@@ -37,6 +37,17 @@ pub struct ShellConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_command: Option<String>,
 
+    /// Literal prefix stripped from the detected version line.
+    ///
+    /// After the first non-empty trimmed line of `version_command` output is
+    /// extracted, this prefix is stripped when the line starts with it (the
+    /// line is used verbatim otherwise). An empty post-strip remainder is
+    /// treated as no detected version. Lets shell-detected versions match
+    /// bare upstream versions when the local tool reports a series-prefixed
+    /// string (e.g. `"uptrakit-controller-standalone-v0.0.7"` → `"0.0.7"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_strip_prefix: Option<String>,
+
     /// Request PTY-backed interactive execution for the update command.
     ///
     /// When `true`, the controller sets `interactive: true` in the
@@ -93,6 +104,17 @@ impl PluginConfig for ShellConfig {
                 e,
             ));
         }
+        if let Some(ref prefix) = self.version_strip_prefix
+            && let Err(e) = uptrakit_shared_types::version_prefix::validate_version_prefix(
+                prefix,
+                "version_strip_prefix",
+            )
+        {
+            return Err(PluginConfigValidationError::invalid_field(
+                "version_strip_prefix",
+                e,
+            ));
+        }
         Ok(())
     }
 
@@ -107,6 +129,8 @@ impl PluginConfig for ShellConfig {
             FormFieldDescriptor::new("update_command", "Update Command")
                 .with_type(FormFieldType::Textarea)
                 .with_help_text("Shell command to execute an update (supports {version}, {tag}, {package_identifier})"),
+            FormFieldDescriptor::new("version_strip_prefix", "Version Strip Prefix")
+                .with_help_text("Literal prefix stripped from the detected version line (e.g. \"myapp-v\" turns \"myapp-v1.2.3\" into \"1.2.3\")."),
             FormFieldDescriptor::new("prefer_interactive", "Interactive Mode")
                 .with_type(FormFieldType::Toggle)
                 .with_help_text("Allocate a PTY for the update command. Enable for scripts that read from /dev/tty (e.g. interactive prompts)."),
@@ -137,6 +161,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: None,
+            version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
         };
@@ -148,6 +173,7 @@ mod tests {
         let config = ShellConfig {
             version_command: None,
             update_command: Some("apt-get install -y myapp".to_string()),
+            version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
         };
@@ -159,6 +185,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("apt-get install -y myapp".to_string()),
+            version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
         };
@@ -170,6 +197,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: None,
+            version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
         };
@@ -183,6 +211,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("myapp update".to_string()),
+            version_strip_prefix: None,
             prefer_interactive: true,
             resumable: false,
         };
@@ -203,6 +232,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("myapp --version".to_string()),
             update_command: Some("myapp update".to_string()),
+            version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
         };
@@ -220,6 +250,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some(cmd),
             update_command: None,
+            version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
         };
@@ -232,6 +263,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some(cmd),
             update_command: None,
+            version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
         };
@@ -246,6 +278,7 @@ mod tests {
         let config = ShellConfig {
             version_command: Some("echo ok".to_string()),
             update_command: Some(cmd),
+            version_strip_prefix: None,
             prefer_interactive: false,
             resumable: false,
         };
@@ -264,5 +297,52 @@ mod tests {
         let config: ShellConfig =
             serde_json::from_str(r#"{"update_command":"echo hi","resumable":true}"#).unwrap();
         assert!(config.resumable);
+    }
+
+    #[test]
+    fn version_strip_prefix_defaults_to_none() {
+        let config: ShellConfig =
+            serde_json::from_str(r#"{"version_command":"echo 1"}"#).expect("deserialize");
+        assert!(config.version_strip_prefix.is_none());
+    }
+
+    #[test]
+    fn validate_rejects_empty_version_strip_prefix() {
+        let config = ShellConfig {
+            version_command: Some("echo 1".to_string()),
+            version_strip_prefix: Some(String::new()),
+            ..ShellConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("version_strip_prefix"));
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn validate_rejects_overlong_version_strip_prefix() {
+        let config = ShellConfig {
+            version_command: Some("echo 1".to_string()),
+            version_strip_prefix: Some(
+                "x".repeat(uptrakit_shared_types::version_prefix::MAX_VERSION_PREFIX_LENGTH + 1),
+            ),
+            ..ShellConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn serde_version_strip_prefix_roundtrip() {
+        let config = ShellConfig {
+            version_command: Some("echo 1".to_string()),
+            version_strip_prefix: Some("myapp-v".to_string()),
+            ..ShellConfig::default()
+        };
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deserialized: ShellConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            deserialized.version_strip_prefix,
+            config.version_strip_prefix
+        );
     }
 }

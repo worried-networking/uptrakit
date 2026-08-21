@@ -29,8 +29,9 @@ pub struct ShellPlugin {
 impl ShellPlugin {
     /// Create a new `ShellPlugin` from the given configuration.
     ///
-    /// The executor is extracted from the host runtime. Config validation is the
-    /// caller's responsibility (the registry calls `validate()` before constructing).
+    /// The executor is extracted from the host runtime. Config validation
+    /// happens at the config-write boundaries via `PluginConfig::validate()`;
+    /// `new()` accepts the config as-is.
     pub fn new(
         config: ShellConfig,
         runtime: Arc<dyn HostRuntime>,
@@ -78,6 +79,14 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for ShellPlugin {
             .lines()
             .map(str::trim)
             .find(|l| !l.is_empty())
+            .map(|line| match self.config.version_strip_prefix.as_deref() {
+                Some(prefix) => line.strip_prefix(prefix).unwrap_or(line),
+                None => line,
+            })
+            // Stripping can expose whitespace the outer trim couldn't see
+            // ("myapp-v 1.2.3" with prefix "myapp-v" leaves " 1.2.3").
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
             .map(|l| Version::new(l.to_string()));
 
         Ok(version)
@@ -158,6 +167,19 @@ mod tests {
                 update_command: update_command.map(String::from),
                 prefer_interactive: false,
                 resumable: false,
+                version_strip_prefix: None,
+            },
+            test_runtime(),
+        )
+        .expect("plugin creation")
+    }
+
+    fn make_version_plugin(version_command: &str, strip: Option<&str>) -> ShellPlugin {
+        ShellPlugin::new(
+            ShellConfig {
+                version_command: Some(version_command.to_string()),
+                version_strip_prefix: strip.map(String::from),
+                ..ShellConfig::default()
             },
             test_runtime(),
         )
@@ -245,6 +267,62 @@ mod tests {
         let plugin = make_plugin(Some("false"), None);
         let result = plugin.detect_installed_version("pkg").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn version_strip_prefix_strips_matching_line() {
+        let plugin = make_version_plugin("echo myapp-v1.2.3", Some("myapp-v"));
+        let version = plugin
+            .detect_installed_version("pkg")
+            .await
+            .expect("detection")
+            .expect("version");
+        assert_eq!(version.as_str(), "1.2.3");
+    }
+
+    #[tokio::test]
+    async fn version_strip_prefix_nonmatching_line_verbatim() {
+        let plugin = make_version_plugin("echo myapp-v1.2.3", Some("other-"));
+        let version = plugin
+            .detect_installed_version("pkg")
+            .await
+            .expect("detection")
+            .expect("version");
+        assert_eq!(version.as_str(), "myapp-v1.2.3");
+    }
+
+    #[tokio::test]
+    async fn version_strip_prefix_unset_identical_to_today() {
+        let plugin = make_version_plugin("echo myapp-v1.2.3", None);
+        let version = plugin
+            .detect_installed_version("pkg")
+            .await
+            .expect("detection")
+            .expect("version");
+        assert_eq!(version.as_str(), "myapp-v1.2.3");
+    }
+
+    #[tokio::test]
+    async fn version_strip_prefix_empty_remainder_is_none() {
+        let plugin = make_version_plugin("echo myapp-v", Some("myapp-v"));
+        let version = plugin
+            .detect_installed_version("pkg")
+            .await
+            .expect("detection");
+        assert!(version.is_none());
+    }
+
+    #[tokio::test]
+    async fn version_strip_prefix_trims_exposed_whitespace() {
+        // Stripping "myapp-v" from "myapp-v 1.2.3" exposes a leading space —
+        // the post-strip trim must remove it.
+        let plugin = make_version_plugin("echo myapp-v 1.2.3", Some("myapp-v"));
+        let version = plugin
+            .detect_installed_version("pkg")
+            .await
+            .expect("detection")
+            .expect("version");
+        assert_eq!(version.as_str(), "1.2.3");
     }
 
     // ── execute_update tests ──────────────────────────────────────────────────
