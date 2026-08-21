@@ -430,6 +430,13 @@ async fn batch_check_versions_inner(
         return vec![];
     }
 
+    // Single absolute deadline shared by every bounded section below, so the
+    // whole operation is bounded by `VERSION_CHECK_OP_TIMEOUT` while groups
+    // that finish in time keep their real results (partial-results contract;
+    // see the outer wrap in `run_check_versions`, which is a backstop only).
+    let op_deadline =
+        tokio::time::Instant::now() + uptrakit_shared_types::op_timeouts::VERSION_CHECK_OP_TIMEOUT;
+
     // ── Step 1: Build detect and fetch groups ────────────────────────────────
     let (detect_groups, fetch_groups) = build_batch_groups(&assignments, ctx);
 
@@ -442,7 +449,20 @@ async fn batch_check_versions_inner(
                 item_count = group.items.len(),
                 "queuing detect_installed_version batch group"
             );
-            run_detect_group(group, Arc::clone(&runtime))
+            let items = group.items.clone();
+            let runtime = Arc::clone(&runtime);
+            async move {
+                match tokio::time::timeout_at(op_deadline, run_detect_group(group, runtime)).await {
+                    Ok(results) => results,
+                    Err(_elapsed) => error_for_all_detect_items(
+                        &items,
+                        format!(
+                            "version check op deadline ({}s) exceeded",
+                            uptrakit_shared_types::op_timeouts::VERSION_CHECK_OP_TIMEOUT.as_secs()
+                        ),
+                    ),
+                }
+            }
         })
         .collect();
 
@@ -454,7 +474,18 @@ async fn batch_check_versions_inner(
     }
 
     // ── Step 3: RefreshPackageIndex – at most once per unique fetch group ───
-    refresh_package_indexes(&fetch_groups, &runtime).await;
+    if tokio::time::timeout_at(
+        op_deadline,
+        refresh_package_indexes(&fetch_groups, &runtime),
+    )
+    .await
+    .is_err()
+    {
+        tracing::warn!(
+            timeout_secs = uptrakit_shared_types::op_timeouts::VERSION_CHECK_OP_TIMEOUT.as_secs(),
+            "package index refresh exceeded the version check op deadline"
+        );
+    }
 
     // ── Step 4: Run fetch groups in parallel ─────────────────────────────────
     let fetch_futs: Vec<_> = fetch_groups
@@ -465,7 +496,25 @@ async fn batch_check_versions_inner(
                 item_count = group.items.len(),
                 "queuing fetch_releases batch group"
             );
-            run_fetch_group(group, Arc::clone(&runtime), fetcher_factory)
+            let items = group.items.clone();
+            let runtime = Arc::clone(&runtime);
+            async move {
+                match tokio::time::timeout_at(
+                    op_deadline,
+                    run_fetch_group(group, runtime, fetcher_factory),
+                )
+                .await
+                {
+                    Ok(results) => results,
+                    Err(_elapsed) => error_for_all_fetch_items(
+                        &items,
+                        format!(
+                            "version check op deadline ({}s) exceeded",
+                            uptrakit_shared_types::op_timeouts::VERSION_CHECK_OP_TIMEOUT.as_secs()
+                        ),
+                    ),
+                }
+            }
         })
         .collect();
 
@@ -521,6 +570,16 @@ pub async fn batch_check_versions(
 /// `true`. On each transient failure, sleeps an exponentially increasing delay
 /// and logs a debug message. Returns the first successful result or an error
 /// string if all attempts fail.
+///
+/// This function has no overall deadline of its own: the caller-side
+/// `tokio::time::timeout_at(op_deadline, …)` bound in
+/// `batch_check_versions_inner` is what cancels the whole retry loop — mid
+/// attempt or mid backoff sleep — at the shared operation deadline.
+/// `PluginError::TimedOut` is retryable
+/// (`crates/plugins/infrastructure/core/src/error.rs`), so a command that
+/// consumes its full default execution budget may be retried up to twice;
+/// it is the op deadline above, not a cap on this function's cumulative
+/// backoff, that bounds that worst case.
 async fn run_with_retry<'a, T>(
     label: &'static str,
     max_retries: u32,

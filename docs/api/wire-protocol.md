@@ -191,6 +191,14 @@ The `fetch_releases` field is only included for agent-side plugins (those withou
 `fetch_releases` (e.g. GitHub Releases, Docker Registry) is handled by the controller scheduler
 and is not sent to the agent.
 
+**Operation deadline:** the agent bounds a whole `check_versions` batch to
+`uptrakit_shared_types::op_timeouts::VERSION_CHECK_OP_TIMEOUT` (1800s). On expiry the agent always
+sends `version_check_results` -- items not yet completed get a per-item error result echoing the
+request's `software_item_id`/`host_software_item_id`, while items that already finished keep their
+real results (partial results, never silence, since the controller's dispatch dedup and watchdog
+depend on a terminal message per request). These constants are shared with the controller's
+dispatch dedup TTLs (M1.6) so the two sides cannot drift out of sync.
+
 #### `execute_update` payload
 
 > **Security note:** When published to NATS JetStream, plugin config fields in
@@ -338,6 +346,13 @@ each `DiscoveredSoftware` item's `targets` array. The controller creates the app
 from these structured targets.
 
 Known `plugin_type` values for discovery: `package-manager.homebrew`, `discovery.proxmox-helper-scripts`, `package-manager.apt`.
+
+**Operation deadline:** the agent bounds a whole `discover_software` run to
+`uptrakit_shared_types::op_timeouts::DISCOVERY_OP_TIMEOUT` (1800s). On expiry the agent always
+sends `discovery_results` -- plugins not yet completed get a per-plugin error result (empty
+`discoveries`, `error` set) echoing the request's `plugin_config_id`/`plugin_type`, while plugins
+that already finished keep their real results (partial results, never silence). Shared with the
+controller's dispatch dedup TTLs (M1.6) for the same reason as `check_versions` above.
 
 #### `discovery_results` payload
 
@@ -541,6 +556,11 @@ sent over the direct WebSocket connection between the controller and the agent.
 | `pre_update_hook`           | Execute a pre-update hook with a mock context.                             |
 | `post_update_hook`          | Execute a post-update hook with a mock context.                            |
 | `connectivity`              | Test upstream API connectivity (controller-side only; not sent to agents). |
+
+**Operation deadline:** the agent bounds a whole `test_plugin_config` run to
+`uptrakit_shared_types::op_timeouts::CONFIG_TEST_OP_TIMEOUT` (25s -- tight because config tests
+back an interactive UI flow). On expiry the agent always sends `test_plugin_config_result` with
+`success: false` and an `error` naming the timeout, rather than leaving the UI request hanging.
 
 #### `test_plugin_config_result` payload (agent -> controller)
 

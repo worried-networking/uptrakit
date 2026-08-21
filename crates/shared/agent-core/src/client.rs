@@ -340,11 +340,51 @@ pub async fn run_check_versions(
         "received CheckVersions request"
     );
 
-    let results: Vec<VersionCheckResult> =
-        crate::version_check::batch_check_versions(payload.assignments, runtime, ctx).await;
+    let results: Vec<VersionCheckResult> = match tokio::time::timeout(
+        uptrakit_shared_types::op_timeouts::VERSION_CHECK_OP_TIMEOUT
+            + uptrakit_shared_types::op_timeouts::OP_DEADLINE_GRACE,
+        crate::version_check::batch_check_versions(payload.assignments.clone(), runtime, ctx),
+    )
+    .await
+    {
+        Ok(results) => results,
+        Err(_elapsed) => {
+            tracing::warn!(
+                timeout_secs =
+                    uptrakit_shared_types::op_timeouts::VERSION_CHECK_OP_TIMEOUT.as_secs(),
+                "version check batch exceeded its operation deadline"
+            );
+            timed_out_version_results(&payload.assignments)
+        }
+    };
 
     tracing::debug!("version check complete");
     ServiceMessage::VersionCheckResults(VersionCheckResultsPayload { results })
+}
+
+/// Per-assignment error results for a version-check batch that hit its
+/// operation deadline. Results are always sent — the controller's dispatch
+/// dedup and watchdog rely on a terminal message per request.
+fn timed_out_version_results(
+    assignments: &[uptrakit_wire::VersionCheckAssignment],
+) -> Vec<VersionCheckResult> {
+    let message = format!(
+        "version check timed out after {}s",
+        uptrakit_shared_types::op_timeouts::VERSION_CHECK_OP_TIMEOUT.as_secs()
+    );
+    assignments
+        .iter()
+        .map(|a| VersionCheckResult {
+            software_item_id: a.software_item_id,
+            installed_version: None,
+            latest_version: None,
+            error: Some(message.clone()),
+            update_category: Default::default(),
+            host_software_item_id: a.host_software_item_id,
+            installed_display_version: None,
+            not_ready: None,
+        })
+        .collect()
 }
 
 /// Spawn an update task and return the in-flight update handle.
@@ -726,12 +766,46 @@ pub async fn run_discover_software(
         "received DiscoverSoftware request"
     );
 
-    let results = discover_software_inner(&payload, base_runtime, ctx).await;
+    let results = match tokio::time::timeout(
+        uptrakit_shared_types::op_timeouts::DISCOVERY_OP_TIMEOUT
+            + uptrakit_shared_types::op_timeouts::OP_DEADLINE_GRACE,
+        discover_software_inner(&payload, base_runtime, ctx),
+    )
+    .await
+    {
+        Ok(results) => results,
+        Err(_elapsed) => {
+            tracing::warn!(
+                timeout_secs = uptrakit_shared_types::op_timeouts::DISCOVERY_OP_TIMEOUT.as_secs(),
+                "discovery run exceeded its operation deadline"
+            );
+            timed_out_discovery_results(&payload)
+        }
+    };
 
     ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
         host_machine_id: payload.host_machine_id,
         results,
     })
+}
+
+/// Per-plugin error results for a discovery run that hit its operation
+/// deadline. Results are always sent (empty `discoveries`, `error` set).
+fn timed_out_discovery_results(payload: &DiscoverSoftwarePayload) -> Vec<DiscoveryPluginResult> {
+    let message = format!(
+        "discovery timed out after {}s",
+        uptrakit_shared_types::op_timeouts::DISCOVERY_OP_TIMEOUT.as_secs()
+    );
+    payload
+        .plugins
+        .iter()
+        .map(|p| DiscoveryPluginResult {
+            plugin_config_id: p.plugin_config_id,
+            plugin_type: p.plugin_type.clone(),
+            discoveries: vec![],
+            error: Some(message.clone()),
+        })
+        .collect()
 }
 
 /// Inner discovery logic for [`run_discover_software`].
@@ -741,6 +815,8 @@ async fn discover_software_inner(
     ctx: &ConnectionContext,
 ) -> Vec<DiscoveryPluginResult> {
     let mut results = Vec::with_capacity(payload.plugins.len());
+    let op_deadline =
+        tokio::time::Instant::now() + uptrakit_shared_types::op_timeouts::DISCOVERY_OP_TIMEOUT;
 
     for assignment in &payload.plugins {
         tracing::debug!(
@@ -801,96 +877,126 @@ async fn discover_software_inner(
                         });
                         continue;
                     }
-                    match (slot.create)(&effective_config, runtime) {
-                        Err(e) => {
-                            tracing::warn!(
-                                plugin_type = %assignment.plugin_type,
-                                error = %e,
-                                "failed to create plugin for discovery"
-                            );
-                            DiscoveryPluginResult {
-                                plugin_config_id: assignment.plugin_config_id,
-                                plugin_type: assignment.plugin_type.clone(),
-                                discoveries: vec![],
-                                error: Some(e.to_string()),
-                            }
-                        }
-                        Ok(discovery) => {
-                            // Run a host-compatibility check before discovery.
-                            //
-                            // Plugins that declare `DetectHostCompatibility` are asked
-                            // whether they make sense on this host (e.g. Docker plugin
-                            // checks if `docker` is present, PHS checks for
-                            // `/usr/bin/update`).  Incompatible plugins return an empty,
-                            // non-error result — it is not a failure for a host to not
-                            // have a particular piece of software installed.
-                            //
-                            // If the check itself errors, we proceed with discovery
-                            // (fail-open) and log a warning.
-                            let is_compatible = if desc
-                                .capabilities
-                                .contains(&PluginCapability::DetectHostCompatibility)
-                            {
-                                match discovery.detect_host_compatibility().await {
-                                    Ok(HostCompatibility::Incompatible(reason)) => {
-                                        tracing::debug!(
-                                            plugin_type = %assignment.plugin_type,
-                                            reason = %reason,
-                                            "plugin not compatible with host; skipping discovery"
-                                        );
-                                        false
-                                    }
-                                    Ok(_) => true,
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            plugin_type = %assignment.plugin_type,
-                                            error = %e,
-                                            "host compatibility check failed; proceeding with discovery"
-                                        );
-                                        true
-                                    }
-                                }
-                            } else {
-                                true
-                            };
-
-                            if !is_compatible {
+                    // The plugin execution below (create + async discovery run)
+                    // is bounded by the shared discovery op deadline so a
+                    // wedged plugin cannot stall the rest of the batch;
+                    // already-completed assignments keep their real results.
+                    match tokio::time::timeout_at(op_deadline, async {
+                        match (slot.create)(&effective_config, runtime) {
+                            Err(e) => {
+                                tracing::warn!(
+                                    plugin_type = %assignment.plugin_type,
+                                    error = %e,
+                                    "failed to create plugin for discovery"
+                                );
                                 DiscoveryPluginResult {
                                     plugin_config_id: assignment.plugin_config_id,
                                     plugin_type: assignment.plugin_type.clone(),
                                     discoveries: vec![],
-                                    error: None,
+                                    error: Some(e.to_string()),
                                 }
-                            } else {
-                                match discovery.discover_software().await {
-                                    Ok(discoveries) => {
-                                        tracing::info!(
-                                            plugin_type = %assignment.plugin_type,
-                                            count = discoveries.len(),
-                                            "discovery completed"
-                                        );
-                                        DiscoveryPluginResult {
-                                            plugin_config_id: assignment.plugin_config_id,
-                                            plugin_type: assignment.plugin_type.clone(),
-                                            discoveries,
-                                            error: None,
+                            }
+                            Ok(discovery) => {
+                                // Run a host-compatibility check before discovery.
+                                //
+                                // Plugins that declare `DetectHostCompatibility` are asked
+                                // whether they make sense on this host (e.g. Docker plugin
+                                // checks if `docker` is present, PHS checks for
+                                // `/usr/bin/update`).  Incompatible plugins return an empty,
+                                // non-error result — it is not a failure for a host to not
+                                // have a particular piece of software installed.
+                                //
+                                // If the check itself errors, we proceed with discovery
+                                // (fail-open) and log a warning.
+                                let is_compatible = if desc
+                                    .capabilities
+                                    .contains(&PluginCapability::DetectHostCompatibility)
+                                {
+                                    match discovery.detect_host_compatibility().await {
+                                        Ok(HostCompatibility::Incompatible(reason)) => {
+                                            tracing::debug!(
+                                                plugin_type = %assignment.plugin_type,
+                                                reason = %reason,
+                                                "plugin not compatible with host; skipping discovery"
+                                            );
+                                            false
+                                        }
+                                        Ok(_) => true,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                plugin_type = %assignment.plugin_type,
+                                                error = %e,
+                                                "host compatibility check failed; proceeding with discovery"
+                                            );
+                                            true
                                         }
                                     }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            plugin_type = %assignment.plugin_type,
-                                            error = %e,
-                                            "discovery failed"
-                                        );
-                                        DiscoveryPluginResult {
-                                            plugin_config_id: assignment.plugin_config_id,
-                                            plugin_type: assignment.plugin_type.clone(),
-                                            discoveries: vec![],
-                                            error: Some(e.to_string()),
+                                } else {
+                                    true
+                                };
+
+                                if !is_compatible {
+                                    DiscoveryPluginResult {
+                                        plugin_config_id: assignment.plugin_config_id,
+                                        plugin_type: assignment.plugin_type.clone(),
+                                        discoveries: vec![],
+                                        error: None,
+                                    }
+                                } else {
+                                    match discovery.discover_software().await {
+                                        Ok(discoveries) => {
+                                            tracing::info!(
+                                                plugin_type = %assignment.plugin_type,
+                                                count = discoveries.len(),
+                                                "discovery completed"
+                                            );
+                                            DiscoveryPluginResult {
+                                                plugin_config_id: assignment.plugin_config_id,
+                                                plugin_type: assignment.plugin_type.clone(),
+                                                discoveries,
+                                                error: None,
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                plugin_type = %assignment.plugin_type,
+                                                error = %e,
+                                                "discovery failed"
+                                            );
+                                            DiscoveryPluginResult {
+                                                plugin_config_id: assignment.plugin_config_id,
+                                                plugin_type: assignment.plugin_type.clone(),
+                                                discoveries: vec![],
+                                                error: Some(e.to_string()),
+                                            }
                                         }
                                     }
                                 }
                             }
+                        }
+                    })
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(_elapsed) => {
+                            tracing::warn!(
+                                plugin_type = %assignment.plugin_type,
+                                timeout_secs =
+                                    uptrakit_shared_types::op_timeouts::DISCOVERY_OP_TIMEOUT
+                                        .as_secs(),
+                                "discovery op deadline exceeded for plugin"
+                            );
+                            results.push(DiscoveryPluginResult {
+                                plugin_config_id: assignment.plugin_config_id,
+                                plugin_type: assignment.plugin_type.clone(),
+                                discoveries: vec![],
+                                error: Some(format!(
+                                    "discovery op deadline ({}s) exceeded",
+                                    uptrakit_shared_types::op_timeouts::DISCOVERY_OP_TIMEOUT
+                                        .as_secs()
+                                )),
+                            });
+                            continue;
                         }
                     }
                 } else {
@@ -1043,6 +1149,69 @@ mod tests {
                 );
             }
             other => panic!("expected VersionCheckResults, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn timed_out_version_results_echo_assignment_ids() {
+        // VersionCheckAssignment has no constructor; struct literal with the
+        // verified field list (`payloads.rs`, not #[non_exhaustive]) —
+        // precedent: version_check.rs.
+        let a = uptrakit_wire::VersionCheckAssignment {
+            software_item_id: uuid::Uuid::new_v4(),
+            name: "pkg".to_string(),
+            detect_version: None,
+            fetch_releases: None,
+            host_software_item_id: Some(uuid::Uuid::new_v4()),
+        };
+        // std::slice::from_ref, not `&[a.clone()]` — clippy::cloned_ref_to_slice_refs
+        // is denied via clippy::all (new in the pinned 1.97.0 toolchain).
+        let results = super::timed_out_version_results(std::slice::from_ref(&a));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].software_item_id, a.software_item_id);
+        assert_eq!(results[0].host_software_item_id, a.host_software_item_id);
+        assert!(
+            results[0]
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("timed out"))
+        );
+        assert!(results[0].installed_version.is_none());
+    }
+
+    #[test]
+    fn timed_out_discovery_results_cover_every_plugin() {
+        use uptrakit_shared_types::plugin_ids;
+        // Field lists verified at baseline: DiscoverSoftwarePayload,
+        // DiscoveryPluginAssignment (`payloads.rs`); neither is
+        // #[non_exhaustive].
+        let payload = uptrakit_wire::DiscoverSoftwarePayload {
+            host_machine_id: "machine-1".to_string(),
+            plugins: vec![
+                uptrakit_wire::DiscoveryPluginAssignment {
+                    plugin_config_id: Some(uuid::Uuid::new_v4()),
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_APT,
+                    config: serde_json::json!({}),
+                },
+                uptrakit_wire::DiscoveryPluginAssignment {
+                    plugin_config_id: None,
+                    plugin_type: plugin_ids::PACKAGE_MANAGER_NPM,
+                    config: serde_json::json!({}),
+                },
+            ],
+        };
+        let results = super::timed_out_discovery_results(&payload);
+        assert_eq!(results.len(), 2);
+        for (result, assignment) in results.iter().zip(&payload.plugins) {
+            assert_eq!(result.plugin_type, assignment.plugin_type);
+            assert_eq!(result.plugin_config_id, assignment.plugin_config_id);
+            assert!(result.discoveries.is_empty());
+            assert!(
+                result
+                    .error
+                    .as_deref()
+                    .is_some_and(|e| e.contains("timed out"))
+            );
         }
     }
 

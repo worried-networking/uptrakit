@@ -34,7 +34,31 @@ pub async fn run_config_test(
     payload: TestPluginConfigPayload,
     executor: Arc<dyn CommandExecutor>,
 ) -> ServiceMessage {
-    ServiceMessage::TestPluginConfigResult(handle_config_test(payload, executor).await)
+    let request_id = payload.request_id.clone();
+    let start = Instant::now();
+    let result = match tokio::time::timeout(
+        uptrakit_shared_types::op_timeouts::CONFIG_TEST_OP_TIMEOUT,
+        handle_config_test(payload, executor),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_elapsed) => {
+            tracing::warn!(
+                request_id = %request_id,
+                timeout_secs =
+                    uptrakit_shared_types::op_timeouts::CONFIG_TEST_OP_TIMEOUT.as_secs(),
+                "config test exceeded its operation deadline"
+            );
+            let mut result = make_result(&request_id, false, start);
+            result.error = Some(format!(
+                "config test timed out after {}s",
+                uptrakit_shared_types::op_timeouts::CONFIG_TEST_OP_TIMEOUT.as_secs()
+            ));
+            result
+        }
+    };
+    ServiceMessage::TestPluginConfigResult(result)
 }
 
 /// Execute a plugin configuration test and return the result payload.
@@ -385,6 +409,51 @@ mod tests {
                 .as_deref()
                 .is_some_and(|e| e.contains("no update_command"))
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn config_test_deadline_returns_error_result() {
+        // An executor whose execute_quiet hangs forever.
+        struct HangingExecutor;
+        #[async_trait::async_trait]
+        impl CommandExecutor for HangingExecutor {
+            async fn execute(
+                &self,
+                _spec: &CommandSpec,
+                _output_tx: &tokio::sync::mpsc::Sender<uptrakit_command::UpdateOutputLine>,
+            ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+                std::future::pending().await
+            }
+
+            async fn execute_quiet(
+                &self,
+                _spec: &CommandSpec,
+            ) -> uptrakit_command::Result<uptrakit_command::CommandOutput> {
+                std::future::pending().await
+            }
+        }
+
+        let payload = make_payload(
+            "test-timeout-001",
+            ConfigTestKind::UpdateCommandValidation,
+            "generic.shell",
+            serde_json::json!({"update_command": "echo hi"}),
+            None,
+        );
+        let msg = run_config_test(payload, Arc::new(HangingExecutor)).await;
+        match msg {
+            ServiceMessage::TestPluginConfigResult(result) => {
+                assert_eq!(result.request_id, "test-timeout-001");
+                assert!(!result.success);
+                assert!(
+                    result
+                        .error
+                        .as_deref()
+                        .is_some_and(|e| e.contains("timed out"))
+                );
+            }
+            other => panic!("expected TestPluginConfigResult, got {other:?}"),
+        }
     }
 
     #[test]
