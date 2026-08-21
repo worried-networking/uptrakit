@@ -69,7 +69,8 @@ use uptrakit_shared_types::access::bounds::{
     MAX_GRANT_DESCRIPTION_LEN, MAX_GRANTS_PER_SUBJECT, PatternSetError, validate_patterns,
 };
 use uptrakit_shared_types::access::{
-    ActionPattern, ResourcePattern, Selector, SelectorValidationError,
+    ActionPattern, ResourcePattern, Selector, SelectorLevelError, SelectorValidationError,
+    validate_selector_level,
 };
 use uuid::Uuid;
 
@@ -88,13 +89,21 @@ pub enum AccessGrantError {
     /// Validation rule 2 failed (single tenant encoding per subject type).
     #[error("invalid tenant encoding: {0}")]
     TenantEncoding(&'static str),
-    /// M1 phase gate (test row B9): non-`All` selectors are rejected until
-    /// M2.1 replaces this with validation rules 3–5.
-    #[error("non-All selectors are not accepted until M2.1")]
+    /// M2.1→M2.3 phase gate: all selector validation has passed, but
+    /// non-`All` selectors stay writable-off until targeted enforcement is
+    /// site-complete. M2.3 deletes this arm, its HTTP mapping, and this
+    /// variant in the same change that lifts enforcement.
+    #[error(
+        "selector validation passed; non-All selectors are not yet enabled (lifts with M2.3 enforcement)"
+    )]
     SelectorPhaseGate,
     /// Selector ID bounds exceeded.
     #[error("invalid selector: {0}")]
     Selector(SelectorValidationError),
+    /// Rule 3: the selector's axis is not admitted by every action the
+    /// grant's patterns reach.
+    #[error("selector not supported: {0}")]
+    SelectorNotSupported(SelectorLevelError),
     /// Description exceeds [`MAX_GRANT_DESCRIPTION_LEN`] characters.
     #[error("description exceeds {max} characters")]
     DescriptionTooLong { max: usize },
@@ -264,18 +273,22 @@ fn validate_write(
         }
         _ => {}
     }
-    // B9 phase gate. M2.1 REPLACES this arm with validation rules 3–5 —
-    // NOT a one-line deletion: rule 4 (selector referents exist in the
-    // grant's tenant) is DB-backed read-before-write validation, new query
-    // work this module does not perform today.
-    if *selector != Selector::All {
-        bail!(AccessGrantError::SelectorPhaseGate);
-    }
-    // Bounds. Selector::validate() is inert while the B9 gate holds; it is
-    // kept so M2.1 swaps the gate arm without re-adding it.
+    // Rule 5 (+5b): bounds and non-empty id lists, on the canonicalized
+    // selector (insert/update canonicalize before validating).
     selector
         .validate()
         .map_err(|e| report!(AccessGrantError::Selector(e)))?;
+    // Rule 3: every action reachable by every pattern must admit the
+    // selector's axis.
+    validate_selector_level(patterns, selector)
+        .map_err(|e| report!(AccessGrantError::SelectorNotSupported(e)))?;
+    // M2.1→M2.3 phase gate: all selector validation above has passed, but
+    // non-All selectors stay writable-off until targeted enforcement is
+    // site-complete. M2.3 deletes this arm (with its variant + HTTP
+    // mapping) in the same change that lifts enforcement.
+    if *selector != Selector::All {
+        bail!(AccessGrantError::SelectorPhaseGate);
+    }
     if let Some(description) = description
         && description.chars().count() > MAX_GRANT_DESCRIPTION_LEN
     {
@@ -338,7 +351,8 @@ fn resolve_row(row: access_grant::Model) -> std::result::Result<ResolvedGrant, &
 }
 
 /// Insert a validated grant; returns the new row id.
-pub async fn insert_grant(db: &impl ConnectionTrait, grant: NewGrant<'_>) -> Result<Uuid> {
+pub async fn insert_grant(db: &impl ConnectionTrait, mut grant: NewGrant<'_>) -> Result<Uuid> {
+    grant.selector.canonicalize();
     validate_write(
         grant.subject,
         grant.tenant_id,
@@ -385,8 +399,9 @@ pub async fn insert_grant(db: &impl ConnectionTrait, grant: NewGrant<'_>) -> Res
 pub async fn update_grant(
     db: &impl ConnectionTrait,
     id: Uuid,
-    update: GrantUpdate<'_>,
+    mut update: GrantUpdate<'_>,
 ) -> Result<()> {
+    update.selector.canonicalize();
     let row = access_grant::Entity::find_by_id(id)
         .one(db)
         .await
@@ -1178,6 +1193,139 @@ mod tests {
                 "expected SelectorPhaseGate for {selector:?}, got: {err}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn rule3_rejects_item_selector_on_host_level_action() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = active_user(&db).await;
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_id),
+                patterns: &pats(&["hosts:read"]),
+                selector: Selector::Items {
+                    ids: vec![Uuid::now_v7()],
+                },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("Items selector on a Host-level action must fail rule 3");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::SelectorNotSupported(SelectorLevelError::NotAdmitted { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn rule3_rejects_selector_on_selector_incapable_action() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = active_user(&db).await;
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_id),
+                patterns: &pats(&["access:manage"]),
+                selector: Selector::Tags {
+                    ids: vec![Uuid::now_v7()],
+                },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("access:manage has SelectorSupport::None");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::SelectorNotSupported(SelectorLevelError::NotAdmitted { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn rule3_rejects_dynamic_pattern_with_selector() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = active_user(&db).await;
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_id),
+                patterns: &pats(&["plugin.package-manager.*:manage"]),
+                selector: Selector::Tags {
+                    ids: vec![Uuid::now_v7()],
+                },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("dynamic patterns never admit non-All selectors");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::SelectorNotSupported(SelectorLevelError::DynamicPattern { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn rule5b_rejects_empty_id_list() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = active_user(&db).await;
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_id),
+                patterns: &pats(&["checks:trigger"]),
+                selector: Selector::Hosts { ids: vec![] },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("empty id list must fail rule 5b");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::Selector(SelectorValidationError::EmptyIds { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn canonicalization_dedups_before_bounds() {
+        // MAX distinct ids + 1 duplicate: over the bound raw, inside it
+        // after insert_grant's canonicalize(). Reaching SelectorPhaseGate
+        // (not TooManyIds) proves canonicalization ran first.
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = active_user(&db).await;
+        let mut ids: Vec<Uuid> = (0..uptrakit_shared_types::access::bounds::MAX_SELECTOR_HOST_IDS)
+            .map(|i| Uuid::from_u128(i as u128))
+            .collect();
+        ids.push(Uuid::from_u128(0));
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_id),
+                patterns: &pats(&["checks:trigger"]),
+                selector: Selector::Hosts { ids },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("gate still holds for valid non-All selectors");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::SelectorPhaseGate
+        ));
     }
 
     /// B11 + resolution: global role-subject grant with tenant-plane patterns
