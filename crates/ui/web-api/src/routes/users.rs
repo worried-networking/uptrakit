@@ -559,7 +559,7 @@ pub async fn update_profile(
             );
         };
         // APPROVED: body-dependent fine check (corpus 07, restated invariant)
-        match access.0.authorize(ctx, &actions::USERS_MANAGE, None) {
+        match access.0.authorize(ctx, &actions::USERS_MANAGE) {
             Decision::Allow => {}
             decision => {
                 let reason = match decision {

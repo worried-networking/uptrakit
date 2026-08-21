@@ -623,7 +623,7 @@ mod tests {
             .expect("reload");
         let action = "hosts:read".parse::<Action>().expect("valid action");
         assert!(
-            matches!(engine.authorize(&ctx, &action, None), Decision::Allow),
+            matches!(engine.authorize(&ctx, &action), Decision::Allow),
             "post-invalidation context must see the new grant (cache flushed)"
         );
     }

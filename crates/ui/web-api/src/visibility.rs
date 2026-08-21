@@ -62,7 +62,7 @@ pub fn is_plugin_visible_to_user(
             );
             enabled
                 || matches!(
-                    engine.authorize(ctx, &actions::SYSTEM_SETTINGS_MANAGE, None),
+                    engine.authorize(ctx, &actions::SYSTEM_SETTINGS_MANAGE),
                     Decision::Allow
                 )
         }

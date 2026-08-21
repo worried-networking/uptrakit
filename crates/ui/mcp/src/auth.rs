@@ -306,9 +306,7 @@ pub async fn validate_api_token_for_mcp(
             return Err(McpAuthError::Internal);
         }
     };
-    let decision = state
-        .access_engine
-        .authorize(&access, &actions::MCP_USE, None);
+    let decision = state.access_engine.authorize(&access, &actions::MCP_USE);
     if !matches!(decision, Decision::Allow) {
         let reason = match decision {
             Decision::Deny(reason) => reason,
@@ -443,9 +441,7 @@ pub async fn validate_oauth_access_token_for_mcp(
             return Err(McpAuthError::Internal);
         }
     };
-    let decision = state
-        .access_engine
-        .authorize(&access, &actions::MCP_USE, None);
+    let decision = state.access_engine.authorize(&access, &actions::MCP_USE);
     if !matches!(decision, Decision::Allow) {
         let reason = match decision {
             Decision::Deny(reason) => reason,

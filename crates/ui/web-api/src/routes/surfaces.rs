@@ -1644,7 +1644,7 @@ fn enforce_required_action(
 ) -> Option<Response> {
     let required = required?;
     match authority {
-        AccessAuthority::Ready(ctx) => match engine.authorize(ctx, required, None) {
+        AccessAuthority::Ready(ctx) => match engine.authorize(ctx, required) {
             Decision::Allow => None,
             decision => {
                 let reason = match decision {

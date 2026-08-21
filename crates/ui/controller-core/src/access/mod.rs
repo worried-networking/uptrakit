@@ -27,6 +27,7 @@
 //! Full design: `.superpowers/authn-and-authz-refactoring/07-decision-and-enforcement.md`
 //! and `docs/superpowers/specs/2026-07-28-access-engine-design.md`.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -40,7 +41,7 @@ use uptrakit_shared_db::access_grants::{
 };
 use uptrakit_shared_db::entity::user_role;
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_shared_types::access::{Action, ActionPattern, CATALOG, Decision, Selector};
+use uptrakit_shared_types::access::{Action, ActionPattern, CATALOG, Decision};
 use uptrakit_shared_types::access::{DenyReason, TargetRef, Visibility};
 use uptrakit_wire::AccessInvalidatedPayload;
 
@@ -225,25 +226,12 @@ impl AccessEngine {
 }
 
 impl AccessEngine {
-    /// Authorize `action` (optionally against `target`) for the context's
-    /// principal. Pure and synchronous — cheap enough per batch item.
-    ///
-    /// Normative check order:
-    /// 1. **Dynamic-action registry** (`plugin.*`/`surface.*` resources
-    ///    only): unregistered → `Deny(UnknownAction)`. Built-in actions skip
-    ///    this step — parse-time catalog membership is their registration.
-    /// 2. **Grant match**: no grant pattern matches → `Deny(NoGrant)`.
-    /// 3. **Token scope**: `None` → vacuously true (credential with no scope
-    ///    concept); `Some` with no matching pattern → `Deny(OutOfScope)`
-    ///    (an empty `Some` vec denies everything).
-    /// 4. **Target/selector**: every M1 grant carries `Selector::All` (B9
-    ///    write gate), so any target is covered by whichever grant matched;
-    ///    `Deny(OutsideSelector)` is unreachable until M2.1.
-    pub fn authorize(
+    /// Shared decision core; `target: None` = the coarse (targetless) gate.
+    fn decide(
         &self,
         ctx: &AccessContext,
         action: &Action,
-        target: Option<&TargetRef>,
+        target: Option<(&TargetRef, &BTreeSet<Uuid>)>,
     ) -> Decision {
         let resource = action.resource();
         let is_dynamic = resource.plugin_type().is_some() || resource.surface_id().is_some();
@@ -273,14 +261,33 @@ impl AccessEngine {
             return Decision::Deny(DenyReason::OutOfScope);
         }
 
-        if !matching_grants
-            .iter()
-            .any(|g| selector_covers(&g.selector, target))
+        if let Some((target, host_tags)) = target
+            && !matching_grants
+                .iter()
+                .any(|g| g.selector.covers(target, host_tags))
         {
             return Decision::Deny(DenyReason::OutsideSelector);
         }
 
         Decision::Allow
+    }
+
+    /// Coarse (targetless) decision: dynamic-registry gate, grant match,
+    /// token scope. Selector coverage is NOT evaluated here — a principal
+    /// whose only matching grant carries a non-`All` selector is allowed
+    /// at this gate; target-aware sites use
+    /// [`AccessEngine::authorize_target`] for the fine (selector) step.
+    ///
+    /// Normative check order:
+    /// 1. **Dynamic-action registry** (`plugin.*`/`surface.*` resources
+    ///    only): unregistered → `Deny(UnknownAction)`. Built-in actions skip
+    ///    this step — parse-time catalog membership is their registration.
+    /// 2. **Grant match**: no grant pattern matches → `Deny(NoGrant)`.
+    /// 3. **Token scope**: `None` → vacuously true (credential with no scope
+    ///    concept); `Some` with no matching pattern → `Deny(OutOfScope)`
+    ///    (an empty `Some` vec denies everything).
+    pub fn authorize(&self, ctx: &AccessContext, action: &Action) -> Decision {
+        self.decide(ctx, action, None)
     }
 
     /// Visibility verdict for `action`: grants matching the action **and**
@@ -310,20 +317,10 @@ impl AccessEngine {
         }
     }
 
-    /// Expanded effective action list for principal-facing introspection
-    /// (`me`, login-family responses).
-    ///
-    /// Membership is derived through [`AccessEngine::authorize`] itself —
-    /// never a re-implementation of pattern matching — so the list can
-    /// never drift from real enforcement outcomes. Wildcard expansion,
-    /// scope intersection (vacuously true for scope-less credentials),
-    /// and the dynamic-registry gate all come from `authorize`.
-    /// M1 CONSTRAINT (pinned by test): the `target: None` derivation is
-    /// exact only while every grant selector is `Selector::All` — a
-    /// non-`All` grant makes its actions vanish from this list entirely.
-    /// M2.1 (selectors) must revisit this together with D13's visibility
-    /// summaries; until then over-reporting is impossible, only
-    /// under-reporting of selector-scoped grants.
+    /// Coarse capability summary: actions the principal holds ANY matching
+    /// grant for, regardless of selector narrowing (pinned by test). A
+    /// selector-scoped grant contributes its actions here — per-action
+    /// visibility summaries are M2.6/D13 UI work, not this method.
     #[must_use]
     pub fn allowed_actions(&self, ctx: &AccessContext) -> Vec<Action> {
         let built_ins = CATALOG.iter().flat_map(|entry| {
@@ -335,7 +332,7 @@ impl AccessEngine {
         });
         let mut actions: Vec<Action> = built_ins
             .chain(self.dynamic_actions())
-            .filter(|action| matches!(self.authorize(ctx, action, None), Decision::Allow))
+            .filter(|action| matches!(self.authorize(ctx, action), Decision::Allow))
             .collect();
         actions.sort_unstable_by_key(ToString::to_string);
         actions
@@ -381,19 +378,6 @@ impl AccessEngine {
             role_ids = ?payload.role_ids,
             "flushed access cache after remote AccessInvalidated event"
         );
-    }
-}
-
-/// Does this grant's selector cover the target? Written over the selector so
-/// M2.1 extends (adds arms) rather than rewrites. `Selector` is
-/// `#[non_exhaustive]` cross-crate, so the wildcard arm is compulsory — and
-/// deliberately fail-closed.
-fn selector_covers(selector: &Selector, _target: Option<&TargetRef>) -> bool {
-    match selector {
-        Selector::All => true,
-        // M2.1 adds Tags/Hosts/Software/Items arms; unreachable in M1
-        // (the B9 write gate admits only Selector::All).
-        _ => false,
     }
 }
 
@@ -514,6 +498,12 @@ mod tests {
         }
     }
 
+    fn resolved_grant_with_selector(pattern: &str, selector: Selector) -> ResolvedGrant {
+        let mut grant = resolved_grant(pattern);
+        grant.selector = selector;
+        grant
+    }
+
     fn ctx_with(grants: Vec<ResolvedGrant>, scope: Option<Vec<ActionPattern>>) -> AccessContext {
         AccessContext {
             user_id: Uuid::nil(),
@@ -548,7 +538,7 @@ mod tests {
             .await
             .expect("context resolves");
         assert_eq!(
-            engine.authorize(&ctx, &actions::HOSTS_READ, None),
+            engine.authorize(&ctx, &actions::HOSTS_READ),
             Decision::Allow
         );
     }
@@ -581,7 +571,7 @@ mod tests {
             .await
             .expect("context resolves");
         assert_eq!(
-            engine.authorize(&ctx, &actions::HOSTS_READ, None),
+            engine.authorize(&ctx, &actions::HOSTS_READ),
             Decision::Allow,
             "viewer role's *:read grant must be inherited"
         );
@@ -592,7 +582,7 @@ mod tests {
         let engine = dummy_engine();
         let ctx = ctx_with(vec![resolved_grant("hosts:*")], None);
         assert_eq!(
-            engine.authorize(&ctx, &actions::HOSTS_READ, None),
+            engine.authorize(&ctx, &actions::HOSTS_READ),
             Decision::Allow
         );
     }
@@ -602,7 +592,7 @@ mod tests {
         let engine = dummy_engine();
         let ctx = ctx_with(vec![], None);
         assert_eq!(
-            engine.authorize(&ctx, &actions::HOSTS_READ, None),
+            engine.authorize(&ctx, &actions::HOSTS_READ),
             Decision::Deny(DenyReason::NoGrant)
         );
     }
@@ -615,7 +605,7 @@ mod tests {
             scope_of(&["services:read"]),
         );
         assert_eq!(
-            engine.authorize(&ctx, &actions::HOSTS_READ, None),
+            engine.authorize(&ctx, &actions::HOSTS_READ),
             Decision::Deny(DenyReason::OutOfScope)
         );
     }
@@ -643,7 +633,7 @@ mod tests {
 
         let no_registry = dummy_engine();
         assert_eq!(
-            no_registry.authorize(&ctx, &action, None),
+            no_registry.authorize(&ctx, &action),
             Decision::Deny(DenyReason::UnknownAction),
             "no registry at all must deny dynamic actions"
         );
@@ -651,7 +641,7 @@ mod tests {
         let empty_registry =
             dummy_engine().with_registry(Arc::new(StubRegistry { registered: vec![] }));
         assert_eq!(
-            empty_registry.authorize(&ctx, &action, None),
+            empty_registry.authorize(&ctx, &action),
             Decision::Deny(DenyReason::UnknownAction),
             "an empty registry must still deny"
         );
@@ -660,7 +650,7 @@ mod tests {
             registered: vec![action.clone()],
         }));
         assert_eq!(
-            populated_registry.authorize(&ctx, &action, None),
+            populated_registry.authorize(&ctx, &action),
             Decision::Allow,
             "registering the action must allow once grant/scope pass"
         );
@@ -744,25 +734,41 @@ mod tests {
         assert_eq!(strs, vec!["surface.test-stub:use".to_string()]);
     }
 
-    #[test]
-    fn allowed_actions_under_reports_non_all_selector_grants_until_m2_1() {
+    #[tokio::test]
+    async fn allowed_actions_includes_actions_held_only_via_non_all_grants() {
         let engine = dummy_engine();
-        let scoped_grant = ResolvedGrant {
-            id: Uuid::nil(),
-            tenant_id: Some(Uuid::nil()),
-            subject: GrantSubject::User(Uuid::nil()),
-            patterns: vec!["hosts:*".parse().expect("valid pattern")],
-            selector: Selector::Hosts {
-                ids: vec![Uuid::now_v7()],
-            },
-            description: None,
-        };
-        let ctx = ctx_with(vec![scoped_grant], None);
-        assert_eq!(
-            engine.allowed_actions(&ctx),
-            Vec::<Action>::new(),
-            "M1: a non-All selector grant's actions vanish from allowed_actions until M2.1"
+        let ctx = ctx_with(
+            vec![resolved_grant_with_selector(
+                "hosts:read",
+                Selector::Hosts {
+                    ids: vec![Uuid::from_u128(1)],
+                },
+            )],
+            None,
         );
+        let actions = engine.allowed_actions(&ctx);
+        assert!(
+            actions.iter().any(|a| a.to_string() == "hosts:read"),
+            "coarse allowed_actions must include selector-scoped grants: {actions:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn coarse_authorize_allows_non_all_selector_grants_targetless() {
+        // Pins the M2.1 split-API contract: the targetless gate never
+        // evaluates selectors; fine checks live in authorize_target.
+        let engine = dummy_engine();
+        let ctx = ctx_with(
+            vec![resolved_grant_with_selector(
+                "hosts:read",
+                Selector::Hosts {
+                    ids: vec![Uuid::from_u128(1)],
+                },
+            )],
+            None,
+        );
+        let action = "hosts:read".parse::<Action>().expect("valid action");
+        assert_eq!(engine.authorize(&ctx, &action), Decision::Allow);
     }
 
     #[test]
@@ -798,22 +804,22 @@ mod tests {
         let wide_grant_narrow_scope =
             ctx_with(vec![resolved_grant("*:*")], scope_of(&["hosts:read"]));
         assert_eq!(
-            engine.authorize(&wide_grant_narrow_scope, &actions::HOSTS_READ, None),
+            engine.authorize(&wide_grant_narrow_scope, &actions::HOSTS_READ),
             Decision::Allow
         );
         assert_eq!(
-            engine.authorize(&wide_grant_narrow_scope, &actions::SERVICES_READ, None),
+            engine.authorize(&wide_grant_narrow_scope, &actions::SERVICES_READ),
             Decision::Deny(DenyReason::OutOfScope)
         );
 
         let narrow_grant_wide_scope =
             ctx_with(vec![resolved_grant("hosts:read")], scope_of(&["*:*"]));
         assert_eq!(
-            engine.authorize(&narrow_grant_wide_scope, &actions::HOSTS_READ, None),
+            engine.authorize(&narrow_grant_wide_scope, &actions::HOSTS_READ),
             Decision::Allow
         );
         assert_eq!(
-            engine.authorize(&narrow_grant_wide_scope, &actions::SERVICES_READ, None),
+            engine.authorize(&narrow_grant_wide_scope, &actions::SERVICES_READ),
             Decision::Deny(DenyReason::NoGrant)
         );
     }
@@ -824,14 +830,14 @@ mod tests {
 
         let no_scope_concept = ctx_with(vec![resolved_grant("hosts:read")], None);
         assert_eq!(
-            engine.authorize(&no_scope_concept, &actions::HOSTS_READ, None),
+            engine.authorize(&no_scope_concept, &actions::HOSTS_READ),
             Decision::Allow,
             "grants alone must authorize when the credential has no scope concept"
         );
 
         let empty_scope_ceiling = ctx_with(vec![resolved_grant("hosts:read")], Some(vec![]));
         assert_eq!(
-            engine.authorize(&empty_scope_ceiling, &actions::HOSTS_READ, None),
+            engine.authorize(&empty_scope_ceiling, &actions::HOSTS_READ),
             Decision::Deny(DenyReason::OutOfScope),
             "an empty Some(scope) ceiling must admit nothing"
         );
@@ -842,10 +848,10 @@ mod tests {
         let engine = dummy_engine();
         let ctx = ctx_with(vec![resolved_grant("hosts:read")], None);
         assert_eq!(
-            engine.authorize(
+            engine.decide(
                 &ctx,
                 &actions::HOSTS_READ,
-                Some(&TargetRef::Host(Uuid::nil()))
+                Some((&TargetRef::Host(Uuid::nil()), &BTreeSet::new()))
             ),
             Decision::Allow
         );

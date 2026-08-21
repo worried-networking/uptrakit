@@ -157,7 +157,7 @@ mod tests {
         // Before registration: the dynamic action is unregistered — fail
         // closed even though the grant already exists.
         assert_eq!(
-            engine.authorize(&ctx, &stub_action, None),
+            engine.authorize(&ctx, &stub_action),
             Decision::Deny(DenyReason::UnknownAction)
         );
 
@@ -171,7 +171,7 @@ mod tests {
                 registration_for_test_stub("service.test-stub", tenant_id),
             )
             .expect("valid registration must admit");
-        assert_eq!(engine.authorize(&ctx, &stub_action, None), Decision::Allow);
+        assert_eq!(engine.authorize(&ctx, &stub_action), Decision::Allow);
 
         // Enumeration must agree with `is_registered` while registered.
         let enumerated = engine.dynamic_actions();
@@ -189,7 +189,7 @@ mod tests {
             .parse::<Action>()
             .expect("valid dynamic action");
         assert_eq!(
-            engine.authorize(&ctx, &plugin_action, None),
+            engine.authorize(&ctx, &plugin_action),
             Decision::Deny(DenyReason::UnknownAction)
         );
 
@@ -199,14 +199,14 @@ mod tests {
             .parse::<Action>()
             .expect("valid dynamic action");
         assert_eq!(
-            engine.authorize(&ctx, &read_action, None),
+            engine.authorize(&ctx, &read_action),
             Decision::Deny(DenyReason::UnknownAction)
         );
 
         // After the registering service unregisters: denies again.
         registry.unregister_service(&service_id);
         assert_eq!(
-            engine.authorize(&ctx, &stub_action, None),
+            engine.authorize(&ctx, &stub_action),
             Decision::Deny(DenyReason::UnknownAction)
         );
         assert!(

@@ -72,7 +72,7 @@ pub fn require_tool_auth(
     require_scopes(&ctx.auth_method, auth.required_scopes)
         .map_err(|e| ErrorData::invalid_request(format!("insufficient_scope: {e}"), None))?;
     for action in auth.required_actions {
-        let decision = state.access_engine.authorize(&ctx.access, action, None);
+        let decision = state.access_engine.authorize(&ctx.access, action);
         if !matches!(decision, Decision::Allow) {
             let reason = match decision {
                 Decision::Deny(reason) => reason,

@@ -201,7 +201,7 @@ macro_rules! action_extractor {
                         }
                     };
                     let engine = AccessState::from_ref(state).0;
-                    match engine.authorize(&ctx, &$action, None) {
+                    match engine.authorize(&ctx, &$action) {
                         Decision::Allow => Ok($name(user)),
                         decision => {
                             let reason = match decision {
@@ -328,7 +328,7 @@ pub(crate) fn authorize_any(
 ) -> Result<(), DenyReason> {
     let mut deny = None;
     for action in actions {
-        match engine.authorize(ctx, action, None) {
+        match engine.authorize(ctx, action) {
             Decision::Allow => return Ok(()),
             Decision::Deny(reason) => {
                 if matches!(deny, None | Some(DenyReason::NoGrant)) {
@@ -364,7 +364,7 @@ pub(crate) fn require_system_access(
             "Authorization authority unavailable",
         ));
     };
-    match engine.authorize(ctx, &actions::SYSTEM_ACCESS_MANAGE, None) {
+    match engine.authorize(ctx, &actions::SYSTEM_ACCESS_MANAGE) {
         Decision::Allow => None,
         decision => {
             let reason = match decision {
