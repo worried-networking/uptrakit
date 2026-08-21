@@ -27,6 +27,10 @@ use crate::config::GitHubConfig;
 use crate::error::{GitHubError, Result};
 use crate::tag::strip_tag_prefix;
 
+/// Pagination window: at most `MAX_PAGES` pages of `PER_PAGE` releases.
+const MAX_PAGES: usize = 10;
+const PER_PAGE: usize = 100;
+
 /// Parse `"owner/repo"` from a package identifier string.
 ///
 /// Rules:
@@ -173,30 +177,106 @@ impl GitHubPlugin {
     /// Build the releases API URL for the given owner/repo pair.
     pub(crate) fn releases_url(&self, owner: &str, repo: &str) -> String {
         format!(
-            "{}/repos/{}/{}/releases?per_page=100",
+            "{}/repos/{}/{}/releases?per_page={PER_PAGE}",
             self.config.api_base_url(),
             owner,
             repo,
         )
     }
 
+    /// Baseline release checks shared by `convert_release` and the
+    /// filtered-vs-empty diagnostics in `fetch_releases`: drafts are always
+    /// skipped; prereleases are skipped unless `include_prereleases` is set.
+    fn passes_baseline(&self, release: &GitHubRelease) -> bool {
+        !release.draft && (!release.prerelease || self.config.include_prereleases)
+    }
+
+    /// Decide whether a fully-filtered fetch result is a configuration error.
+    ///
+    /// Returns `Some(message)` when releases passed baseline checks but the
+    /// series/asset filters removed all of them — a misconfigured
+    /// `tag_prefix`/`asset_patterns` would otherwise present as a silent
+    /// "no releases". Returns `None` for genuinely empty results or when no
+    /// filter is active.
+    fn filtered_out_error(
+        &self,
+        raw_count: usize,
+        baseline_count: usize,
+        surviving_count: usize,
+        window_exhausted: bool,
+    ) -> Option<String> {
+        if baseline_count == 0 || surviving_count > 0 {
+            return None;
+        }
+        let tag_prefix_active = self
+            .config
+            .tag_prefix
+            .as_deref()
+            .is_some_and(|p| !p.is_empty());
+        // Compiled filters, not the raw config strings: this check must never
+        // disagree with the gating convert_release actually applies.
+        let asset_patterns_active = !self.asset_filters.is_empty();
+        if !tag_prefix_active && !asset_patterns_active {
+            return None;
+        }
+        let window_note = if window_exhausted {
+            format!(
+                "the fetch window ({MAX_PAGES} pages x {PER_PAGE} releases = newest {}) was \
+                 exhausted, so matching releases may exist beyond it",
+                MAX_PAGES * PER_PAGE
+            )
+        } else {
+            "every upstream release was fetched, so nothing upstream matches the filters"
+                .to_string()
+        };
+        Some(format!(
+            "no releases survive the configured filters (tag_prefix={:?}, asset_patterns={:?}): \
+             {baseline_count} of {raw_count} fetched releases passed draft/prerelease checks but \
+             all were filtered out; {window_note}. These filters come from the assignment's \
+             effective config — a plugin config profile or a per-host config_override (e.g. one \
+             written by autodiscovery). To recover, edit or clear tag_prefix on this item's \
+             fetch_releases assignment and version_strip_prefix on its detect_version \
+             assignment (an upstream series rename stales both together). Do not set \
+             tag_strip_prefix to the full series prefix: it strips without filtering and \
+             recreates cross-series phantom updates.",
+            self.config.tag_prefix, self.config.asset_patterns,
+        ))
+    }
+
     /// Convert a GitHub API release to an `UpstreamRelease`, applying filters.
     ///
-    /// Returns `None` if the release should be skipped (draft, filtered prerelease).
+    /// Returns `None` if the release should be skipped (draft, filtered
+    /// prerelease, outside the configured tag series, empty version after
+    /// prefix stripping, or no assets survive `asset_patterns`).
     fn convert_release(&self, gh_release: &GitHubRelease) -> Option<UpstreamRelease> {
-        // Skip drafts
-        if gh_release.draft {
-            tracing::trace!(tag = %gh_release.tag_name, "skipping draft release");
+        if !self.passes_baseline(gh_release) {
+            tracing::trace!(tag = %gh_release.tag_name, "skipping draft or filtered prerelease");
             return None;
         }
 
-        // Skip prereleases unless configured to include them
-        if gh_release.prerelease && !self.config.include_prereleases {
-            tracing::trace!(tag = %gh_release.tag_name, "skipping prerelease");
+        // Series filter: when tag_prefix is set, the release must belong to
+        // the series (literal prefix match) — other series in the same repo
+        // are excluded entirely, not just stripped.
+        if let Some(prefix) = self.config.tag_prefix.as_deref()
+            && !prefix.is_empty()
+            && !gh_release.tag_name.starts_with(prefix)
+        {
+            tracing::trace!(tag = %gh_release.tag_name, "skipping release outside tag_prefix series");
             return None;
         }
 
-        let version_str = strip_tag_prefix(&gh_release.tag_name, &self.config.tag_strip_prefix);
+        // Strip order: tag_prefix first, then tag_strip_prefix, then parse —
+        // so "…-standalone-" + "v" and "…-standalone-v" + "v" both yield the
+        // same bare version.
+        let after_series = strip_tag_prefix(
+            &gh_release.tag_name,
+            self.config.tag_prefix.as_deref().unwrap_or(""),
+        );
+        let version_str = strip_tag_prefix(after_series, &self.config.tag_strip_prefix);
+        if version_str.is_empty() {
+            tracing::trace!(tag = %gh_release.tag_name, "skipping release: empty version after prefix strip");
+            return None;
+        }
         let version = Version::new(version_str);
 
         let published_at = gh_release.published_at.as_ref().and_then(|s| {
@@ -228,6 +308,14 @@ impl GitHubPlugin {
                 sha256_digest: None,
             })
             .collect();
+
+        // Asset gating: a configured asset filter that matches nothing means
+        // this release has no installable artifact — drop the release instead
+        // of surfacing an asset-less "update".
+        if !self.asset_filters.is_empty() && assets.is_empty() {
+            tracing::trace!(tag = %gh_release.tag_name, "skipping release: no assets match asset_patterns");
+            return None;
+        }
 
         Some({
             let mut r = UpstreamRelease::new(
@@ -474,9 +562,9 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for GitHubPlugin {
         let initial_url = self.releases_url(owner, repo);
         tracing::debug!(url = %initial_url, "fetching GitHub releases");
 
-        const MAX_PAGES: usize = 10;
         let mut all_releases: Vec<GitHubRelease> = Vec::new();
         let mut url = initial_url;
+        let mut window_exhausted = true;
 
         'pages: for _ in 0..MAX_PAGES {
             let response = self
@@ -534,25 +622,55 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for GitHubPlugin {
             })?;
 
             if page.is_empty() {
+                window_exhausted = false;
                 break 'pages;
             }
+            let page_full = page.len() >= PER_PAGE;
             all_releases.extend(page);
             match next_url {
                 Some(next) => url = next,
-                None => break 'pages,
+                None => {
+                    // No Link header after a FULL page is ambiguous — the
+                    // listing may end exactly at the page boundary, or an
+                    // intermediary stripped the header. Only a partial page
+                    // proves the listing genuinely ended, so only then is the
+                    // window known to be un-exhausted.
+                    if !page_full {
+                        window_exhausted = false;
+                    }
+                    break 'pages;
+                }
             }
         }
+
+        let raw_count = all_releases.len();
+        let baseline_count = all_releases
+            .iter()
+            .filter(|r| self.passes_baseline(r))
+            .count();
 
         let mut upstream_releases: Vec<UpstreamRelease> = all_releases
             .iter()
             .filter_map(|r| self.convert_release(r))
             .collect();
 
+        // count vs baseline exposes how many releases the series/asset
+        // filters dropped, even when survivors remain.
         tracing::debug!(
             count = upstream_releases.len(),
-            total = all_releases.len(),
+            baseline = baseline_count,
+            total = raw_count,
             "fetched GitHub releases"
         );
+
+        if let Some(msg) = self.filtered_out_error(
+            raw_count,
+            baseline_count,
+            upstream_releases.len(),
+            window_exhausted,
+        ) {
+            bail!(PluginError::Configuration(msg));
+        }
 
         // Attestation check for the latest (first) release.
         if self.config.verify_attestation
@@ -838,6 +956,9 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::{
         HostCapabilities, PluginCapability, StandardHostRuntime, UpdateExecutor as _,
     };
+    use uptrakit_plugin_infrastructure_core::{
+        PluginHttpClientConfig, ReleaseFetcher, SsrfMode, build_plugin_http_client,
+    };
 
     fn test_config() -> GitHubConfig {
         GitHubConfig::default()
@@ -1100,6 +1221,152 @@ mod tests {
         };
         let release = plugin.convert_release(&gh).expect("should convert");
         assert!(release.published_at.is_none());
+    }
+
+    // ── tag_prefix series tests ───────────────────────────────────────────────
+
+    fn series_plugin(tag_prefix: &str) -> GitHubPlugin {
+        let config = GitHubConfig {
+            tag_prefix: Some(tag_prefix.to_string()),
+            ..GitHubConfig::default()
+        };
+        GitHubPlugin::new(config, test_runtime()).expect("valid config")
+    }
+
+    #[test]
+    fn tag_prefix_filters_other_series() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        let foreign = make_release("uptrakit-agent-v1.0.0", false, false);
+        assert!(plugin.convert_release(&foreign).is_none());
+        let ours = make_release("uptrakit-controller-standalone-v0.0.7", false, false);
+        assert!(plugin.convert_release(&ours).is_some());
+    }
+
+    #[test]
+    fn strip_composition_prefix_without_v() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        let gh = make_release("uptrakit-controller-standalone-v0.0.7", false, false);
+        let release = plugin.convert_release(&gh).expect("should convert");
+        assert_eq!(release.version.as_str(), "0.0.7");
+        assert_eq!(release.tag, "uptrakit-controller-standalone-v0.0.7");
+    }
+
+    #[test]
+    fn strip_composition_prefix_including_v() {
+        let plugin = series_plugin("uptrakit-controller-standalone-v");
+        let gh = make_release("uptrakit-controller-standalone-v0.0.7", false, false);
+        let release = plugin.convert_release(&gh).expect("should convert");
+        assert_eq!(release.version.as_str(), "0.0.7");
+    }
+
+    #[test]
+    fn tag_equal_to_composed_prefix_dropped() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        let gh = make_release("uptrakit-controller-standalone-v", false, false);
+        assert!(plugin.convert_release(&gh).is_none());
+    }
+
+    // ── asset gating (D3) tests ───────────────────────────────────────────────
+
+    fn release_with_asset(tag: &str, asset_name: &str) -> GitHubRelease {
+        let mut gh = make_release(tag, false, false);
+        gh.assets = vec![GitHubAsset {
+            name: asset_name.to_string(),
+            browser_download_url: format!("https://example.com/{asset_name}"),
+            size: 42,
+            content_type: None,
+        }];
+        gh
+    }
+
+    #[test]
+    fn asset_gating_drops_release_without_matching_assets() {
+        let config = GitHubConfig {
+            asset_patterns: vec![r".*\.deb$".to_string()],
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
+        let gh = release_with_asset("v1.0.0", "app.rpm");
+        assert!(plugin.convert_release(&gh).is_none());
+        let gh_ok = release_with_asset("v1.0.0", "app.deb");
+        assert!(plugin.convert_release(&gh_ok).is_some());
+    }
+
+    #[test]
+    fn no_asset_patterns_keeps_assetless_release() {
+        let plugin = test_plugin();
+        let gh = make_release("v1.0.0", false, false);
+        assert!(plugin.convert_release(&gh).is_some());
+    }
+
+    // ── filtered-to-zero diagnostics (D4) tests ───────────────────────────────
+
+    #[test]
+    fn filtered_out_error_fires_when_series_filter_removes_all() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        let msg = plugin
+            .filtered_out_error(120, 100, 0, false)
+            .expect("error expected");
+        assert!(msg.contains("uptrakit-controller-standalone-"));
+        assert!(msg.contains("120"), "raw count must be named");
+        assert!(msg.contains("100"), "baseline count must be named");
+        assert!(msg.contains("tag_prefix"), "fetch recovery lever");
+        assert!(
+            msg.contains("version_strip_prefix"),
+            "detect recovery lever"
+        );
+        assert!(msg.contains("tag_strip_prefix"), "full-prefix warning");
+        assert!(
+            msg.contains("nothing upstream matches"),
+            "non-exhausted window wording"
+        );
+    }
+
+    #[test]
+    fn filtered_out_error_window_exhausted_reads_differently() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        // Counts deliberately distinct from the 10x100=1000 window numbers so
+        // no assert can pass by matching the wrong figure.
+        let msg = plugin
+            .filtered_out_error(170, 150, 0, true)
+            .expect("error expected");
+        assert!(msg.contains("exhausted"));
+        assert!(msg.contains("1000"), "window bound must be named");
+        assert!(msg.contains("170"), "raw count must be named");
+        assert!(msg.contains("150"), "baseline count must be named");
+    }
+
+    #[test]
+    fn filtered_out_error_silent_without_active_filters() {
+        // tag_strip_prefix eating whole tags is not a *new* filter: stay silent.
+        let plugin = test_plugin();
+        assert!(plugin.filtered_out_error(5, 5, 0, false).is_none());
+    }
+
+    #[test]
+    fn filtered_out_error_silent_when_baseline_empty() {
+        // All-prerelease repo with tag_prefix set: empty success, no error.
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        assert!(plugin.filtered_out_error(5, 0, 0, false).is_none());
+    }
+
+    #[test]
+    fn filtered_out_error_silent_when_survivors_exist() {
+        let plugin = series_plugin("uptrakit-controller-standalone-");
+        assert!(plugin.filtered_out_error(5, 5, 1, false).is_none());
+    }
+
+    #[test]
+    fn filtered_out_error_fires_for_asset_patterns_alone() {
+        let config = GitHubConfig {
+            asset_patterns: vec![r".*\.deb$".to_string()],
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
+        let msg = plugin
+            .filtered_out_error(3, 3, 0, false)
+            .expect("error expected");
+        assert!(msg.contains("asset_patterns"));
     }
 
     #[test]
@@ -1435,5 +1702,81 @@ mod tests {
         assert!(DESCRIPTOR.roles.update_executor.is_some());
         assert!(DESCRIPTOR.roles.discoverer.is_none());
         assert!(DESCRIPTOR.roles.version_detector.is_none());
+    }
+
+    // ── wired fetch_releases seam tests (httpmock) ────────────────────────────
+
+    fn plugin_for_mock(config: GitHubConfig) -> GitHubPlugin {
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
+        // Same-crate test: seed the lazy client cache with a permissive-SSRF
+        // client so the plugin can reach the httpmock server on 127.0.0.1
+        // (idiom from the npm plugin's release tests).
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: "uptrakit-plugin-releases-github-test",
+            ssrf_mode: SsrfMode::Permissive,
+            ..PluginHttpClientConfig::default()
+        })
+        .expect("build test HTTP client");
+        *plugin.client.lock() = Some(client);
+        plugin
+    }
+
+    #[tokio::test]
+    async fn fetch_releases_all_filtered_fails_with_configuration_error() {
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/releases");
+                then.status(200).json_body(serde_json::json!([{
+                    "tag_name": "other-series-v1.0.0",
+                    "name": null,
+                    "draft": false,
+                    "prerelease": false,
+                    "html_url": "https://example.com/r/other-series-v1.0.0",
+                    "body": null,
+                    "published_at": null,
+                    "assets": []
+                }]));
+            })
+            .await;
+        let plugin = plugin_for_mock(GitHubConfig {
+            api_base_url: Some(server.base_url()),
+            tag_prefix: Some("uptrakit-controller-standalone-".to_string()),
+            ..GitHubConfig::default()
+        });
+        let err = plugin.fetch_releases("o/r").await.expect_err("must fail");
+        let rendered = format!("{err:?}");
+        assert!(rendered.contains("no releases survive the configured filters"));
+        assert!(rendered.contains("uptrakit-controller-standalone-"));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn fetch_releases_all_prerelease_with_tag_prefix_is_empty_success() {
+        let server = httpmock::MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/releases");
+                then.status(200).json_body(serde_json::json!([{
+                    "tag_name": "uptrakit-controller-standalone-v0.0.7",
+                    "name": null,
+                    "draft": false,
+                    "prerelease": true,
+                    "html_url": "https://example.com/r/t",
+                    "body": null,
+                    "published_at": null,
+                    "assets": []
+                }]));
+            })
+            .await;
+        let plugin = plugin_for_mock(GitHubConfig {
+            api_base_url: Some(server.base_url()),
+            tag_prefix: Some("uptrakit-controller-standalone-".to_string()),
+            ..GitHubConfig::default()
+        });
+        let releases = plugin.fetch_releases("o/r").await.expect("empty success");
+        assert!(releases.is_empty());
     }
 }
