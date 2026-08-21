@@ -9,6 +9,8 @@ use std::collections::BTreeSet;
 
 use uuid::Uuid;
 
+use super::selector::Selector;
+
 /// A concrete object an action is evaluated against.
 ///
 /// Carries `Host` and, since M2.1, `HostSoftwareItem`.
@@ -123,6 +125,51 @@ mod tests {
             host
         );
     }
+
+    #[test]
+    fn from_selectors_unions_axes_and_dedups() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let selectors = [
+            Selector::Tags { ids: vec![a] },
+            Selector::Tags { ids: vec![a, b] },
+            Selector::Hosts { ids: vec![a] },
+            Selector::Software { ids: vec![b] },
+            Selector::Items { ids: vec![a] },
+        ];
+        let visibility = Visibility::from_selectors(selectors.iter());
+        assert_eq!(
+            visibility,
+            Visibility::Filter {
+                tags: BTreeSet::from([a, b]),
+                hosts: BTreeSet::from([a]),
+                software: BTreeSet::from([b]),
+                items: BTreeSet::from([a]),
+            }
+        );
+    }
+
+    #[test]
+    fn from_selectors_all_short_circuits_to_full() {
+        let selectors = [
+            Selector::Tags {
+                ids: vec![Uuid::from_u128(1)],
+            },
+            Selector::All,
+        ];
+        assert_eq!(
+            Visibility::from_selectors(selectors.iter()),
+            Visibility::Full
+        );
+    }
+
+    #[test]
+    fn from_selectors_empty_is_none() {
+        assert_eq!(
+            Visibility::from_selectors(std::iter::empty::<&Selector>()),
+            Visibility::None
+        );
+    }
 }
 
 /// Visibility verdict for list/read filtering.
@@ -132,8 +179,8 @@ pub enum Visibility {
     /// Every row is visible.
     Full,
     /// Only rows covered by the union of matching grant selectors are
-    /// visible. Never produced until M2.3 (types-complete,
-    /// behavior-restricted — every M1 selector is `All`).
+    /// visible. Produced from M2.1 by `Visibility::from_selectors` (engine
+    /// `visibility()` union).
     Filter {
         /// Visible tag ids.
         tags: BTreeSet<Uuid>,
@@ -146,4 +193,39 @@ pub enum Visibility {
     },
     /// No rows are visible.
     None,
+}
+
+impl Visibility {
+    /// Union the narrowing axes of `selectors` into a `Visibility`.
+    ///
+    /// Any `Selector::All` short-circuits to `Full`; an empty iterator (no
+    /// matching grants) yields `None`; otherwise each axis unions into
+    /// `Filter`.
+    #[must_use]
+    pub fn from_selectors<'a>(selectors: impl Iterator<Item = &'a Selector>) -> Self {
+        let mut tags = BTreeSet::new();
+        let mut hosts = BTreeSet::new();
+        let mut software = BTreeSet::new();
+        let mut items = BTreeSet::new();
+        let mut any = false;
+        for selector in selectors {
+            any = true;
+            match selector {
+                Selector::All => return Self::Full,
+                Selector::Tags { ids } => tags.extend(ids.iter().copied()),
+                Selector::Hosts { ids } => hosts.extend(ids.iter().copied()),
+                Selector::Software { ids } => software.extend(ids.iter().copied()),
+                Selector::Items { ids } => items.extend(ids.iter().copied()),
+            }
+        }
+        if !any {
+            return Self::None;
+        }
+        Self::Filter {
+            tags,
+            hosts,
+            software,
+            items,
+        }
+    }
 }
