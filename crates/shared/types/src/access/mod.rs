@@ -25,7 +25,10 @@ pub use catalog::actions;
 pub use catalog::{CATALOG, CatalogEntry, ParseResourceError, Resource, VerbEntry};
 pub use decision::{Decision, DenyReason, TargetRef, Visibility};
 pub use pattern::{ActionPattern, ParsePatternError, ResourcePattern, VerbPattern};
-pub use selector::{Selector, SelectorSupport, SelectorValidationError};
+pub use selector::{
+    Selector, SelectorAxis, SelectorLevelError, SelectorSupport, SelectorValidationError,
+    validate_selector_level,
+};
 pub use verb::{ParseVerbError, Verb};
 
 /// Returns `true` when `s` is a single kebab-case identifier segment:

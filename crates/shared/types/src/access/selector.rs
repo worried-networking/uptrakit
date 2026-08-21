@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use super::bounds;
 use super::decision::TargetRef;
+use super::pattern::ActionPattern;
 
 /// Resource selector on a grant: which hosts / software items a
 /// selector-capable action may target. `All` is the M1 default; write-path
@@ -64,6 +65,92 @@ impl SelectorSupport {
             }
         }
     }
+}
+
+/// The narrowing axis a non-`All` selector filters on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectorAxis {
+    Tags,
+    Hosts,
+    Software,
+    Items,
+}
+
+impl SelectorAxis {
+    /// The axis of `selector`, or `None` for `Selector::All`.
+    #[must_use]
+    pub fn of(selector: &Selector) -> Option<Self> {
+        match selector {
+            Selector::All => None,
+            Selector::Tags { .. } => Some(Self::Tags),
+            Selector::Hosts { .. } => Some(Self::Hosts),
+            Selector::Software { .. } => Some(Self::Software),
+            Selector::Items { .. } => Some(Self::Items),
+        }
+    }
+
+    /// Stable lowercase label, used in error messages.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tags => "tags",
+            Self::Hosts => "hosts",
+            Self::Software => "software",
+            Self::Items => "items",
+        }
+    }
+}
+
+impl std::fmt::Display for SelectorAxis {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Rule-3 (capability-level) rejection for a grant's selector.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SelectorLevelError {
+    /// A concrete catalog action matched by `pattern` does not admit this
+    /// selector axis (per its `SelectorSupport`).
+    #[error("pattern `{pattern}` matches `{action}`, which does not admit a {axis} selector")]
+    NotAdmitted {
+        pattern: String,
+        action: &'static str,
+        axis: SelectorAxis,
+    },
+    /// The pattern reaches dynamically-registered actions, which never
+    /// admit non-`All` selectors.
+    #[error("pattern `{pattern}` reaches dynamic actions, which never admit non-All selectors")]
+    DynamicPattern { pattern: String },
+}
+
+/// Rule 3: every action reachable by every pattern must admit the
+/// selector's axis. `Selector::All` always passes.
+pub fn validate_selector_level(
+    patterns: &[ActionPattern],
+    selector: &Selector,
+) -> Result<(), SelectorLevelError> {
+    let Some(axis) = SelectorAxis::of(selector) else {
+        return Ok(());
+    };
+    for pattern in patterns {
+        if pattern.reaches_dynamic() {
+            return Err(SelectorLevelError::DynamicPattern {
+                pattern: pattern.to_string(),
+            });
+        }
+        for (_, verb_entry) in pattern.matched_catalog_actions() {
+            if !verb_entry.selector_support.admits(selector) {
+                return Err(SelectorLevelError::NotAdmitted {
+                    pattern: pattern.to_string(),
+                    action: verb_entry.action_str,
+                    axis,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Error returned when a [`Selector`] exceeds its bounded sizes.
@@ -388,5 +475,84 @@ mod tests {
                 "{selector:?} covering {target:?}"
             );
         }
+    }
+
+    #[test]
+    fn selector_level_matrix() {
+        let id = Uuid::from_u128(1);
+        let tags = Selector::Tags { ids: vec![id] };
+        let hosts = Selector::Hosts { ids: vec![id] };
+        let software = Selector::Software { ids: vec![id] };
+        let items = Selector::Items { ids: vec![id] };
+        let cases: &[(&str, &Selector, bool)] = &[
+            ("hosts:read", &tags, true),
+            ("hosts:read", &hosts, true),
+            ("hosts:read", &software, false),
+            ("hosts:read", &items, false),
+            ("hosts:update", &tags, true),
+            ("hosts:delete", &hosts, true),
+            ("checks:trigger", &items, true),
+            ("updates:trigger", &items, true),
+            ("access:manage", &tags, false),
+            ("*:trigger", &items, false),
+            ("plugin.package-manager.*:manage", &tags, false),
+            ("plugin.package-manager.*:manage", &Selector::All, true),
+            ("checks:trigger", &Selector::All, true),
+        ];
+        for (pattern_str, selector, expected_ok) in cases {
+            let patterns = vec![
+                pattern_str
+                    .parse::<ActionPattern>()
+                    .expect("valid test pattern"),
+            ];
+            assert_eq!(
+                validate_selector_level(&patterns, selector).is_ok(),
+                *expected_ok,
+                "{pattern_str} with {selector:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn selector_level_error_names_pattern_and_action() {
+        let patterns = vec![
+            "hosts:read"
+                .parse::<ActionPattern>()
+                .expect("valid pattern"),
+        ];
+        let err = validate_selector_level(
+            &patterns,
+            &Selector::Items {
+                ids: vec![Uuid::from_u128(1)],
+            },
+        )
+        .expect_err("Items not admitted on hosts:read");
+        assert_eq!(
+            err,
+            SelectorLevelError::NotAdmitted {
+                pattern: "hosts:read".to_string(),
+                action: "hosts:read",
+                axis: SelectorAxis::Items,
+            }
+        );
+
+        let dynamic = vec![
+            "plugin.package-manager.*:manage"
+                .parse::<ActionPattern>()
+                .expect("valid pattern"),
+        ];
+        let err = validate_selector_level(
+            &dynamic,
+            &Selector::Tags {
+                ids: vec![Uuid::from_u128(1)],
+            },
+        )
+        .expect_err("dynamic pattern never admits non-All");
+        assert_eq!(
+            err,
+            SelectorLevelError::DynamicPattern {
+                pattern: "plugin.package-manager.*:manage".to_string(),
+            }
+        );
     }
 }
