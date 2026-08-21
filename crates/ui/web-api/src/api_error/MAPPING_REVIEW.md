@@ -277,14 +277,28 @@ deliberately gets the bare `too_many_grants` code (no `access_grant.` prefix)
 per the M1.6a Global Constraints reason-code set — the message is reason-code
 only, never holder identities or counts.
 
+`SelectorNotSupported` (rule 3: selector axis not admitted by every action
+the grant's patterns reach) and `SelectorReferentsMissing` /
+`SelectorOnGlobalRole` (rule 4: selector referent existence, with
+global-role grants excluded because they have no tenant to resolve
+referents in) were added in M2.1 alongside the selector-matcher write path.
+
+`SelectorPhaseGate`'s message was reworded in M2.1 (it now describes the
+gate rather than citing the milestone that installed it); the arm, its
+`AccessGrantError` variant, and this row are all deleted in the same change
+that lifts the gate in M2.3.
+
 | Variant | Status | Message Strategy | Code |
 | --- | --- | --- | --- |
 | `AccessGrantError::NotFound` | 404 | static | `access_grant.not_found` |
 | `AccessGrantError::Patterns` | 400 | static | `access_grant.invalid_patterns` |
 | `AccessGrantError::PlaneMixing` | 400 | static | `access_grant.plane_mixing` |
 | `AccessGrantError::TenantEncoding` | 400 | static | `access_grant.invalid_tenant_encoding` |
-| `AccessGrantError::SelectorPhaseGate` | 400 | static | `access_grant.selector_phase_gate` |
+| `AccessGrantError::SelectorPhaseGate` (lifts in M2.3) | 400 | static | `access_grant.selector_phase_gate` |
 | `AccessGrantError::Selector` | 400 | static | `access_grant.invalid_selector` |
+| `AccessGrantError::SelectorNotSupported` | 400 | static | `access_grant.selector_not_supported` |
+| `AccessGrantError::SelectorReferentsMissing` | 400 | static | `access_grant.selector_referents_missing` |
+| `AccessGrantError::SelectorOnGlobalRole` | 400 | static | `access_grant.selector_on_global_role` |
 | `AccessGrantError::DescriptionTooLong` | 400 | static | `access_grant.description_too_long` |
 | `AccessGrantError::TooManyGrants` | 409 | static | `too_many_grants` |
 | `AccessGrantError::UnclassifiablePattern` | 400 | static | `access_grant.unclassifiable_pattern` |

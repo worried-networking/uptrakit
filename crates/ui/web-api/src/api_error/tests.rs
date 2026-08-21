@@ -323,6 +323,31 @@ async fn access_grant_error_all_variants() {
     )
     .await;
     check(
+        report!(AccessGrantError::SelectorNotSupported(
+            uptrakit_shared_types::access::SelectorLevelError::DynamicPattern {
+                pattern: "plugin.package-manager.*:manage".to_string(),
+            }
+        )),
+        400,
+        "access_grant.selector_not_supported",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::SelectorReferentsMissing {
+            axis: uptrakit_shared_types::access::SelectorAxis::Hosts,
+            missing: vec![uuid::Uuid::nil()],
+        }),
+        400,
+        "access_grant.selector_referents_missing",
+    )
+    .await;
+    check(
+        report!(AccessGrantError::SelectorOnGlobalRole),
+        400,
+        "access_grant.selector_on_global_role",
+    )
+    .await;
+    check(
         report!(AccessGrantError::DescriptionTooLong { max: 200 }),
         400,
         "access_grant.description_too_long",
@@ -1330,7 +1355,10 @@ const ALL_IMPL_CODES: &[&str] = &[
     "access_grant.not_found",
     "access_grant.plane_mixing",
     "access_grant.selector_encode_error",
+    "access_grant.selector_not_supported",
+    "access_grant.selector_on_global_role",
     "access_grant.selector_phase_gate",
+    "access_grant.selector_referents_missing",
     "access_grant.sentinel_missing",
     "access_grant.unclassifiable_pattern",
     "access_grant.unknown_error",

@@ -7,7 +7,10 @@ access_grant.invalid_tenant_encoding
 access_grant.not_found
 access_grant.plane_mixing
 access_grant.selector_encode_error
+access_grant.selector_not_supported
+access_grant.selector_on_global_role
 access_grant.selector_phase_gate
+access_grant.selector_referents_missing
 access_grant.sentinel_missing
 access_grant.unclassifiable_pattern
 access_grant.unknown_error

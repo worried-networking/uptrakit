@@ -1173,7 +1173,7 @@ impl From<Report<AccessGrantError>> for ApiError {
             ),
             SelectorPhaseGate => ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "Non-All selectors are not accepted until M2.1.",
+                "Selector validation passed; non-All selectors are not yet enabled.",
                 "access_grant.selector_phase_gate",
                 None,
             ),
@@ -1181,6 +1181,24 @@ impl From<Report<AccessGrantError>> for ApiError {
                 StatusCode::BAD_REQUEST,
                 "The grant selector is invalid.",
                 "access_grant.invalid_selector",
+                None,
+            ),
+            SelectorNotSupported(_) => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "The selector kind is not supported by every action in the grant's patterns.",
+                "access_grant.selector_not_supported",
+                None,
+            ),
+            SelectorReferentsMissing { .. } => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "The selector references ids that do not exist in this tenant.",
+                "access_grant.selector_referents_missing",
+                None,
+            ),
+            SelectorOnGlobalRole => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "Global-role grants cannot carry non-All selectors.",
+                "access_grant.selector_on_global_role",
                 None,
             ),
             DescriptionTooLong { max } => ApiError::new(
