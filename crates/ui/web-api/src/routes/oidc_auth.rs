@@ -3169,6 +3169,15 @@ mod audit_tests {
     /// observed base URL. Drives a real authorize request against a mocked
     /// OIDC discovery document and reads the persisted `pending_oidc_flows`
     /// row back to verify it.
+    ///
+    /// Exercises the allowlist branch end-to-end (canonical host set, observed
+    /// host listed in `oauth.accepted_audience_hosts`) -- the branch the unit
+    /// tests reach only by calling `compute_pinned_redirect` directly, without
+    /// the handler, `Host`-header parsing, or the settings-store read path.
+    /// It also pins the MCP-off regression: the harness `oauth` state is
+    /// `OAuthState::disabled()` and no `oauth.mcp_enabled` row is seeded, yet
+    /// the alias is still honored, because the check reads the settings store
+    /// per request instead of `state.oauth`.
     #[tokio::test]
     async fn authorize_pins_redirect_and_snapshots_return_origin() {
         let app = TestApp::new().await;
@@ -3187,19 +3196,27 @@ mod audit_tests {
         )
         .await;
 
-        // Canonical host equals the request's own observed host, so
-        // `return_origin` should be `Some("https://localhost")`.
+        // Canonical host differs from the observed request host, and the
+        // observed host is allowlisted: `redirect_uri` pins to canonical
+        // while `return_origin` keeps the allowlisted alias.
         uptrakit_shared_db::raw_settings::upsert_global_setting_raw(
             &app.db,
             "oauth.canonical_host",
-            serde_json::json!("localhost"),
+            serde_json::json!("auth.example.com"),
         )
         .await
         .expect("insert canonical_host");
+        uptrakit_shared_db::raw_settings::upsert_global_setting_raw(
+            &app.db,
+            "oauth.accepted_audience_hosts",
+            serde_json::json!(["alias.example.com"]),
+        )
+        .await
+        .expect("insert accepted_audience_hosts");
 
         let response = client
             .get(&format!("/api/v1/auth/oidc/{provider_id}/authorize"))
-            .header("Host", "localhost")
+            .header("Host", "alias.example.com")
             .send()
             .await;
         assert_eq!(
@@ -3216,12 +3233,12 @@ mod audit_tests {
             .expect("expected a pending_oidc_flows row for this provider");
 
         assert_eq!(
-            flow.redirect_uri, "https://localhost/api/v1/auth/oidc/callback",
-            "redirect_uri must be the canonical-host-pinned callback URL"
+            flow.redirect_uri, "https://auth.example.com/api/v1/auth/oidc/callback",
+            "redirect_uri must pin to the canonical host, never the observed alias"
         );
         assert_eq!(
-            flow.return_origin, "https://localhost",
-            "return_origin must be the canonical origin (equal to the observed origin here)"
+            flow.return_origin, "https://alias.example.com",
+            "an allowlisted observed origin must be kept as the return origin"
         );
     }
 
