@@ -32,16 +32,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rootcause::prelude::*;
-use sea_orm::{ColumnTrait, DatabaseConnection, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseConnection, QueryFilter, QuerySelect, RelationTrait};
 use uuid::Uuid;
 
 use uptrakit_shared_db::TenantDb;
 use uptrakit_shared_db::access_grants::{
     AccessGrantError, ResolvedGrant, load_grants_for_principal,
 };
-use uptrakit_shared_db::entity::user_role;
+use uptrakit_shared_db::entity::{host_tag, host_tag_assignment, user_role};
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_shared_types::access::{Action, ActionPattern, CATALOG, Decision};
+use uptrakit_shared_types::access::{Action, ActionPattern, CATALOG, Decision, Selector};
 use uptrakit_shared_types::access::{DenyReason, TargetRef, Visibility};
 use uptrakit_wire::AccessInvalidatedPayload;
 
@@ -60,6 +60,9 @@ pub enum AccessEngineError {
     /// Loading the principal's access grants failed.
     #[error("grant resolution failed: {0}")]
     GrantResolution(AccessGrantError),
+    /// Decision-time host-tag lookup failed; the decision fails closed.
+    #[error("target tag resolution failed: {0}")]
+    TagResolution(sea_orm::DbErr),
 }
 
 /// Module-wide result alias (covers every fn in this module).
@@ -112,7 +115,8 @@ pub struct AccessEngine {
 pub struct AccessContext {
     /// The authenticated principal.
     pub user_id: Uuid,
-    /// Carried for M1.6b deny-audit and logging; unused by evaluation.
+    /// Tenant for decision-time lookups (`authorize_target` tag resolution)
+    /// and M1.6b deny-audit/logging.
     pub tenant_id: Uuid,
     authority: Arc<CachedAuthority>,
     /// `None` = credential with no scope concept (pre-M3 session JWT).
@@ -290,6 +294,67 @@ impl AccessEngine {
         self.decide(ctx, action, None)
     }
 
+    /// Target-aware decision: the fine (selector) gate.
+    ///
+    /// Resolves the target host's tag set only when a grant matching
+    /// `action` carries `Selector::Tags` — every other shape decides
+    /// purely. The lookup is uncached and fail-closed: a DB error
+    /// propagates instead of degrading to an empty tag set.
+    ///
+    /// NOT a tenant filter. Only the `Tags` axis is tenant-scoped here
+    /// (a cross-tenant host resolves to an empty tag set and denies);
+    /// `Selector::All` covers ANY target. Callers MUST load `target`
+    /// through `TenantDb` (or an equivalently tenant-scoped path) —
+    /// a raw-id target from another tenant is Allowed when a matching
+    /// `All` grant exists.
+    ///
+    /// M2.3: never loop this per target (batch sites are barred from
+    /// N+1 per spec §3) — add an engine-internal plural variant sharing
+    /// `decide()` with one batched tag query instead.
+    pub async fn authorize_target(
+        &self,
+        ctx: &AccessContext,
+        action: &Action,
+        target: &TargetRef,
+    ) -> Result<Decision> {
+        let needs_tags = ctx.authority.grants.iter().any(|g| {
+            g.patterns.iter().any(|pattern| pattern.matches(action))
+                && matches!(g.selector, Selector::Tags { .. })
+        });
+        let host_tags = if needs_tags {
+            // ponytail: token-scope refinement skipped — a scoped-out Tags
+            // grant costs one harmless extra query, never a wrong decision.
+            self.load_host_tags(ctx.tenant_id, target.host_id()).await?
+        } else {
+            BTreeSet::new()
+        };
+        Ok(self.decide(ctx, action, Some((target, &host_tags))))
+    }
+
+    /// Live tag ids assigned to `host_id` in `tenant_id`.
+    ///
+    /// Tenant isolation via `TenantDb`'s join — a cross-tenant host id
+    /// resolves to an empty set (deny for `Tags` selectors): for the
+    /// `Tags` axis the engine does not trust callers to have pre-checked
+    /// the target's tenant. (Other axes decide on ids alone — see the
+    /// caller obligation on [`AccessEngine::authorize_target`].)
+    async fn load_host_tags(&self, tenant_id: Uuid, host_id: Uuid) -> Result<BTreeSet<Uuid>> {
+        let tenant_db = TenantDb::new(self.db.clone(), tenant_id);
+        let ids: Vec<Uuid> = tenant_db
+            .find_via_tenant_join::<host_tag_assignment::Entity, host_tag::Entity>(
+                host_tag_assignment::Relation::HostTag.def(),
+            )
+            .filter(host_tag_assignment::Column::HostId.eq(host_id))
+            .filter(host_tag::Column::DeactivatedAt.is_null())
+            .select_only()
+            .column(host_tag_assignment::Column::HostTagId)
+            .into_tuple()
+            .all(tenant_db.db())
+            .await
+            .context_transform(AccessEngineError::TagResolution)?;
+        Ok(ids.into_iter().collect())
+    }
+
     /// Visibility verdict for `action`: grants matching the action **and**
     /// surviving scope intersection — any → `Full` (every M1 selector is
     /// `All`), none → `Visibility::None`. M2.3 adds the selector-union →
@@ -392,7 +457,7 @@ mod tests {
     };
     use time::OffsetDateTime;
     use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
-    use uptrakit_shared_db::entity::{role, tenant, user};
+    use uptrakit_shared_db::entity::{host, host_tag, host_tag_assignment, role, tenant, user};
     use uptrakit_shared_types::MaskedEmail;
     use uptrakit_shared_types::access::Selector;
     use uptrakit_shared_types::access::{Resource, Verb, actions};
@@ -514,6 +579,77 @@ mod tests {
             }),
             scope,
         }
+    }
+
+    fn ctx_with_tenant(
+        tenant_id: Uuid,
+        grants: Vec<ResolvedGrant>,
+        scope: Option<Vec<ActionPattern>>,
+    ) -> AccessContext {
+        AccessContext {
+            user_id: Uuid::nil(),
+            tenant_id,
+            authority: Arc::new(CachedAuthority {
+                grants,
+                loaded_at: tokio::time::Instant::now(),
+            }),
+            scope,
+        }
+    }
+
+    async fn seed_host(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        host::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{id}")),
+            hostname: Set(format!("host-{id}")),
+            friendly_name: Set("Tag Fixture".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host");
+        id
+    }
+
+    async fn seed_tag(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        host_tag::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            name: Set(format!("tag-{id}")),
+            color: Set("#0000aa".to_string()),
+            description: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert tag");
+        id
+    }
+
+    async fn assign_tag(db: &DatabaseConnection, tag_id: Uuid, host_id: Uuid) {
+        host_tag_assignment::ActiveModel {
+            host_tag_id: Set(tag_id),
+            host_id: Set(host_id),
+            assigned_at: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(db)
+        .await
+        .expect("assign tag");
     }
 
     fn scope_of(patterns: &[&str]) -> Option<Vec<ActionPattern>> {
@@ -769,6 +905,225 @@ mod tests {
         );
         let action = "hosts:read".parse::<Action>().expect("valid action");
         assert_eq!(engine.authorize(&ctx, &action), Decision::Allow);
+    }
+
+    #[tokio::test]
+    async fn c2_hosts_selector_gates_target() {
+        let engine = dummy_engine();
+        let host_a = Uuid::from_u128(1);
+        let host_b = Uuid::from_u128(2);
+        let ctx = ctx_with(
+            vec![resolved_grant_with_selector(
+                "hosts:read",
+                Selector::Hosts { ids: vec![host_a] },
+            )],
+            None,
+        );
+        let action = "hosts:read".parse::<Action>().expect("valid action");
+        let allow = engine
+            .authorize_target(&ctx, &action, &TargetRef::Host(host_a))
+            .await
+            .expect("no tag lookup needed for Hosts selectors");
+        assert_eq!(allow, Decision::Allow);
+        let deny = engine
+            .authorize_target(&ctx, &action, &TargetRef::Host(host_b))
+            .await
+            .expect("no tag lookup needed for Hosts selectors");
+        assert_eq!(deny, Decision::Deny(DenyReason::OutsideSelector));
+    }
+
+    #[tokio::test]
+    async fn c3_tags_selector_resolves_host_tags_at_decision_time() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let tag = seed_tag(&db, tenant_id).await;
+        let tagged_host = seed_host(&db, tenant_id).await;
+        let untagged_host = seed_host(&db, tenant_id).await;
+        assign_tag(&db, tag, tagged_host).await;
+        let engine = AccessEngine::new(db);
+        let ctx = ctx_with_tenant(
+            tenant_id,
+            vec![resolved_grant_with_selector(
+                "hosts:read",
+                Selector::Tags { ids: vec![tag] },
+            )],
+            None,
+        );
+        let action = "hosts:read".parse::<Action>().expect("valid action");
+        assert_eq!(
+            engine
+                .authorize_target(&ctx, &action, &TargetRef::Host(tagged_host))
+                .await
+                .expect("tag lookup"),
+            Decision::Allow
+        );
+        assert_eq!(
+            engine
+                .authorize_target(&ctx, &action, &TargetRef::Host(untagged_host))
+                .await
+                .expect("tag lookup"),
+            Decision::Deny(DenyReason::OutsideSelector)
+        );
+    }
+
+    #[tokio::test]
+    async fn retag_is_reflected_immediately_without_cache() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let tag = seed_tag(&db, tenant_id).await;
+        let host = seed_host(&db, tenant_id).await;
+        let engine = AccessEngine::new(db.clone());
+        let ctx = ctx_with_tenant(
+            tenant_id,
+            vec![resolved_grant_with_selector(
+                "hosts:read",
+                Selector::Tags { ids: vec![tag] },
+            )],
+            None,
+        );
+        let action = "hosts:read".parse::<Action>().expect("valid action");
+        assert_eq!(
+            engine
+                .authorize_target(&ctx, &action, &TargetRef::Host(host))
+                .await
+                .expect("tag lookup"),
+            Decision::Deny(DenyReason::OutsideSelector)
+        );
+        assign_tag(&db, tag, host).await;
+        assert_eq!(
+            engine
+                .authorize_target(&ctx, &action, &TargetRef::Host(host))
+                .await
+                .expect("tag lookup"),
+            Decision::Allow,
+            "uncached tag resolution must see the new assignment"
+        );
+    }
+
+    #[tokio::test]
+    async fn c6_c16_item_level_selectors_against_targets() {
+        let engine = dummy_engine();
+        let host_a = Uuid::from_u128(1);
+        let sw_x = Uuid::from_u128(2);
+        let link_ax = Uuid::from_u128(3);
+        let link_ay = Uuid::from_u128(4);
+        let action = "checks:trigger".parse::<Action>().expect("valid action");
+        let t_ax = TargetRef::HostSoftwareItem {
+            id: link_ax,
+            host_id: host_a,
+            software_item_id: sw_x,
+        };
+        let t_ay = TargetRef::HostSoftwareItem {
+            id: link_ay,
+            host_id: host_a,
+            software_item_id: Uuid::from_u128(5),
+        };
+        let items_ctx = ctx_with(
+            vec![resolved_grant_with_selector(
+                "checks:trigger",
+                Selector::Items { ids: vec![link_ax] },
+            )],
+            None,
+        );
+        assert_eq!(
+            engine
+                .authorize_target(&items_ctx, &action, &t_ax)
+                .await
+                .expect("pure decision"),
+            Decision::Allow
+        );
+        assert_eq!(
+            engine
+                .authorize_target(&items_ctx, &action, &t_ay)
+                .await
+                .expect("pure decision"),
+            Decision::Deny(DenyReason::OutsideSelector)
+        );
+        // C16: a bare host target never satisfies item-level selectors.
+        assert_eq!(
+            engine
+                .authorize_target(&items_ctx, &action, &TargetRef::Host(host_a))
+                .await
+                .expect("pure decision"),
+            Decision::Deny(DenyReason::OutsideSelector)
+        );
+        let software_ctx = ctx_with(
+            vec![resolved_grant_with_selector(
+                "checks:trigger",
+                Selector::Software { ids: vec![sw_x] },
+            )],
+            None,
+        );
+        assert_eq!(
+            engine
+                .authorize_target(&software_ctx, &action, &TargetRef::Host(host_a))
+                .await
+                .expect("pure decision"),
+            Decision::Deny(DenyReason::OutsideSelector)
+        );
+    }
+
+    #[tokio::test]
+    async fn all_selector_allows_cross_tenant_target() {
+        // Pins the documented caller obligation: authorize_target is NOT
+        // a tenant filter — an `All` grant covers a target from another
+        // tenant, so callers must load targets via TenantDb first.
+        let db = test_db().await;
+        let tenant_a = default_tenant_id(&db).await;
+        let tenant_b = {
+            let id = Uuid::now_v7();
+            let now = OffsetDateTime::now_utc();
+            tenant::ActiveModel {
+                id: Set(id),
+                name: Set("cross-tenant-b".to_string()),
+                slug: Set("cross-tenant-b".to_string()),
+                is_default: Set(false),
+                created_at: Set(now),
+                updated_at: Set(now),
+                deactivated_at: Set(None),
+            }
+            .insert(&db)
+            .await
+            .expect("insert second tenant");
+            id
+        };
+        let foreign_host = seed_host(&db, tenant_b).await;
+        let engine = AccessEngine::new(db);
+        let ctx = ctx_with_tenant(tenant_a, vec![resolved_grant("hosts:read")], None);
+        let action = "hosts:read".parse::<Action>().expect("valid action");
+        assert_eq!(
+            engine
+                .authorize_target(&ctx, &action, &TargetRef::Host(foreign_host))
+                .await
+                .expect("no tag lookup for All selectors"),
+            Decision::Allow
+        );
+    }
+
+    #[tokio::test]
+    async fn tag_lookup_db_error_fails_closed() {
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            .append_query_errors(vec![sea_orm::DbErr::Custom("tag lookup boom".to_string())])
+            .into_connection();
+        let engine = AccessEngine::new(db);
+        let ctx = ctx_with(
+            vec![resolved_grant_with_selector(
+                "hosts:read",
+                Selector::Tags {
+                    ids: vec![Uuid::nil()],
+                },
+            )],
+            None,
+        );
+        let action = "hosts:read".parse::<Action>().expect("valid action");
+        let err = engine
+            .authorize_target(&ctx, &action, &TargetRef::Host(Uuid::nil()))
+            .await
+            .expect_err("DB error must propagate, never become an empty tag set");
+        assert!(matches!(
+            err.current_context(),
+            AccessEngineError::TagResolution(_)
+        ));
     }
 
     #[test]

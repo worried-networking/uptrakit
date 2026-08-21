@@ -64,8 +64,9 @@ pub enum DenyReason {
     /// A grant matched but the credential's scope ceiling excludes the action.
     OutOfScope,
     /// A grant matched but its selector does not cover the target.
-    /// Unreachable until M2.1 — every M1 grant carries `Selector::All`
-    /// (types-complete, behavior-restricted).
+    /// Returned by `authorize_target` when no matching grant's selector
+    /// covers the target; production sites route through it in M2.3
+    /// (M2.1: engine tests only).
     OutsideSelector,
     /// Dynamic action (`plugin.*` / `surface.*`) not registered with the
     /// engine's `DynamicActionRegistry` (fail-closed).
