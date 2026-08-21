@@ -15,6 +15,8 @@
 	} from '$lib/api';
 	import { Actions, hasAnyAction, hasActionValue, ApiError } from '$lib/api';
 	import type { SystemAlert } from '$lib/api';
+	import { getOAuthSettings, updateOAuthSettings } from '$lib/api/oauth';
+	import type { OAuthSettingsResponse } from '$lib/api/oauth';
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
@@ -22,6 +24,7 @@
 	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
 	import { FormFieldRow, FormFieldReadOnly, Input, Textarea, Checkbox, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
+	import { createFormDraft } from '$lib/forms/draft.svelte';
 	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByAction, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 
@@ -61,6 +64,28 @@
 	let zeroconfUrlOverride: string = $state('');
 	let zeroconfPkiAddrOverride: string = $state('');
 	let zeroconfSaving: boolean = $state(false);
+
+	// --- Canonical Host ---
+	let oauthSettings: OAuthSettingsResponse | null = $state(null);
+	let canonicalHostSaving: boolean = $state(false);
+	let showCanonicalHostConfirm: boolean = $state(false);
+
+	type DraftCanonicalHost = { canonical_host: string | null };
+
+	const canonicalHostDraft = createFormDraft<DraftCanonicalHost>({ canonical_host: null });
+
+	const canonicalHostWarnings = $derived.by<string[]>(() => {
+		const warnings = [
+			'The login redirect URL changes for every OIDC provider — update the registered redirect URI at your IdP.',
+			'All in-progress logins are cancelled.'
+		];
+		if (oauthSettings?.mcp_enabled && !canonicalHostDraft.draft.canonical_host) {
+			warnings.push(
+				'MCP OAuth is enabled and requires a canonical host — the controller will fail to start on its next restart until a host is set again or MCP is disabled.'
+			);
+		}
+		return warnings;
+	});
 
 	// --- Loading ---
 	let loading: boolean = $state(true);
@@ -123,7 +148,8 @@
 			getSystemAlerts(),
 			getNatsSettings(),
 			getZeroconfSettings(),
-			getGithubProviderSettings()
+			getGithubProviderSettings(),
+			getOAuthSettings()
 		]);
 
 		if (results[0].status === 'fulfilled') {
@@ -164,6 +190,10 @@
 			githubProviderHasAuthToken = github.has_auth_token;
 		} else {
 			githubProviderAvailable = false;
+		}
+		if (results[5].status === 'fulfilled') {
+			oauthSettings = results[5].value;
+			canonicalHostDraft.load({ canonical_host: oauthSettings.canonical_host ?? null });
 		}
 
 		loading = false;
@@ -281,6 +311,34 @@
 			}
 		} catch (e) {
 			showErrorWithStaleEtagOverride(e, 'Failed to save network settings');
+		}
+	}
+
+	// --- Canonical Host ---
+	function requestSaveCanonicalHost() {
+		clearError();
+		const newValue = canonicalHostDraft.draft.canonical_host;
+		const oldValue = canonicalHostDraft.serverValues.canonical_host;
+		if (newValue !== oldValue && oldValue) {
+			showCanonicalHostConfirm = true;
+		} else {
+			void saveCanonicalHost();
+		}
+	}
+
+	async function saveCanonicalHost() {
+		showCanonicalHostConfirm = false;
+		canonicalHostSaving = true;
+		try {
+			const value = canonicalHostDraft.draft.canonical_host;
+			const res = await updateOAuthSettings({ canonical_host: value ?? '' });
+			oauthSettings = res;
+			canonicalHostDraft.commit({ canonical_host: res.canonical_host ?? null });
+			showSuccess('Canonical host saved.');
+		} catch (e) {
+			showErrorWithStaleEtagOverride(e, 'Failed to save canonical host');
+		} finally {
+			canonicalHostSaving = false;
 		}
 	}
 
@@ -544,6 +602,55 @@
 			<Button variant="primary" onclick={saveNetworkSettings}>Save</Button>
 		</div>
 	</SectionCard>
+
+	<!-- Section 4b: Canonical Host -->
+	<SectionCard title="Canonical Host" description="Canonical external URL of this Uptrakit instance.">
+		<FormFieldRow
+			label="Canonical host"
+			hint="Bare host, optionally with port (e.g. uptrakit.example.com). Used for MCP OAuth and as the pinned OIDC login redirect origin."
+			inputId="canonical-host"
+		>
+			<Input
+				id="canonical-host"
+				type="text"
+				value={canonicalHostDraft.draft.canonical_host ?? ''}
+				placeholder="uptrakit.example.com"
+				disabled={canonicalHostSaving}
+				oninput={(e) => {
+					const v = (e.currentTarget as HTMLInputElement).value.trim();
+					canonicalHostDraft.update('canonical_host', v === '' ? null : v);
+				}}
+			/>
+		</FormFieldRow>
+
+		<div class="flex gap-2 justify-end">
+			<Button
+				variant="primary"
+				disabled={!canonicalHostDraft.isDirty || canonicalHostSaving}
+				loading={canonicalHostSaving}
+				onclick={requestSaveCanonicalHost}
+			>
+				Save
+			</Button>
+			{#if canonicalHostDraft.isDirty}
+				<Button variant="ghost" disabled={canonicalHostSaving} onclick={() => canonicalHostDraft.discard()}>
+					Discard
+				</Button>
+			{/if}
+		</div>
+	</SectionCard>
+
+	{#if showCanonicalHostConfirm}
+		<ConfirmDialog
+			title="Change canonical host"
+			messagePrefix="Change the canonical host to"
+			entityName={canonicalHostDraft.draft.canonical_host || '(empty)'}
+			confirmLabel="Change"
+			warnings={canonicalHostWarnings}
+			onconfirm={() => void saveCanonicalHost()}
+			oncancel={() => (showCanonicalHostConfirm = false)}
+		/>
+	{/if}
 
 	<!-- Section 5: Controller TLS Certificate -->
 	<SectionCard title="Controller TLS Certificate">

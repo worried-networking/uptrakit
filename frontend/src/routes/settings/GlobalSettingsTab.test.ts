@@ -30,11 +30,28 @@ vi.mock('$lib/api', async (importOriginal) => ({
 	updateZeroconfSettings: vi.fn(),
 	rotateCa: vi.fn()
 }));
+vi.mock('$lib/api/oauth', () => ({
+	getOAuthSettings: vi.fn(),
+	updateOAuthSettings: vi.fn()
+}));
 
 import * as api from '$lib/api';
+import * as oauthApi from '$lib/api/oauth';
+import type { OAuthSettingsResponse } from '$lib/api/oauth';
 import GlobalSettingsTab from './GlobalSettingsTab.svelte';
 
-function stubAllApis() {
+function defaultOAuthSettings(overrides: Partial<OAuthSettingsResponse> = {}): OAuthSettingsResponse {
+	return {
+		mcp_enabled: false,
+		dcr_enabled: false,
+		cimd_enabled: false,
+		restart_required: false,
+		canonical_host: null,
+		...overrides
+	};
+}
+
+function stubAllApis(oauthOverrides: Partial<OAuthSettingsResponse> = {}) {
 	vi.mocked(api.getNetworkSettings).mockResolvedValue({
 		data: {
 			trusted_proxies: [],
@@ -59,6 +76,7 @@ function stubAllApis() {
 			has_auth_token: false
 		}
 	} as unknown as Awaited<ReturnType<typeof api.getGithubProviderSettings>>);
+	vi.mocked(oauthApi.getOAuthSettings).mockResolvedValue(defaultOAuthSettings(oauthOverrides));
 }
 
 describe('GlobalSettingsTab button variants', () => {
@@ -154,5 +172,74 @@ describe('GlobalSettingsTab loading states', () => {
 
 		resolveSave();
 		await waitFor(() => expect(saveBtn).not.toHaveAttribute('aria-busy'));
+	});
+});
+
+describe('GlobalSettingsTab Canonical Host card', () => {
+	afterEach(() => vi.clearAllMocks());
+
+	function canonicalHostSection() {
+		return screen.getByRole('heading', { name: 'Canonical Host' }).closest('[data-ui="section-card"]') as HTMLElement;
+	}
+
+	it('renders the Canonical Host card', async () => {
+		stubAllApis();
+		render(GlobalSettingsTab);
+		await screen.findByText('Canonical Host');
+		const section = canonicalHostSection();
+		expect(within(section).getByLabelText('Canonical host')).toBeInTheDocument();
+	});
+
+	it('Save stays disabled until the draft is dirty', async () => {
+		stubAllApis();
+		render(GlobalSettingsTab);
+		await screen.findByText('Canonical Host');
+		const section = canonicalHostSection();
+		const saveBtn = within(section).getByRole('button', { name: 'Save' });
+		expect(saveBtn).toBeDisabled();
+
+		const input = within(section).getByLabelText('Canonical host');
+		await fireEvent.input(input, { target: { value: 'uptrakit.example.com' } });
+		await waitFor(() => expect(saveBtn).not.toBeDisabled());
+	});
+
+	it('saves and sends only canonical_host', async () => {
+		stubAllApis(); // canonical_host starts null — no previous value, so no confirm dialog
+		vi.mocked(oauthApi.updateOAuthSettings).mockResolvedValue(
+			defaultOAuthSettings({ canonical_host: 'uptrakit.example.com' })
+		);
+		render(GlobalSettingsTab);
+		await screen.findByText('Canonical Host');
+		const section = canonicalHostSection();
+		const input = within(section).getByLabelText('Canonical host');
+		await fireEvent.input(input, { target: { value: 'uptrakit.example.com' } });
+
+		const saveBtn = within(section).getByRole('button', { name: 'Save' });
+		await waitFor(() => expect(saveBtn).not.toBeDisabled());
+		await fireEvent.click(saveBtn);
+
+		await waitFor(() => expect(oauthApi.updateOAuthSettings).toHaveBeenCalledOnce());
+		expect(oauthApi.updateOAuthSettings).toHaveBeenCalledWith({ canonical_host: 'uptrakit.example.com' });
+	});
+
+	it('shows the boot-failure warning when clearing the host while mcp_enabled is true', async () => {
+		stubAllApis({ mcp_enabled: true, canonical_host: 'old.example.com' });
+		render(GlobalSettingsTab);
+		await screen.findByText('Canonical Host');
+		const section = canonicalHostSection();
+		const input = within(section).getByLabelText('Canonical host');
+		await fireEvent.input(input, { target: { value: '' } });
+
+		const saveBtn = within(section).getByRole('button', { name: 'Save' });
+		await waitFor(() => expect(saveBtn).not.toBeDisabled());
+		await fireEvent.click(saveBtn);
+
+		// Changing away from a previously non-empty value opens the confirm dialog.
+		await screen.findByRole('dialog');
+		expect(
+			screen.getByText(
+				/MCP OAuth is enabled and requires a canonical host — the controller will fail to start on its next restart/
+			)
+		).toBeInTheDocument();
 	});
 });

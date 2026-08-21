@@ -16,7 +16,7 @@
 		StatusBadge,
 		type DataTableColumn
 	} from '$lib/components/ui';
-	import { Checkbox, FormFieldRow, Input } from '$lib/components/forms';
+	import { Checkbox } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { createFormDraft } from '$lib/forms/draft.svelte';
@@ -45,14 +45,12 @@
 		mcp_enabled: boolean;
 		dcr_enabled: boolean;
 		cimd_enabled: boolean;
-		canonical_host: string | null;
 	};
 
 	const oauthDraft = createFormDraft<DraftOAuthSettings>({
 		mcp_enabled: false,
 		dcr_enabled: false,
-		cimd_enabled: false,
-		canonical_host: null
+		cimd_enabled: false
 	});
 
 	const columns: DataTableColumn[] = [
@@ -131,8 +129,7 @@
 		return {
 			mcp_enabled: data.mcp_enabled,
 			dcr_enabled: data.dcr_enabled,
-			cimd_enabled: data.cimd_enabled,
-			canonical_host: data.canonical_host ?? null
+			cimd_enabled: data.cimd_enabled
 		};
 	}
 
@@ -156,7 +153,7 @@
 		settingsError = null;
 		try {
 			const patch = oauthDraft.draft;
-			const result = await updateOAuthSettings({ ...patch, canonical_host: patch.canonical_host ?? '' });
+			const result = await updateOAuthSettings(patch);
 			oauthSettings = result;
 			oauthDraft.commit(settingsToOAuthDraft(result));
 		} catch (e) {
@@ -277,7 +274,11 @@
 						<span class="text-sm text-[var(--text-primary)]">Enable MCP OAuth (master switch)</span>
 					</label>
 
-					{#if oauthDraft.draft.mcp_enabled && !oauthDraft.draft.canonical_host}
+					<p class="text-sm text-[var(--text-secondary)]">
+						Canonical host is configured under Global Settings → Canonical Host.
+					</p>
+
+					{#if oauthDraft.draft.mcp_enabled && !oauthSettings?.canonical_host}
 						<Callout
 							tone="warning"
 							message="oauth.canonical_host must be set before enabling MCP OAuth. Tokens minted without a canonical host will be invalid."
@@ -301,24 +302,6 @@
 						/>
 						<span class="text-sm text-[var(--text-primary)]">Enable Client-Initiated Metadata Discovery (CIMD)</span>
 					</label>
-
-					<FormFieldRow
-						label="Canonical host"
-						hint="Required when MCP OAuth is enabled (e.g. auth.example.com)"
-						inputId="canonical_host"
-					>
-						<Input
-							id="canonical_host"
-							type="text"
-							value={oauthDraft.draft.canonical_host ?? ''}
-							placeholder="auth.example.com"
-							disabled={savingSettings}
-							oninput={(e) => {
-								const v = (e.currentTarget as HTMLInputElement).value.trim();
-								oauthDraft.update('canonical_host', v === '' ? null : v);
-							}}
-						/>
-					</FormFieldRow>
 
 					{#if oauthSettings.restart_required}
 						<Callout tone="info" message="Settings saved. Changes take effect after the controller is restarted." />
