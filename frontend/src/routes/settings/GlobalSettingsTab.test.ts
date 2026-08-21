@@ -204,7 +204,7 @@ describe('GlobalSettingsTab Canonical Host card', () => {
 	});
 
 	it('saves and sends only canonical_host', async () => {
-		stubAllApis(); // canonical_host starts null — no previous value, so no confirm dialog
+		stubAllApis(); // canonical_host starts null — Save still opens the confirm dialog
 		vi.mocked(oauthApi.updateOAuthSettings).mockResolvedValue(
 			defaultOAuthSettings({ canonical_host: 'uptrakit.example.com' })
 		);
@@ -218,8 +218,29 @@ describe('GlobalSettingsTab Canonical Host card', () => {
 		await waitFor(() => expect(saveBtn).not.toBeDisabled());
 		await fireEvent.click(saveBtn);
 
+		const dialog = await screen.findByRole('dialog');
+		const confirmBtn = within(dialog).getByRole('button', { name: 'Change' });
+		await fireEvent.click(confirmBtn);
+
 		await waitFor(() => expect(oauthApi.updateOAuthSettings).toHaveBeenCalledOnce());
 		expect(oauthApi.updateOAuthSettings).toHaveBeenCalledWith({ canonical_host: 'uptrakit.example.com' });
+	});
+
+	it('opens the confirm dialog with the OIDC redirect warning on the unset-to-set transition', async () => {
+		stubAllApis(); // canonical_host starts null (unset)
+		render(GlobalSettingsTab);
+		await screen.findByText('Canonical Host');
+		const section = canonicalHostSection();
+		const input = within(section).getByLabelText('Canonical host');
+		await fireEvent.input(input, { target: { value: 'uptrakit.example.com' } });
+
+		const saveBtn = within(section).getByRole('button', { name: 'Save' });
+		await waitFor(() => expect(saveBtn).not.toBeDisabled());
+		await fireEvent.click(saveBtn);
+
+		await screen.findByRole('dialog');
+		expect(screen.getByText(/The login redirect URL changes for every OIDC provider/)).toBeInTheDocument();
+		expect(oauthApi.updateOAuthSettings).not.toHaveBeenCalled();
 	});
 
 	it('shows the boot-failure warning when clearing the host while mcp_enabled is true', async () => {

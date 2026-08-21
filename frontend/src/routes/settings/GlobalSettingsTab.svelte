@@ -317,13 +317,10 @@
 	// --- Canonical Host ---
 	function requestSaveCanonicalHost() {
 		clearError();
-		const newValue = canonicalHostDraft.draft.canonical_host;
-		const oldValue = canonicalHostDraft.serverValues.canonical_host;
-		if (newValue !== oldValue && oldValue) {
-			showCanonicalHostConfirm = true;
-		} else {
-			void saveCanonicalHost();
-		}
+		// The Save button is only enabled when the draft is dirty, so newValue !== oldValue
+		// always holds here — always confirm, including the unset→set transition, where the
+		// OIDC redirect-URL and in-progress-login warnings matter most.
+		showCanonicalHostConfirm = true;
 	}
 
 	async function saveCanonicalHost() {
