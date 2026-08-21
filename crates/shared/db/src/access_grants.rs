@@ -15,9 +15,15 @@
 //! 3. **Rule 2 (single encoding per subject type)** — system-plane ⇒
 //!    `tenant_id IS NULL` (any subject); role subject ⇒ NULL always;
 //!    user-subject tenant-plane ⇒ non-NULL.
-//! 4. **B9 phase gate** — any non-`All` selector is rejected until M2.1.
-//! 5. Bounds — description length, selector ID bounds (inert while B9
-//!    holds), `MAX_GRANTS_PER_SUBJECT` on insert.
+//! 4. Canonicalize — selector id lists sorted + deduped before any check.
+//! 5. Bounds — description length, selector id bounds incl. min-1
+//!    (`EmptyIds`), `MAX_GRANTS_PER_SUBJECT` on insert.
+//! 6. Capability level (rule 3) — every action reachable by every pattern
+//!    must admit the selector's axis.
+//! 7. Referent existence (rule 4) — selector ids must name active rows in
+//!    the grant's tenant; global-role grants reject non-`All` outright.
+//! 8. **B9 phase gate (last)** — valid non-`All` selectors still rejected;
+//!    lifts with M2.3 site-complete enforcement.
 //!
 //! # Resolution safety argument (06 §Storage schema)
 //!
@@ -60,7 +66,8 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection,
-    DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    DatabaseTransaction, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, RelationTrait, Set,
 };
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
@@ -69,12 +76,13 @@ use uptrakit_shared_types::access::bounds::{
     MAX_GRANT_DESCRIPTION_LEN, MAX_GRANTS_PER_SUBJECT, PatternSetError, validate_patterns,
 };
 use uptrakit_shared_types::access::{
-    ActionPattern, ResourcePattern, Selector, SelectorLevelError, SelectorValidationError,
-    validate_selector_level,
+    ActionPattern, ResourcePattern, Selector, SelectorAxis, SelectorLevelError,
+    SelectorValidationError, validate_selector_level,
 };
 use uuid::Uuid;
 
 use crate::entity::access_grant::{self, GrantSubjectType};
+use crate::entity::{host, host_software_item, host_tag, role, software_item};
 
 /// Error returned by grant storage operations.
 #[non_exhaustive]
@@ -104,6 +112,16 @@ pub enum AccessGrantError {
     /// grant's patterns reach.
     #[error("selector not supported: {0}")]
     SelectorNotSupported(SelectorLevelError),
+    /// Rule 4: the selector names ids that do not exist (or are
+    /// deactivated) in the grant's tenant.
+    #[error("selector references {axis} ids that do not exist in this tenant")]
+    SelectorReferentsMissing {
+        axis: SelectorAxis,
+        missing: Vec<Uuid>,
+    },
+    /// Rule 4: global roles have no tenant to resolve referents in.
+    #[error("non-All selectors are not allowed on global-role grants")]
+    SelectorOnGlobalRole,
     /// Description exceeds [`MAX_GRANT_DESCRIPTION_LEN`] characters.
     #[error("description exceeds {max} characters")]
     DescriptionTooLong { max: usize },
@@ -242,8 +260,129 @@ pub fn patterns_reach_system_plane(patterns: &[ActionPattern]) -> Result<bool> {
     Ok(grant_plane(patterns)? == Plane::System)
 }
 
+/// The tenant rule 4 resolves selector referents in.
+async fn referent_tenant(
+    db: &impl ConnectionTrait,
+    subject: GrantSubject,
+    tenant_id: Option<Uuid>,
+) -> Result<Uuid> {
+    match subject {
+        GrantSubject::User(_) => tenant_id.ok_or_else(|| {
+            // Internal invariant, not a user-facing rule: rules 2+3 already
+            // reject non-All selectors on tenant-less user grants
+            // (system-plane actions never admit them), so this is
+            // unreachable in practice.
+            report!(AccessGrantError::TenantEncoding(
+                "non-All selector on a tenant-less user grant"
+            ))
+        }),
+        GrantSubject::Role(role_id) => {
+            let role = role::Entity::find_by_id(role_id)
+                .one(db)
+                .await
+                .context_to()?
+                .ok_or_else(|| {
+                    // A dangling role id is a caller bug; reported as a
+                    // tenant-encoding failure rather than a new variant.
+                    report!(AccessGrantError::TenantEncoding(
+                        "role-subject grant references an unknown role"
+                    ))
+                })?;
+            role.tenant_id
+                .ok_or_else(|| report!(AccessGrantError::SelectorOnGlobalRole))
+        }
+    }
+}
+
+/// Rule 4 referent-existence check: every id must name a live
+/// (non-deactivated) row in `tenant_id`. Authoring typo-catcher — the
+/// decision-time matcher does not depend on it for safety. `TenantDb` is
+/// unusable here (this module is generic over `ConnectionTrait`), so the
+/// tenant filters are explicit — spec §2 escape clause.
+async fn validate_selector_referents(
+    db: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    selector: &Selector,
+) -> Result<()> {
+    let (axis, ids) = match selector {
+        Selector::All => return Ok(()),
+        Selector::Tags { ids } => (SelectorAxis::Tags, ids),
+        Selector::Hosts { ids } => (SelectorAxis::Hosts, ids),
+        Selector::Software { ids } => (SelectorAxis::Software, ids),
+        Selector::Items { ids } => (SelectorAxis::Items, ids),
+        // `Selector` is `#[non_exhaustive]` cross-crate (mirrors the
+        // fail-closed wildcard in controller-core's `selector_covers`); a
+        // future axis added without a matching rule 4 arm here must fail
+        // closed rather than skip referent-existence checking.
+        _ => bail!(AccessGrantError::TenantEncoding(
+            "selector variant has no rule 4 referent-existence arm"
+        )),
+    };
+    let found: Vec<Uuid> = match axis {
+        SelectorAxis::Tags => host_tag::Entity::find()
+            .filter(host_tag::Column::TenantId.eq(tenant_id))
+            .filter(host_tag::Column::Id.is_in(ids.iter().copied()))
+            .filter(host_tag::Column::DeactivatedAt.is_null())
+            .select_only()
+            .column(host_tag::Column::Id)
+            .into_tuple()
+            .all(db)
+            .await
+            .context_to()?,
+        SelectorAxis::Hosts => host::Entity::find()
+            .filter(host::Column::TenantId.eq(tenant_id))
+            .filter(host::Column::Id.is_in(ids.iter().copied()))
+            .filter(host::Column::DeactivatedAt.is_null())
+            .select_only()
+            .column(host::Column::Id)
+            .into_tuple()
+            .all(db)
+            .await
+            .context_to()?,
+        SelectorAxis::Software => software_item::Entity::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .filter(software_item::Column::Id.is_in(ids.iter().copied()))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .select_only()
+            .column(software_item::Column::Id)
+            .into_tuple()
+            .all(db)
+            .await
+            .context_to()?,
+        SelectorAxis::Items => {
+            // A live link row under a live host in this tenant.
+            host_software_item::Entity::find()
+                .join(
+                    JoinType::InnerJoin,
+                    host_software_item::Relation::Host.def(),
+                )
+                .filter(host::Column::TenantId.eq(tenant_id))
+                .filter(host::Column::DeactivatedAt.is_null())
+                .filter(host_software_item::Column::Id.is_in(ids.iter().copied()))
+                .filter(host_software_item::Column::DeactivatedAt.is_null())
+                .select_only()
+                .column(host_software_item::Column::Id)
+                .into_tuple()
+                .all(db)
+                .await
+                .context_to()?
+        }
+    };
+    if found.len() != ids.len() {
+        let found: HashSet<Uuid> = found.into_iter().collect();
+        let missing: Vec<Uuid> = ids
+            .iter()
+            .filter(|id| !found.contains(id))
+            .copied()
+            .collect();
+        bail!(AccessGrantError::SelectorReferentsMissing { axis, missing });
+    }
+    Ok(())
+}
+
 /// The write-path validation chain (module docs; shared by insert + update).
-fn validate_write(
+async fn validate_write(
+    db: &impl ConnectionTrait,
     subject: GrantSubject,
     tenant_id: Option<Uuid>,
     patterns: &[ActionPattern],
@@ -282,10 +421,18 @@ fn validate_write(
     // selector's axis.
     validate_selector_level(patterns, selector)
         .map_err(|e| report!(AccessGrantError::SelectorNotSupported(e)))?;
+    // Rule 4: non-All selector ids must reference live rows in the grant's
+    // tenant.
+    if *selector != Selector::All {
+        let tenant = referent_tenant(db, subject, tenant_id).await?;
+        validate_selector_referents(db, tenant, selector).await?;
+    }
     // M2.1→M2.3 phase gate: all selector validation above has passed, but
     // non-All selectors stay writable-off until targeted enforcement is
     // site-complete. M2.3 deletes this arm (with its variant + HTTP
-    // mapping) in the same change that lifts enforcement.
+    // mapping) in the same change that lifts enforcement. Position: last
+    // selector check (Task 5 layout) — lifts with M2.3 site-complete
+    // enforcement.
     if *selector != Selector::All {
         bail!(AccessGrantError::SelectorPhaseGate);
     }
@@ -354,12 +501,14 @@ fn resolve_row(row: access_grant::Model) -> std::result::Result<ResolvedGrant, &
 pub async fn insert_grant(db: &impl ConnectionTrait, mut grant: NewGrant<'_>) -> Result<Uuid> {
     grant.selector.canonicalize();
     validate_write(
+        db,
         grant.subject,
         grant.tenant_id,
         grant.patterns,
         &grant.selector,
         grant.description.as_deref(),
-    )?;
+    )
+    .await?;
     let (subject_type, subject_id) = split_subject(grant.subject);
     // Count-then-insert: accepted TOCTOU risk (module docs).
     let existing = access_grant::Entity::find()
@@ -409,12 +558,14 @@ pub async fn update_grant(
         .ok_or_else(|| report!(AccessGrantError::NotFound))?;
     let subject = subject_from_row(&row);
     validate_write(
+        db,
         subject,
         row.tenant_id,
         update.patterns,
         &update.selector,
         update.description.as_deref(),
-    )?;
+    )
+    .await?;
     let mut active: access_grant::ActiveModel = row.into();
     active.patterns = Set(patterns_json(update.patterns));
     active.selector = Set(selector_json(&update.selector)?);
@@ -929,7 +1080,9 @@ mod tests {
     use uptrakit_shared_types::access::bounds::MAX_GRANTS_PER_SUBJECT;
 
     use super::*;
-    use crate::entity::{role, tenant, user, user_role};
+    use crate::entity::{
+        host, host_software_item, host_tag, role, software_item, tenant, user, user_role,
+    };
 
     async fn test_db() -> DatabaseConnection {
         let mut opt = ConnectOptions::new("sqlite::memory:");
@@ -1044,6 +1197,120 @@ mod tests {
         strs.iter().map(|s| pat(s)).collect()
     }
 
+    struct SeededRefs {
+        tag_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        item_id: Uuid,
+    }
+
+    /// Insert one live row per selector axis in `tenant_id`.
+    async fn seed_selector_referents(db: &DatabaseConnection, tenant_id: Uuid) -> SeededRefs {
+        let now = OffsetDateTime::now_utc();
+        let tag_id = Uuid::now_v7();
+        host_tag::ActiveModel {
+            id: Set(tag_id),
+            tenant_id: Set(tenant_id),
+            name: Set(format!("tag-{tag_id}")),
+            color: Set("#00aa00".to_string()),
+            description: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host tag");
+
+        let host_id = Uuid::now_v7();
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{host_id}")),
+            hostname: Set(format!("host-{host_id}")),
+            friendly_name: Set("Selector Fixture".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host");
+
+        let software_item_id = Uuid::now_v7();
+        software_item::ActiveModel {
+            id: Set(software_item_id),
+            tenant_id: Set(tenant_id),
+            name: Set(format!("sw-{software_item_id}")),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            awaiting_restart_timeout: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert software item");
+
+        let item_id = Uuid::now_v7();
+        host_software_item::ActiveModel {
+            id: Set(item_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+            last_discovered_at: Set(None),
+            missing_since: Set(None),
+            discovery_source: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host software item");
+
+        SeededRefs {
+            tag_id,
+            host_id,
+            software_item_id,
+            item_id,
+        }
+    }
+
+    /// Insert a role row; `tenant_id: None` = global role.
+    async fn seed_role(db: &DatabaseConnection, tenant_id: Option<Uuid>) -> Uuid {
+        let id = Uuid::now_v7();
+        role::ActiveModel {
+            id: Set(id),
+            name: Set(format!("role-{id}")),
+            description: Set(None),
+            is_built_in: Set(false),
+            created_at: Set(OffsetDateTime::now_utc()),
+            tenant_id: Set(tenant_id),
+        }
+        .insert(db)
+        .await
+        .expect("insert role");
+        id
+    }
+
     fn user_grant<'a>(
         tenant_id: Option<Uuid>,
         user_id: Uuid,
@@ -1156,42 +1423,62 @@ mod tests {
         );
     }
 
-    /// B9: each non-`All` selector variant rejected with SelectorPhaseGate.
+    /// B9: each non-`All` selector variant, once fully valid (live referents,
+    /// admitting action), still rejected with SelectorPhaseGate — the last
+    /// selector check ahead of M2.3 enforcement.
     #[tokio::test]
-    async fn b9_non_all_selectors_phase_gated() {
+    async fn b9_valid_non_all_selectors_hit_phase_gate_last() {
         let db = test_db().await;
         let tenant_id = default_tenant_id(&db).await;
-        let patterns = pats(&["checks:trigger"]);
-        let selectors = [
+        let user_id = active_user(&db).await;
+        let refs = seed_selector_referents(&db, tenant_id).await;
+        let item_level = [
             Selector::Tags {
-                ids: vec![Uuid::now_v7()],
+                ids: vec![refs.tag_id],
             },
             Selector::Hosts {
-                ids: vec![Uuid::now_v7()],
+                ids: vec![refs.host_id],
             },
             Selector::Software {
-                ids: vec![Uuid::now_v7()],
+                ids: vec![refs.software_item_id],
             },
             Selector::Items {
-                ids: vec![Uuid::now_v7()],
+                ids: vec![refs.item_id],
             },
         ];
-        for selector in selectors {
-            let grant = NewGrant {
-                subject: GrantSubject::User(Uuid::now_v7()),
-                tenant_id: Some(tenant_id),
-                patterns: &patterns,
-                selector: selector.clone(),
-                description: None,
-                created_by: None,
-            };
-            let err = insert_grant(&db, grant)
+        let host_level = [
+            Selector::Tags {
+                ids: vec![refs.tag_id],
+            },
+            Selector::Hosts {
+                ids: vec![refs.host_id],
+            },
+        ];
+        let cases = [
+            ("checks:trigger", &item_level[..]),
+            ("updates:trigger", &item_level[..]),
+            ("hosts:read", &host_level[..]),
+        ];
+        for (pattern, selectors) in cases {
+            for selector in selectors {
+                let err = insert_grant(
+                    &db,
+                    NewGrant {
+                        subject: GrantSubject::User(user_id),
+                        tenant_id: Some(tenant_id),
+                        patterns: &pats(&[pattern]),
+                        selector: selector.clone(),
+                        description: None,
+                        created_by: None,
+                    },
+                )
                 .await
-                .expect_err("non-All selector must be phase-gated");
-            assert!(
-                matches!(err.current_context(), AccessGrantError::SelectorPhaseGate),
-                "expected SelectorPhaseGate for {selector:?}, got: {err}"
-            );
+                .expect_err("fully valid non-All grant still gated until M2.3");
+                assert!(
+                    matches!(err.current_context(), AccessGrantError::SelectorPhaseGate),
+                    "{pattern} + {selector:?} must hit the phase gate last"
+                );
+            }
         }
     }
 
@@ -1298,10 +1585,218 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rule4_rejects_foreign_tenant_referents() {
+        let db = test_db().await;
+        let tenant_a = default_tenant_id(&db).await;
+        let tenant_b = insert_tenant(&db, "selector-refs-b").await;
+        let user_id = active_user(&db).await;
+        let foreign = seed_selector_referents(&db, tenant_b).await;
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_a),
+                patterns: &pats(&["checks:trigger"]),
+                selector: Selector::Hosts {
+                    ids: vec![foreign.host_id],
+                },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("foreign-tenant host id must fail rule 4");
+        assert!(
+            matches!(
+                err.current_context(),
+                AccessGrantError::SelectorReferentsMissing {
+                    axis: SelectorAxis::Hosts,
+                    missing,
+                } if *missing == vec![foreign.host_id]
+            ),
+            "expected SelectorReferentsMissing naming the foreign host id"
+        );
+    }
+
+    #[tokio::test]
+    async fn rule4_rejects_deactivated_referents() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = active_user(&db).await;
+        let now = OffsetDateTime::now_utc();
+        let dead_tag = Uuid::now_v7();
+        host_tag::ActiveModel {
+            id: Set(dead_tag),
+            tenant_id: Set(tenant_id),
+            name: Set("deactivated".to_string()),
+            color: Set("#333333".to_string()),
+            description: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(Some(now)),
+        }
+        .insert(&db)
+        .await
+        .expect("insert deactivated tag");
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_id),
+                patterns: &pats(&["checks:trigger"]),
+                selector: Selector::Tags {
+                    ids: vec![dead_tag],
+                },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("deactivated referent must fail rule 4");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::SelectorReferentsMissing {
+                axis: SelectorAxis::Tags,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn rule4_missing_lists_only_the_dangling_ids() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let user_id = active_user(&db).await;
+        let refs = seed_selector_referents(&db, tenant_id).await;
+        let dangling = Uuid::from_u128(0xDEAD);
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::User(user_id),
+                tenant_id: Some(tenant_id),
+                patterns: &pats(&["checks:trigger"]),
+                selector: Selector::Hosts {
+                    ids: vec![refs.host_id, dangling],
+                },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("one dangling id must fail rule 4");
+        assert!(
+            matches!(
+                err.current_context(),
+                AccessGrantError::SelectorReferentsMissing { missing, .. }
+                    if *missing == vec![dangling]
+            ),
+            "missing must list exactly the dangling id"
+        );
+    }
+
+    #[tokio::test]
+    async fn rule4_role_subject_resolves_role_tenant() {
+        let db = test_db().await;
+        let tenant_a = default_tenant_id(&db).await;
+        let tenant_b = insert_tenant(&db, "selector-role-b").await;
+        let refs_a = seed_selector_referents(&db, tenant_a).await;
+
+        // Custom in-tenant role + same-tenant referents: passes rule 4,
+        // hits the gate.
+        let role_a = seed_role(&db, Some(tenant_a)).await;
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::Role(role_a),
+                tenant_id: None,
+                patterns: &pats(&["checks:trigger"]),
+                selector: Selector::Hosts {
+                    ids: vec![refs_a.host_id],
+                },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("valid role-subject non-All grant still gated");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::SelectorPhaseGate
+        ));
+
+        // Role in tenant B + referents from tenant A: rule 4 rejects.
+        let role_b = seed_role(&db, Some(tenant_b)).await;
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::Role(role_b),
+                tenant_id: None,
+                patterns: &pats(&["checks:trigger"]),
+                selector: Selector::Hosts {
+                    ids: vec![refs_a.host_id],
+                },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("cross-tenant referents must fail rule 4");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::SelectorReferentsMissing { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn rule4_global_role_rejects_non_all_but_accepts_all() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let refs = seed_selector_referents(&db, tenant_id).await;
+        let global_role = seed_role(&db, None).await;
+        let err = insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::Role(global_role),
+                tenant_id: None,
+                patterns: &pats(&["checks:trigger"]),
+                selector: Selector::Hosts {
+                    ids: vec![refs.host_id],
+                },
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect_err("global roles never carry non-All selectors");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::SelectorOnGlobalRole
+        ));
+
+        // Regression: All on a global role still inserts.
+        insert_grant(
+            &db,
+            NewGrant {
+                subject: GrantSubject::Role(global_role),
+                tenant_id: None,
+                patterns: &pats(&["checks:trigger"]),
+                selector: Selector::All,
+                description: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("All-selector global-role grant unaffected by rule 4");
+    }
+
+    #[tokio::test]
     async fn canonicalization_dedups_before_bounds() {
         // MAX distinct ids + 1 duplicate: over the bound raw, inside it
-        // after insert_grant's canonicalize(). Reaching SelectorPhaseGate
-        // (not TooManyIds) proves canonicalization ran first.
+        // after insert_grant's canonicalize(). Reaching rule 4 (not
+        // TooManyIds) still proves canonicalization ran first — a
+        // non-deduped list of MAX+1 would fail rule 5 first. None of these
+        // arbitrary ids resolve to live rows, so rule 4 is the next check
+        // to fire.
         let db = test_db().await;
         let tenant_id = default_tenant_id(&db).await;
         let user_id = active_user(&db).await;
@@ -1321,10 +1816,10 @@ mod tests {
             },
         )
         .await
-        .expect_err("gate still holds for valid non-All selectors");
+        .expect_err("dangling ids must fail rule 4");
         assert!(matches!(
             err.current_context(),
-            AccessGrantError::SelectorPhaseGate
+            AccessGrantError::SelectorReferentsMissing { .. }
         ));
     }
 
@@ -1640,6 +2135,37 @@ mod tests {
             matches!(err.current_context(), AccessGrantError::NotFound),
             "expected NotFound, got: {err}"
         );
+    }
+
+    /// update_grant runs rule 4 against the STORED tenant, same as insert.
+    #[tokio::test]
+    async fn update_grant_rejects_foreign_tenant_referents() {
+        let db = test_db().await;
+        let tenant_id = default_tenant_id(&db).await;
+        let foreign_tenant = insert_tenant(&db, "selector-update-refs-b").await;
+        let foreign = seed_selector_referents(&db, foreign_tenant).await;
+        let patterns = pats(&["hosts:read"]);
+        let grant_id = insert_grant(&db, user_grant(Some(tenant_id), Uuid::now_v7(), &patterns))
+            .await
+            .expect("insert");
+
+        let err = update_grant(
+            &db,
+            grant_id,
+            GrantUpdate {
+                patterns: &pats(&["checks:trigger"]),
+                selector: Selector::Hosts {
+                    ids: vec![foreign.host_id],
+                },
+                description: None,
+            },
+        )
+        .await
+        .expect_err("foreign-tenant host id must fail rule 4 on update");
+        assert!(matches!(
+            err.current_context(),
+            AccessGrantError::SelectorReferentsMissing { .. }
+        ));
     }
 
     #[tokio::test]
