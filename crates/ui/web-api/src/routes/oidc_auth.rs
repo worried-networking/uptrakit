@@ -59,7 +59,7 @@ pub struct OidcCallbackParams {
 /// Claims extracted from the OIDC ID token after successful code exchange.
 struct ExtractedOidcClaims {
     sub: String,
-    email: String,
+    email: MaskedEmail,
     email_verified: Option<bool>,
     first_name: Option<String>,
     last_name: Option<String>,
@@ -260,7 +260,8 @@ fn oidc_callback_outcome_for_error_code(error_code: &str) -> uptrakit_audit_log:
         | "oidc_no_account"
         | "oidc_email_unverified"
         | "account_deactivated"
-        | "oidc_no_email" => uptrakit_audit_log::AuditOutcome::Denied,
+        | "oidc_no_email"
+        | "oidc_invalid_email" => uptrakit_audit_log::AuditOutcome::Denied,
         _ => uptrakit_audit_log::AuditOutcome::Failed,
     }
 }
@@ -1074,7 +1075,7 @@ async fn execute_oidc_resolution(
     provider_id: Uuid,
     provider: &oidc_provider::Model,
     sub: &str,
-    email: &str,
+    email: &MaskedEmail,
     first_name: Option<String>,
     last_name: Option<String>,
     additional_claims: &serde_json::Value,
@@ -1127,7 +1128,7 @@ async fn execute_oidc_resolution(
                 provider_id,
                 provider,
                 sub,
-                email,
+                email.expose_email(),
                 first_name,
                 last_name,
                 additional_claims,
@@ -1146,7 +1147,7 @@ async fn execute_oidc_resolution(
                 provider_id,
                 provider,
                 sub,
-                email,
+                email.expose_email(),
                 first_name,
                 last_name,
                 additional_claims,
@@ -1196,7 +1197,7 @@ async fn check_registration_eligibility(
     provider_id: Uuid,
     provider: &oidc_provider::Model,
     sub: &str,
-    email: &str,
+    email: &MaskedEmail,
     first_name: Option<&str>,
     last_name: Option<&str>,
     additional_claims: &serde_json::Value,
@@ -1228,13 +1229,15 @@ async fn check_registration_eligibility(
         return None;
     }
 
-    // Check if a user with this email already exists
-    let has_user = match User::find()
-        .filter(uptrakit_shared_db::entity::user::Column::Email.eq(email))
-        .count(state.db())
-        .await
+    // Check if a user with this email already exists. Routed through the
+    // canonical-email chokepoint rather than a raw `Column::Email` filter
+    // (per `uptrakit_shared_db::users::find_by_canonical_email`'s doc
+    // contract); this deliberately swaps `.count() > 0` for a row fetch —
+    // functionally equivalent (email is unique) but consistent with the
+    // chokepoint's `Option<Model>` signature.
+    let has_user = match uptrakit_shared_db::users::find_by_canonical_email(state.db(), email).await
     {
-        Ok(n) => n > 0,
+        Ok(found) => found.is_some(),
         Err(e) => {
             tracing::error!(err = %e, "DB error checking user by email");
             return Some(error_response(
@@ -1279,7 +1282,7 @@ async fn check_registration_eligibility(
             registration_code: code.clone(),
             provider_id,
             oidc_subject: sub.to_owned(),
-            email: email.to_owned(),
+            email: email.expose_email().to_owned(),
             first_name: first_name.map(str::to_owned),
             last_name: last_name.map(str::to_owned),
             mapped_roles,
@@ -1784,6 +1787,30 @@ pub async fn oidc_complete_registration(
         }
     };
 
+    // `pending.email` is an internal-invariant contract: rows are stored
+    // canonical by construction (see `check_registration_eligibility`'s
+    // insert), so a parse failure here indicates a corrupted store rather
+    // than user input to reject gracefully.
+    let pending_email: MaskedEmail = match pending.email.parse() {
+        Ok(email) => email,
+        Err(e) => {
+            tracing::error!(error = %e, "Pending OIDC registration has non-canonical email");
+            emit_oidc_user_create_audit(
+                &state,
+                None,
+                Some(pending.provider_id),
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("pending_email_parse_failed"),
+                None,
+            );
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
     // 3. Wrap user creation + first-user check + role assignment in a transaction
     // to prevent the race where two concurrent registrations both see count == 0.
     let txn = match begin_immediate(state.db()).await {
@@ -1807,12 +1834,10 @@ pub async fn oidc_complete_registration(
     };
 
     // 4. Race condition guard: verify user still doesn't exist
-    let user_exists = match User::find()
-        .filter(uptrakit_shared_db::entity::user::Column::Email.eq(&pending.email))
-        .count(&txn)
+    let user_exists = match uptrakit_shared_db::users::find_by_canonical_email(&txn, &pending_email)
         .await
     {
-        Ok(n) => n > 0,
+        Ok(found) => found.is_some(),
         Err(e) => {
             tracing::error!(err = %e, "DB error checking for duplicate user during OIDC registration");
             emit_oidc_user_create_audit(
@@ -1852,7 +1877,7 @@ pub async fn oidc_complete_registration(
     let now = OffsetDateTime::now_utc();
     let user_model = uptrakit_shared_db::entity::user::ActiveModel {
         id: Set(user_id),
-        email: Set(MaskedEmail::new(pending.email.clone())),
+        email: Set(pending_email.clone()),
         first_name: Set(pending.first_name.unwrap_or_default()),
         last_name: Set(pending.last_name.unwrap_or_default()),
         password_hash: Set(None),
@@ -2376,6 +2401,11 @@ async fn exchange_code_for_claims(
         return Err(Redirect::to("/login?error=oidc_no_email").into_response());
     }
 
+    let email: MaskedEmail = email.parse().map_err(|e| {
+        tracing::warn!(error = %e, "OIDC email claim failed canonical parse");
+        Redirect::to("/login?error=oidc_invalid_email").into_response()
+    })?;
+
     let additional_claims = serde_json::to_value(claims.additional_claims()).unwrap_or_default();
 
     Ok(ExtractedOidcClaims {
@@ -2610,6 +2640,17 @@ mod tests {
         assert_eq!(
             redirect,
             "/login?link_required=true&email=user%40example%2Ecom&link_provider_id=00000000-0000-0000-0000-000000000000#link_token=token"
+        );
+    }
+
+    #[test]
+    fn link_redirect_carries_canonical_email() {
+        let email: uptrakit_shared_types::MaskedEmail =
+            " User@Example.COM ".parse().expect("valid");
+        let redirect = build_link_required_redirect(email.expose_email(), "token", None);
+        assert_eq!(
+            redirect,
+            "/login?link_required=true&email=user%40example%2Ecom#link_token=token"
         );
     }
 }
@@ -3477,13 +3518,14 @@ mod audit_tests {
             .send_json()
             .await;
         assert_eq!(register_status, http::StatusCode::CREATED);
-        let user_id = User::find()
-            .filter(user::Column::Email.eq(email))
-            .one(&app.db)
-            .await
-            .expect("query registered user")
-            .expect("registered user should exist")
-            .id;
+        let user_id = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &email.parse().expect("valid test email"),
+        )
+        .await
+        .expect("query registered user")
+        .expect("registered user should exist")
+        .id;
         let provider_id = insert_active_oidc_provider(
             &app.db,
             app.state.default_tenant_id,
@@ -3540,13 +3582,14 @@ mod audit_tests {
             .send_json()
             .await;
         assert_eq!(register_status, http::StatusCode::CREATED);
-        let user_id = User::find()
-            .filter(user::Column::Email.eq(email))
-            .one(&app.db)
-            .await
-            .expect("query registered user")
-            .expect("registered user should exist")
-            .id;
+        let user_id = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &email.parse().expect("valid test email"),
+        )
+        .await
+        .expect("query registered user")
+        .expect("registered user should exist")
+        .id;
 
         // Deactivate the user.
         let mut active: user::ActiveModel = User::find_by_id(user_id)
@@ -4938,12 +4981,14 @@ mod audit_tests {
         )
         .await;
 
+        let shadow_email: uptrakit_shared_types::MaskedEmail =
+            "user-shadow@test.local".parse().expect("valid test email");
         let resolution = super::resolve_oidc_user(super::OidcUserParams {
             db: &app.db,
             tenant_id: app.state.default_tenant_id,
             provider_id: provider.id,
             oidc_subject: "user-shadow-subject",
-            email: "user-shadow@test.local",
+            email: &shadow_email,
             first_name: Some("Shadow"),
             last_name: Some("Target"),
             auto_create: true,
@@ -4969,5 +5014,87 @@ mod audit_tests {
              exists, so the tenant shadow must never be picked up as a \
              best-effort default"
         );
+    }
+
+    /// Regression pin for the canonical-email lookup: a case/whitespace-
+    /// variant claim (`" User@Regress.LOCAL "`) must still match an existing
+    /// user seeded with the canonical form (`user@regress.local`), routing
+    /// to `LinkViaPasswordRequired` instead of falling through to
+    /// auto-create. Pre-fix (raw `Column::Email.eq(email)` against the
+    /// unparsed claim string), the exact-match lookup misses the seeded row
+    /// entirely and a second user gets auto-created.
+    #[tokio::test]
+    async fn resolve_oidc_user_matches_seeded_user_by_canonical_email() {
+        let app = TestApp::new().await;
+        let seeded_user_id =
+            insert_test_user_with_password(&app.db, "user@regress.local", "correct-password").await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "Regress Canonical Email",
+            "regress-canonical-email",
+        )
+        .await;
+        let provider = oidc_provider::Entity::find_by_id(provider_id)
+            .one(&app.db)
+            .await
+            .expect("provider query")
+            .expect("provider row");
+
+        let claim_email: MaskedEmail = " User@Regress.LOCAL ".parse().expect("valid test email");
+
+        let resolution = super::resolve_oidc_user(super::OidcUserParams {
+            db: &app.db,
+            tenant_id: app.state.default_tenant_id,
+            provider_id: provider.id,
+            oidc_subject: "regress-canonical-subject",
+            email: &claim_email,
+            first_name: Some("Regress"),
+            last_name: Some("Target"),
+            auto_create: true,
+            email_verified: Some(true),
+        })
+        .await
+        .expect("resolve_oidc_user must succeed");
+
+        match resolution {
+            super::OidcUserResolution::LinkViaPasswordRequired { user_id } => {
+                assert_eq!(
+                    user_id, seeded_user_id,
+                    "must resolve to the seeded user, not a different row"
+                );
+            }
+            super::OidcUserResolution::NewUser(_) => panic!(
+                "case/whitespace-variant claim fell through to auto-create \
+                 instead of matching the seeded user by canonical email"
+            ),
+            super::OidcUserResolution::LinkedUser(_) => {
+                panic!("unexpected LinkedUser resolution")
+            }
+            super::OidcUserResolution::LinkViaOidcRequired { .. } => {
+                panic!("unexpected LinkViaOidcRequired resolution")
+            }
+            super::OidcUserResolution::EmailNotVerified => {
+                panic!("unexpected EmailNotVerified resolution")
+            }
+            super::OidcUserResolution::NotAllowed => {
+                panic!("unexpected NotAllowed resolution")
+            }
+            super::OidcUserResolution::Deactivated => {
+                panic!("unexpected Deactivated resolution")
+            }
+        }
+
+        // Non-vacuity: confirm no second user row was created — the
+        // canonical lookup for the seeded address still resolves to the
+        // same single id.
+        let found = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &"user@regress.local".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query by canonical email")
+        .expect("seeded user must still be found");
+        assert_eq!(found.id, seeded_user_id);
     }
 }

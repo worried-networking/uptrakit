@@ -107,7 +107,7 @@ pub struct OidcUserParams<'a, C: ConnectionTrait> {
     pub tenant_id: uuid::Uuid,
     pub provider_id: uuid::Uuid,
     pub oidc_subject: &'a str,
-    pub email: &'a str,
+    pub email: &'a MaskedEmail,
     pub first_name: Option<&'a str>,
     pub last_name: Option<&'a str>,
     pub auto_create: bool,
@@ -169,9 +169,7 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
     }
 
     // 2. Check for existing user by email
-    let existing_user = User::find()
-        .filter(user::Column::Email.eq(email))
-        .one(db)
+    let existing_user = uptrakit_shared_db::users::find_by_canonical_email(db, email)
         .await
         .context_to()?;
 
@@ -225,7 +223,7 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
 
     let new_user = user::ActiveModel {
         id: Set(user_id),
-        email: Set(MaskedEmail::new(email)),
+        email: Set(email.clone()),
         first_name: Set(first_name.unwrap_or("").to_string()),
         last_name: Set(last_name.unwrap_or("").to_string()),
         password_hash: Set(None),

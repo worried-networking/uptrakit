@@ -140,3 +140,10 @@ impl_report_conversion! {
 impl_report_conversion!(uptrakit_shared_db::access_grants::AccessGrantError => AuthError::AccessGuard);
 
 impl_report_conversion!(argon2::Error => AuthError, |_| AuthError::Internal("argon2 error".to_string()));
+
+impl_report_conversion!(
+    uptrakit_shared_db::users::UsersError => AuthError,
+    |e| match e {
+        uptrakit_shared_db::users::UsersError::Db(db) => AuthError::Database(db),
+    }
+);
