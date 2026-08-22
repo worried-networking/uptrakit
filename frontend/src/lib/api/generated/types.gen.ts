@@ -10446,6 +10446,10 @@ export type InitiateEmailChangeData = {
 
 export type InitiateEmailChangeErrors = {
     /**
+     * Invalid request body
+     */
+    400: unknown;
+    /**
      * Not authenticated or wrong current password
      */
     401: unknown;
@@ -10461,10 +10465,6 @@ export type InitiateEmailChangeErrors = {
      * Email already in use
      */
     409: unknown;
-    /**
-     * Validation error
-     */
-    422: unknown;
     /**
      * Email delivery unavailable
      */

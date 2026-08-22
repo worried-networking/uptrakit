@@ -10563,6 +10563,9 @@
           "202": {
             "description": "Email change initiated; confirmation email sent"
           },
+          "400": {
+            "description": "Invalid request body"
+          },
           "401": {
             "description": "Not authenticated or wrong current password"
           },
@@ -10574,9 +10577,6 @@
           },
           "409": {
             "description": "Email already in use"
-          },
-          "422": {
-            "description": "Validation error"
           },
           "503": {
             "description": "Email delivery unavailable"
