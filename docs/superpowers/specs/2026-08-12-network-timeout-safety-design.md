@@ -2,8 +2,10 @@
 
 **Date:** 2026-08-12
 **Status:** Design (pending plan)
+**Amended:** 2026-08-22 — M1.6/M1.7 restructured (controller-side registry removed; agent-side guard is the sole
+overlap-prevention mechanism). See § Amendment log.
 **Scope:** command execution (`crates/shared/command/`), agent operations (`crates/shared/agent-core/`, `crates/core/agent-runtime/`,
-`crates/core/agent-ssh-runtime/`), controller dispatch/watchdog (`crates/ui/web-api/`, `crates/ui/web-api-queries/`,
+`crates/core/agent-ssh-runtime/`), controller-side reaper/dispatch (`crates/ui/web-api/`, `crates/ui/web-api-queries/`,
 `crates/core/scheduler-runtime/`), sudoers generation (`crates/core/agent-ssh-runtime/src/operations/`), plugin trait surface
 (`crates/plugins/infrastructure/core/`), service-sdk keepalive, openapi-client SSE streams, and the documentation set listed in
 § Documentation deliverables. Three ordered milestones; each becomes its own plan (or plan series) and lands in order.
@@ -60,7 +62,12 @@ Compounding defects:
 2. Hosts stay free of stuck processes: kill what we can kill directly; back-stop what we cannot (root-owned) with a
    host-local mechanism that has root authority (sudoers `TIMEOUT=`).
 3. No duplicate pile-up: a wedged operation never causes the scheduler to stack more copies of itself.
-4. Failures are legible: timeout kills are distinguishable from real command failures in results, logs, and the UI.
+4. Failures are legible: timeout kills are distinguishable from real command failures in results, logs, and the UI —
+   **for operations that return results.** A fire-and-forget operation whose result never arrives is bounded and
+   non-stacking (M1.7) but surfaces only in logs: the controller result handler today drops errored results without
+   persistence or SSE (log + audit error count only), so there is no failure channel to feed. Building that channel
+   (persist per-item error + SSE + UI display, covering _all_ errors, not just timeouts) is descoped to the follow-up
+   epic `uptrakit-async-op-failure-surface` (2026-08-22 amendment).
 5. Fleet safety during rollout: nothing in this spec may brick sudo on a host, and the kill/backstop milestone is
    canary-deployed to one host before fleet rollout.
 
@@ -273,51 +280,59 @@ the bound to reach SSH-managed hosts).
   explicit `with_timeout` at spec-construction time. Plan-time inventory: grep plugin command constructions and classify each
   against the 600 s default; the apt/dnf/pacman/... index refreshes and version detections stay on the default.
 
-### M1.6 Controller-side dedup + watchdog for version checks and discovery
+### M1.6 Overlap prevention is agent-side only — no controller registry (2026-08-22 amendment)
 
 Dispatch today is fire-and-forget with no correlation (`version_check_dispatch.rs:298-307`,
-`routes/service_ws/handler/discovery.rs:146-160`, `executors/detect_version.rs:111-115`). Add a controller-side pending-request
-registry (in-memory, in the service-connection state, keyed `(host_id, op_kind)` — op kinds: version check, discovery,
-config test):
+`routes/service_ws/handler/discovery.rs:146-160`, `executors/detect_version.rs:111-115`). The original design here added a
+controller-side pending-request registry (in-memory, `(host_id, op_kind)`-keyed, with a watchdog synthesizing timed-out
+results). **Removed by the 2026-08-22 amendment** after plan review; this section now records the decision and its reasons
+so it is not re-invented:
 
-- **Dedup:** skip dispatch when an outstanding entry for the same key is younger than its budget; log the skip at `info!`.
-- **Watchdog:** when an entry outlives budget + grace with no result, clear it, log at `warn!`, and emit the existing
-  failure surface for that op (per-item error persistence / SSE event, reusing the shapes the result handler already writes).
-  This is the version-check analogue of the update reaper, using the proven pattern.
-- Entries are cleared by result arrival, by watchdog expiry, and by service disconnect (the connection state owns them, so
-  disconnect cleanup is structural).
-- **Budget symmetry:** the controller's dedup TTL / watchdog expiry and the agent's op deadline must be the same number —
-  the op-timeout constants live in a shared crate both sides already depend on (`uptrakit-shared-types`), never duplicated.
-  A controller-low value writes failures over a still-running check; a controller-high value blocks re-dispatch after the
-  agent gave up.
-- **Restart semantics (deliberate):** the registry is in-memory; a controller restart loses outstanding watchdog entries and
-  those checks produce no failure surface. Accepted because checks are idempotent and re-dispatched on the next scheduler
-  tick — the durable-reaper treatment is reserved for updates, whose rows are user-visible state. Stated here so Goal 4's
-  "failures are legible" is understood as bounded by a restart.
-- Agent-side guard stays as defence in depth (M1.7).
-- **Build on the existing primitive, don't twin it:** `ConfigTestProxy` (`crates/ui/web-api/src/config_test_proxy.rs`) is
-  already a `parking_lot::Mutex<HashMap<…>>` pending map with a bounded wait and explicit cleanup on send-failure and
-  timeout (a mid-flight disconnect is reclaimed only via the timeout path today — the new registry improves on this with
-  connection-state-owned disconnect cleanup). The plan either generalizes that shape for the new registry or states the
-  structural reason not to (the known difference: version checks have no single awaiting caller to correlate a oneshot to).
-  Locking follows the same documented convention: `parking_lot::Mutex`, guard dropped before any `.await`.
+- **The watchdog's premise was false.** It relied on "the existing failure surface for that op" — but the result handlers
+  deliberately _drop_ errored results (`handle_version_check_results` skips any result with `error.is_some()` before DB
+  writes, SSE, and MQTT; only a `debug!` log and an audit error count remain). A synthesized timed-out result was a provable
+  no-op. No failure channel for async agent ops exists today; building one is descoped to the follow-up epic
+  `uptrakit-async-op-failure-surface` (see Goal 4).
+- **Nothing consumes controller-side pending state.** The web UI's "checking"/"discovering" indicators are scoped to the
+  triggering HTTP request (`finally`-cleared), `VersionCheckCompleted`/`DiscoveryCompleted` SSE only trigger list refreshes,
+  a 300 s poll covers missed refreshes, and no DB column records in-flight state. There is no stuck UI state to clear and
+  no reader for "already running".
+- **Mirror-state defects are structural, not fixable.** The overlap harm — concurrent duplicate runs — occurs on the agent
+  host. A controller-side mirror can only approximate agent truth: entries die on disconnect while the agent keeps running,
+  the dedup key conflates scheduler batches with manual single-item dispatches, and result-to-entry matching by item id
+  can free the wrong host's slot on the multi-host SSH runtime. Enforcement belongs where the harm is.
+- **Config test never belonged in this machinery.** `TestPluginConfig` is request/response, correlated by `ConfigTestProxy`
+  (`crates/ui/web-api/src/config_test_proxy.rs`) with a bounded REST wait (30 s proxy deadline) and an agent-side in-op
+  deadline (M1.3, 25 s). Gating it would turn a skip into a silent REST 504. It stays entirely outside the guard.
 
-External-scheduler note: the registry lives where the WS connections live (the controller), so both embedded and external
-scheduler dispatch paths funnel through it. Plan-time verification: confirm the external scheduler's dispatch path reaches the
-same controller-side send funnel; if it sends via NATS directly, the dedup check must sit in the controller's NATS→WS bridge.
+Consequences: the controller dispatches freely; the agent-side guard (M1.7) is the sole overlap-prevention mechanism. A
+scheduler tick re-dispatching to a host with an op in flight costs one WS message that the agent skips with an `info!` log —
+accepted. The "budget symmetry" rule between a controller TTL and the agent deadline is void (there is no controller TTL);
+the op-timeout constants stay in `uptrakit-shared-types` as the single home for the per-op budgets the agent enforces.
 
-### M1.7 Agent-side spawn guard
+### M1.7 Agent-side spawn guard (sole overlap-prevention mechanism; 2026-08-22 amendment)
 
 Replace bare `spawn_background` (`client.rs:285-294`) usage for the scheduled, idempotent ops — CheckVersions /
-DiscoverSoftware / TestPluginConfig — with a small registry that: retains the `JoinHandle`, keys entries `(op_kind)` for the WS agent
-(one host) and `(host_id, op_kind)` for the SSH runtime (`spawn_check_versions_ssh`, `agent-ssh-runtime/src/client.rs:820-890`),
-handles duplicates by skipping while an entry is live (re-issued next scheduler tick), and hard-expires entries at op
-budget + grace by `abort()`ing the retained handle
-(a registry entry must never outlive its own deadline — the blocking-await failure class in M0.2 would otherwise wedge the
-slot permanently). Per-plugin-type keying was considered and rejected: the op-level deadline (M1.3) already prevents one
+DiscoverSoftware (**not** TestPluginConfig; request/response, excluded per M1.6) — with a small registry keyed
+`(host_machine_id, op_kind)` (the WS agent serves one host; the SSH runtime
+(`spawn_check_versions_ssh`, `agent-ssh-runtime/src/client.rs:820-890`) serves many):
+
+- **Dedup is item-set-aware for version checks.** The entry records the dispatched software-item id set. A new
+  `CheckVersions` is skipped (`info!` log, re-issued next scheduler tick) only when its requested item set is a subset of
+  the running set — the running op will deliver those items' results. A non-subset request (e.g. a manual check for an
+  item outside a running scheduled batch) runs concurrently: the harm being prevented is duplicate _same-item_ work, and
+  disjoint item sets were always able to overlap. Discovery has no item set; its dedup degenerates to the plain
+  `(host, kind)` key.
+- **Dedup window vs cancellation are split.** The skip window ends at the op _budget_ (M1.3 constant); the guarded future
+  is hard-cancelled — dropped via `tokio::time::timeout_at` — at _budget + grace_ (a registry entry must never outlive its
+  own deadline; the blocking-await failure class in M0.2 would otherwise wedge the slot permanently). Between budget and
+  budget + grace a new dispatch may start while the stale future awaits cancellation — accepted; the stale future's result,
+  if any, is idempotent. No retained `JoinHandle`/`abort()`: `timeout_at` on the un-spawned future gives identical
+  drop-at-deadline cancellation without a second task, and panic isolation is moot under the workspace's `panic = "abort"`.
+
+Per-plugin-type keying was considered and rejected: the op-level deadline (M1.3) already prevents one
 wedged plugin from blocking the host's next round, and per-type keys multiply registry states for no additional safety.
-Registry locking: `parking_lot::Mutex`, guard dropped before any `.await` (project convention; `JoinHandle::abort()` is
-synchronous and may run under the guard, but nothing else may).
+Registry locking: `parking_lot::Mutex`, guard dropped before any `.await` (project convention).
 
 `ExecuteBatchUpdate` is **excluded from the registry by design**: duplicate update dispatches are already structurally
 prevented controller-side (`validate_update_preconditions` HTTP 409 + the `uix_update_history_host_active` partial unique
@@ -477,12 +492,12 @@ sudo-layer tests plus one new case per flag.
 | `DEFAULT_COMMAND_TIMEOUT`  | 600 s                                                | `uptrakit-command`                                                                                                   |
 | `KILL_GRACE`               | 10 s                                                 | `uptrakit-command`                                                                                                   |
 | `KILL_REAP_GRACE`          | 5 s                                                  | `uptrakit-command`                                                                                                   |
-| `VERSION_CHECK_OP_TIMEOUT` | 1800 s                                               | `uptrakit-shared-types` (agent + controller watchdog reference the same constant)                                    |
+| `VERSION_CHECK_OP_TIMEOUT` | 1800 s                                               | `uptrakit-shared-types` (agent-side in-op deadline + guard dedup window)                                             |
 | `DISCOVERY_OP_TIMEOUT`     | 1800 s                                               | `uptrakit-shared-types` (same)                                                                                       |
 | `HOOK_TIMEOUT`             | 300 s                                                | `uptrakit-agent-core`                                                                                                |
 | `CONFIG_TEST_OP_TIMEOUT`   | 25 s                                                 | `uptrakit-shared-types`, beside the proxy's 30 s deadline with the recorded invariant: agent budget < proxy deadline |
 | `PENDING_DISPATCH_GRACE`   | 600 s                                                | `uptrakit-web-api` (reaper module)                                                                                   |
-| `CHECK_WATCHDOG_GRACE`     | 120 s                                                | `uptrakit-web-api` (registry module)                                                                                 |
+| `BG_OP_ABORT_GRACE`        | 120 s                                                | `uptrakit-agent-core` (guard cancellation slack past the op budget; M1.7)                                            |
 | `MISSED_PONG_LIMIT`        | 3                                                    | `uptrakit-service-sdk`                                                                                               |
 | Sudoers refresh `TIMEOUT=` | budget + `KILL_GRACE` + 120 s slack (≈900 s rounded) | sudoers generator, derived from the executor's constant                                                              |
 
@@ -499,22 +514,21 @@ no stringly matching on error text.
 
 ## Testing strategy
 
-- Timer-driven logic (op deadlines, watchdog expiry, dedup TTL, missed-pong): `#[tokio::test(start_paused = true)]` +
+- Timer-driven logic (op deadlines, agent-guard dedup/cancellation, missed-pong): `#[tokio::test(start_paused = true)]` +
   `tokio::time::advance()` — **except** anything touching SQLx/SeaORM pools (reaper queries), which use real short delays per
   the documented testing rule.
 - Kill-path tests spawn real child processes (`sleep`-style) and must use short real timeouts — these are a documented
   exception to the paused-clock rule and the plan must add them to the exception list in `docs/development/testing.md`.
   Group-kill coverage includes the `bash -c` pipeline shape (§ M2.1).
 - Concurrency/liveness guards get red-checkable tests: the M1.2 regression test must fail when the budget promotion is
-  removed; the M1.6 dedup test must fail when the registry check is deleted (delete-the-guard red check as acceptance).
+  removed; the M1.7 dedup test must fail when the guard check is deleted (delete-the-guard red check as acceptance).
 - External-cancellation cleanliness (M1.1/M1.3 interaction): a test cancels the command future mid-execution and asserts the
   reader tasks are aborted (not detached) — red-checked by removing the abort-on-drop guard.
 - Golden tests for all three `build_remote_command_string` shapes with and without the wrapper (M2.3).
 - Reaper changes: two-phase seeds with distinct unique-key values; budget-column reap covered for per-row, NULL-fallback, and
   boundary cases derived from the constants by name.
-- New web-api handler tests (if the watchdog adds routes/handlers — none planned) would use the shared `TestApp` harness;
-  the registry itself is exercised at the connection-state level, and `db_access_policy.toml` rows are added only for fns
-  under `routes/` per the gate's actual scope.
+- New web-api handler tests (none planned — no controller-side machinery after the 2026-08-22 amendment) would use the
+  shared `TestApp` harness; `db_access_policy.toml` rows are added only for fns under `routes/` per the gate's actual scope.
 
 ## Wire/API/schema impact
 
@@ -542,7 +556,7 @@ no stringly matching on error text.
 | `docs/development/plugin-guidelines.md`           | M1.5, M2.4             | plugin-author guidance: when to `with_timeout`, shell plugin `timeout_seconds`, `SudoCommandEntry::with_command_timeout` classification rule                                                                                                                                                                |
 | `docs/development/testing.md`                     | M2.1                   | documented exception: real-process kill tests use real short timeouts                                                                                                                                                                                                                                       |
 | `docs/api/services-operations.md`                 | M1.11                  | missed-pong dead-connection detection alongside ping-interval mechanics                                                                                                                                                                                                                                     |
-| `docs/development/autodiscovery-internals.md`     | M1.6                   | discovery dedup/watchdog behaviour (file already documents discovery cadence)                                                                                                                                                                                                                               |
+| `docs/development/autodiscovery-internals.md`     | M1.7                   | discovery dedup behaviour (agent-side guard; file already documents discovery cadence)                                                                                                                                                                                                                      |
 | `AGENTS.md`                                       | M1                     | one new MUST-FOLLOW rule line: every command execution path carries a deadline (executor default + explicit budgets); link to command-executor.md as canonical home                                                                                                                                         |
 | `CONTEXT.md`                                      | M1                     | glossary entries: _Report deadline_, _Kill escalation_, _Root backstop_ (the three-layer vocabulary)                                                                                                                                                                                                        |
 | `scripts/pvehs/install/uptrakit-install.sh`       | M2.4                   | emit `TIMEOUT=` lines behind the same sudo-version check (script, listed here because it embeds sudoers documentation-by-example)                                                                                                                                                                           |
@@ -559,7 +573,9 @@ strings) and promote every hit to a deliverable.
 3. GNU/BusyBox/toybox `timeout` flag compatibility — the behavioural probe (M2.3) is the mechanism; verify the probe command
    against BusyBox ≥/< 1.30 syntax before pinning it.
 4. `russh` channel close/`signal()` semantics against the deployed OpenSSH versions (M1.9, M2.5).
-5. External-scheduler dispatch funnel (M1.6) — confirm the path before placing the dedup registry.
+5. External-scheduler dispatch funnel (M1.6) — obsolete since the 2026-08-22 amendment (no controller-side registry to
+   place). The funnel was verified anyway during plan review: all dispatch paths, including the external scheduler's
+   NATS→WS bridge, reach `ServiceConnectionRegistry::send`.
 6. `update_history` writer inventory (M0.4, M1.8) — grep-derived, not task-list-derived.
 7. Baseline runs of every scoped gate command against the untouched tree (feature flags per crate checked against each
    crate's own `Cargo.toml`), per the standing gate rules.
@@ -586,8 +602,29 @@ strings) and promote every hit to a deliverable.
 
 - **Plan 0** (M0.1–M0.5): independent live-bug fixes; land before anything else. M0.3 is "merge the existing plan", not new work.
 - **Plan 1** (M1.1–M1.5): command/op deadlines + budget plumbing (agent side). M1.1+M1.2 in one commit.
-- **Plan 2** (M1.6–M1.11): controller dedup/watchdog, reaper budget, SSH stream deadline, SSE/pong. Can parallel Plan 1 except
+- **Plan 2** (M1.6–M1.11): agent-side op guard, reaper budget, SSH stream deadline, SSE/pong. Can parallel Plan 1 except
   M1.8 (budget column) depends on M1.2's budget concept only nominally — plans state the ordering explicitly.
 - **Plan 3** (M2.1–M2.6): kill mechanics + sudoers backstop; canary rollout gate before fleet.
 
 Dependencies: Plan 0 → (Plan 1 ∥ Plan 2) → Plan 3.
+
+## Amendment log
+
+### 2026-08-22 — M1.6/M1.7 restructured after plan review (owner-approved via grilling)
+
+Plan review of the M1.6–M1.11 plan found the controller-side registry + watchdog unsound at the root:
+
+1. **Fatal:** watchdog result synthesis was a provable no-op — the result handlers drop errored results before any DB
+   write, SSE, or MQTT emission, so the "existing failure surface" the design reused does not exist.
+2. Nothing consumes controller-side pending state (UI in-flight indicators are HTTP-request-scoped; SSE events only
+   trigger refreshes; no DB in-flight column).
+3. The mirror's defects were structural: disconnect loses entries while the agent keeps running, `(host, kind)` keying
+   conflates scheduler batches with manual single-item dispatches, and item-id-based clearing can free the wrong host's
+   slot on the multi-host SSH runtime.
+4. Config test is request/response (bounded by `ConfigTestProxy` + the M1.3 in-op deadline) — gating it converted a skip
+   into a silent REST 504.
+
+Resolution: overlap prevention moved entirely to the agent-side guard (M1.7), which gained item-set-aware dedup and a
+split dedup-window/cancellation deadline; config test removed from the guard; Goal 4 re-scoped honestly; per-item
+async-op failure surfacing extracted to follow-up epic `uptrakit-async-op-failure-surface` (discovered-from the
+M1.6–M1.11 plan epic; independent enhancement, no blocking edge).
