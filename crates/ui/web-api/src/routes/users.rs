@@ -892,11 +892,7 @@ pub async fn initiate_email_change(
 
     // Check new email is not already taken
     if let Ok(Some(_)) = User::find()
-        .filter(
-            user::Column::Email.eq(uptrakit_shared_types::MaskedEmail::new(
-                req.new_email.as_str(),
-            )),
-        )
+        .filter(user::Column::Email.eq(&req.new_email))
         .one(state.db())
         .await
     {
@@ -917,7 +913,7 @@ pub async fn initiate_email_change(
     let expires_at = now + time::Duration::hours(24);
 
     let encrypted_email = match uptrakit_crypto::EncryptedString::new(
-        req.new_email.clone(),
+        req.new_email.expose_email().to_string(),
         "uptrakit:email_change_requests:new_email",
     ) {
         Ok(e) => e,
@@ -957,7 +953,7 @@ pub async fn initiate_email_change(
     match send_email_change_emails(
         &state,
         state.default_tenant_id,
-        req.new_email.as_str(),
+        req.new_email.expose_email(),
         user.email.expose_email(),
         &confirm_url,
     )

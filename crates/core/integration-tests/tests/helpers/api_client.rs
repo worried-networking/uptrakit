@@ -216,7 +216,7 @@ impl ApiClient {
         .expect("build unauthenticated client");
 
         let register_req = RegisterRequest {
-            email: "test@example.com".to_string(),
+            email: "test@example.com".parse().expect("valid test email"),
             first_name: "Test".to_string(),
             last_name: "User".to_string(),
             password: SecretString::new("SecureTestPassword123"),
@@ -251,7 +251,7 @@ impl ApiClient {
 
         // Verify login works too.
         let login_req = LoginRequest {
-            email: "test@example.com".to_string(),
+            email: "test@example.com".parse().expect("valid test email"),
             password: SecretString::new("SecureTestPassword123"),
         };
         let _login_resp = unauthenticated

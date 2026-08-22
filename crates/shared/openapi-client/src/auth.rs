@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn register_request_serialization() {
         let req = RegisterRequest {
-            email: "admin@example.com".to_string(),
+            email: "admin@example.com".parse().expect("valid test email"),
             first_name: "Admin".to_string(),
             last_name: "User".to_string(),
             password: SecretString::new("SecurePass123"),
@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn register_request_with_token_serialization() {
         let req = RegisterRequest {
-            email: "admin@example.com".to_string(),
+            email: "admin@example.com".parse().expect("valid test email"),
             first_name: "Admin".to_string(),
             last_name: "User".to_string(),
             password: SecretString::new("SecurePass123"),
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn login_request_serialization() {
         let req = LoginRequest {
-            email: "admin@example.com".to_string(),
+            email: "admin@example.com".parse().expect("valid test email"),
             password: SecretString::new("SecurePass123"),
         };
         let json = serde_json::to_value(&req).expect("serialize");

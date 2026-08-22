@@ -54,7 +54,7 @@ pub(crate) async fn register_user(
     password: &str,
 ) -> (http::StatusCode, AuthResponse) {
     let req = RegisterRequest {
-        email: email.to_string(),
+        email: email.parse().expect("valid test email"),
         first_name: "Test".to_string(),
         last_name: "User".to_string(),
         password: SecretString::new(password),
@@ -124,7 +124,7 @@ pub(crate) async fn login_user(
     password: &str,
 ) -> (http::StatusCode, AuthResponse) {
     let req = LoginRequest {
-        email: email.to_string(),
+        email: email.parse().expect("valid test email"),
         password: SecretString::new(password),
     };
     client
@@ -350,7 +350,7 @@ pub(crate) async fn insert_oauth_client(
 pub(crate) async fn open_registration(app: &super::TestApp) -> String {
     let client = app.client();
     let req = RegisterRequest {
-        email: "owner@test.local".to_string(),
+        email: "owner@test.local".parse().expect("valid test email"),
         first_name: "Test".to_string(),
         last_name: "User".to_string(),
         password: SecretString::new("TestPassword123!"),

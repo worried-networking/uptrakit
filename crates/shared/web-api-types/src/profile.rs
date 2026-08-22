@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_shared_types::SecretString;
+use uptrakit_shared_types::{MaskedEmail, SecretString};
 
 use crate::validation::{Validate, ValidationError};
 
@@ -41,24 +41,18 @@ impl Validate for UpdateProfileRequest {
 pub struct InitiateEmailChangeRequest {
     #[cfg_attr(feature = "openapi", schema(example = "currentpassword123"))]
     pub current_password: SecretString,
-    #[cfg_attr(feature = "openapi", schema(example = "newemail@example.com"))]
-    pub new_email: String,
+    #[cfg_attr(
+        feature = "openapi",
+        schema(example = "newemail@example.com", value_type = String)
+    )]
+    pub new_email: MaskedEmail,
 }
 
 impl Validate for InitiateEmailChangeRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if !self.new_email.contains('@') {
-            return Err(ValidationError {
-                field: "new_email",
-                message: "new_email must contain '@'".to_string(),
-            });
-        }
-        if self.new_email.len() > 254 {
-            return Err(ValidationError {
-                field: "new_email",
-                message: "new_email must not exceed 254 characters".to_string(),
-            });
-        }
+        // Email format and length are enforced by the MaskedEmail parse at
+        // deserialization; nothing is left to validate here. The impl stays
+        // because Validated<T> requires it.
         Ok(())
     }
 }
@@ -154,7 +148,7 @@ mod tests {
     fn valid_email_change() -> InitiateEmailChangeRequest {
         InitiateEmailChangeRequest {
             current_password: SecretString::new("currentpassword123"),
-            new_email: "newemail@example.com".to_string(),
+            new_email: "newemail@example.com".parse().expect("valid test email"),
         }
     }
 
@@ -164,19 +158,24 @@ mod tests {
     }
 
     #[test]
-    fn initiate_email_change_missing_at_fails() {
-        let mut req = valid_email_change();
-        req.new_email = "notanemail".to_string();
-        let err = req.validate().unwrap_err();
-        assert_eq!(err.field, "new_email");
+    fn initiate_email_change_rejects_email_without_at() {
+        let json = r#"{"current_password":"currentpassword123","new_email":"notanemail"}"#;
+        let err = serde_json::from_str::<InitiateEmailChangeRequest>(json)
+            .err()
+            .expect("should reject");
+        assert!(err.to_string().contains("must contain '@'"));
     }
 
     #[test]
-    fn initiate_email_change_email_too_long() {
-        let mut req = valid_email_change();
-        req.new_email = format!("{}@x.com", "a".repeat(250));
-        let err = req.validate().unwrap_err();
-        assert_eq!(err.field, "new_email");
+    fn initiate_email_change_rejects_over_long_email() {
+        let json = format!(
+            r#"{{"current_password":"currentpassword123","new_email":"{}@x.com"}}"#,
+            "a".repeat(uptrakit_shared_types::MAX_EMAIL_LEN)
+        );
+        let err = serde_json::from_str::<InitiateEmailChangeRequest>(&json)
+            .err()
+            .expect("should reject");
+        assert!(err.to_string().contains("must not exceed"));
     }
 
     // ── ChangePasswordRequest ────────────────────────────────────────────────

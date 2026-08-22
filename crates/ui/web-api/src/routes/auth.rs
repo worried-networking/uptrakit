@@ -30,7 +30,6 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{role, user, user_role, user_totp};
-use uptrakit_shared_types::MaskedEmail;
 use uptrakit_web_api_types::mfa::{MfaChallengeResponse, MfaMethod};
 
 use crate::auth::AuthMethod;
@@ -337,7 +336,7 @@ pub async fn register(
 
     let new_user = user::ActiveModel {
         id: Set(user_id),
-        email: Set(MaskedEmail::new(req.email.clone())),
+        email: Set(req.email.clone()),
         first_name: Set(req.first_name.clone()),
         last_name: Set(req.last_name.clone()),
         password_hash: Set(Some(password_hash)),
@@ -477,7 +476,7 @@ pub async fn register(
         token_type: "Bearer".to_string(),
         user: UserResponse {
             id: user_id,
-            email: req.email,
+            email: req.email.expose_email().to_string(),
             first_name: req.first_name,
             last_name: req.last_name,
             actions,
@@ -893,6 +892,7 @@ mod tests {
         QueryFilter, QueryOrder,
     };
     use uptrakit_shared_db::entity::{audit_log, tenant};
+    use uptrakit_shared_types::MaskedEmail;
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
@@ -1445,7 +1445,7 @@ mod tests {
             State(state),
             crate::extract::SessionSvc::new(SessionService::new(db.clone())),
             crate::extract::Validated(LoginRequest {
-                email: "test@example.com".to_string(),
+                email: "test@example.com".parse().expect("valid test email"),
                 password: SecretString::new("correct-horse-battery-staple".to_string()),
             }),
         )
@@ -1477,7 +1477,7 @@ mod tests {
             State(state),
             crate::extract::SessionSvc::new(SessionService::new(db.clone())),
             crate::extract::Validated(LoginRequest {
-                email: "test@example.com".to_string(),
+                email: "test@example.com".parse().expect("valid test email"),
                 password: SecretString::new("short".to_string()),
             }),
         )
@@ -1553,7 +1553,7 @@ mod tests {
             State(state),
             crate::extract::SessionSvc::new(SessionService::new(db.clone())),
             crate::extract::Validated(RegisterRequest {
-                email: "test@example.com".to_string(),
+                email: "test@example.com".parse().expect("valid test email"),
                 first_name: "Test".to_string(),
                 last_name: "User".to_string(),
                 password: SecretString::new("correct-horse-battery-staple".to_string()),
@@ -1642,7 +1642,7 @@ mod tests {
             State(state),
             crate::extract::SessionSvc::new(SessionService::new(db.clone())),
             crate::extract::Validated(RegisterRequest {
-                email: "new-user@example.com".to_string(),
+                email: "new-user@example.com".parse().expect("valid test email"),
                 first_name: "New".to_string(),
                 last_name: "User".to_string(),
                 password: SecretString::new("correct-horse-battery-staple".to_string()),
@@ -1733,7 +1733,7 @@ mod tests {
             State(state),
             crate::extract::SessionSvc::new(crate::auth::session::SessionService::new(db.clone())),
             crate::extract::Validated(LoginRequest {
-                email: "test@example.com".to_string(),
+                email: "test@example.com".parse().expect("valid test email"),
                 password: SecretString::new("correct-horse-battery-staple".to_string()),
             }),
         )
@@ -1771,7 +1771,7 @@ mod tests {
             State(Arc::clone(&state)),
             crate::extract::SessionSvc::new(crate::auth::session::SessionService::new(db.clone())),
             crate::extract::Validated(LoginRequest {
-                email: "test@example.com".to_string(),
+                email: "test@example.com".parse().expect("valid test email"),
                 password: SecretString::new("correct-horse-battery-staple".to_string()),
             }),
         )
@@ -2079,7 +2079,7 @@ mod tests {
 
     fn first_user_request() -> crate::extract::Validated<RegisterRequest> {
         crate::extract::Validated(RegisterRequest {
-            email: "first-user@example.com".to_string(),
+            email: "first-user@example.com".parse().expect("valid test email"),
             first_name: "First".to_string(),
             last_name: "User".to_string(),
             password: SecretString::new("correct-horse-battery-staple".to_string()),
@@ -2229,7 +2229,7 @@ mod tests {
             State(state.clone()),
             crate::extract::SessionSvc::new(SessionService::new(db.clone())),
             crate::extract::Validated(RegisterRequest {
-                email: "second-user@example.com".to_string(),
+                email: "second-user@example.com".parse().expect("valid test email"),
                 first_name: "Second".to_string(),
                 last_name: "User".to_string(),
                 password: SecretString::new("correct-horse-battery-staple".to_string()),
@@ -2308,7 +2308,7 @@ mod tests {
                 State(state.clone()),
                 crate::extract::SessionSvc::new(SessionService::new(db.clone())),
                 crate::extract::Validated(RegisterRequest {
-                    email: email.to_string(),
+                    email: email.parse().expect("valid test email"),
                     first_name: "Second".to_string(),
                     last_name: "User".to_string(),
                     password: SecretString::new("correct-horse-battery-staple".to_string()),

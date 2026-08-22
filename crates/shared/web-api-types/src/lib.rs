@@ -606,7 +606,7 @@ mod tests {
         use crate::auth::RegisterRequest;
         use crate::validation::Validate;
         let req = RegisterRequest {
-            email: "user@example.com".to_string(),
+            email: "user@example.com".parse().expect("valid test email"),
             first_name: "John".to_string(),
             last_name: "Doe".to_string(),
             password: SecretString::new("password12345678"),
@@ -616,26 +616,11 @@ mod tests {
     }
 
     #[test]
-    fn register_request_email_missing_at() {
-        use crate::auth::RegisterRequest;
-        use crate::validation::Validate;
-        let req = RegisterRequest {
-            email: "invalid-email".to_string(),
-            first_name: "John".to_string(),
-            last_name: "Doe".to_string(),
-            password: SecretString::new("password12345678"),
-            registration_token: None,
-        };
-        let err = req.validate().unwrap_err();
-        assert_eq!(err.field, "email");
-    }
-
-    #[test]
     fn register_request_password_too_short() {
         use crate::auth::RegisterRequest;
         use crate::validation::Validate;
         let req = RegisterRequest {
-            email: "user@example.com".to_string(),
+            email: "user@example.com".parse().expect("valid test email"),
             first_name: "John".to_string(),
             last_name: "Doe".to_string(),
             password: SecretString::new("short"),
@@ -650,7 +635,7 @@ mod tests {
         use crate::auth::RegisterRequest;
         use crate::validation::Validate;
         let req = RegisterRequest {
-            email: "user@example.com".to_string(),
+            email: "user@example.com".parse().expect("valid test email"),
             first_name: "".to_string(),
             last_name: "Doe".to_string(),
             password: SecretString::new("password12345678"),
@@ -665,7 +650,7 @@ mod tests {
         use crate::auth::LoginRequest;
         use crate::validation::Validate;
         let req = LoginRequest {
-            email: "user@example.com".to_string(),
+            email: "user@example.com".parse().expect("valid test email"),
             password: SecretString::new("any-password"),
         };
         assert!(req.validate().is_ok());
@@ -676,7 +661,7 @@ mod tests {
         use crate::auth::LoginRequest;
         use crate::validation::Validate;
         let req = LoginRequest {
-            email: "user@example.com".to_string(),
+            email: "user@example.com".parse().expect("valid test email"),
             password: SecretString::new(""),
         };
         let err = req.validate().unwrap_err();

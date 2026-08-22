@@ -20,7 +20,7 @@ pub(crate) async fn register_user(
     password: &str,
 ) -> (http::StatusCode, AuthResponse) {
     let req = RegisterRequest {
-        email: email.to_string(),
+        email: email.parse().expect("valid test email"),
         first_name: "Test".to_string(),
         last_name: "User".to_string(),
         password: SecretString::new(password),
@@ -64,7 +64,7 @@ pub(crate) async fn login_user(
     password: &str,
 ) -> (http::StatusCode, AuthResponse) {
     let req = LoginRequest {
-        email: email.to_string(),
+        email: email.parse().expect("valid test email"),
         password: SecretString::new(password),
     };
     client

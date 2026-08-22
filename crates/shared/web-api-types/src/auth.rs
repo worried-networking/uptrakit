@@ -1,6 +1,6 @@
 use crate::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
-use uptrakit_shared_types::SecretString;
+use uptrakit_shared_types::{MaskedEmail, SecretString};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
@@ -12,8 +12,11 @@ use uuid::Uuid;
     "password": "SecurePass123"
 })))]
 pub struct RegisterRequest {
-    #[cfg_attr(feature = "openapi", schema(example = "admin@example.com"))]
-    pub email: String,
+    #[cfg_attr(
+        feature = "openapi",
+        schema(example = "admin@example.com", value_type = String)
+    )]
+    pub email: MaskedEmail,
     #[cfg_attr(feature = "openapi", schema(example = "Admin"))]
     pub first_name: String,
     #[cfg_attr(feature = "openapi", schema(example = "User"))]
@@ -31,8 +34,11 @@ pub struct RegisterRequest {
     "password": "SecurePass123"
 })))]
 pub struct LoginRequest {
-    #[cfg_attr(feature = "openapi", schema(example = "admin@example.com"))]
-    pub email: String,
+    #[cfg_attr(
+        feature = "openapi",
+        schema(example = "admin@example.com", value_type = String)
+    )]
+    pub email: MaskedEmail,
     #[cfg_attr(feature = "openapi", schema(example = "SecurePass123"))]
     pub password: SecretString,
 }
@@ -119,18 +125,8 @@ pub struct UserResponse {
 
 impl Validate for RegisterRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if self.email.len() > 254 {
-            return Err(ValidationError {
-                field: "email",
-                message: "email must not exceed 254 characters".to_string(),
-            });
-        }
-        if !self.email.contains('@') {
-            return Err(ValidationError {
-                field: "email",
-                message: "email must contain '@'".to_string(),
-            });
-        }
+        // Email format and length are enforced by the MaskedEmail parse at
+        // deserialization; nothing left to check here.
         if self.first_name.is_empty() {
             return Err(ValidationError {
                 field: "first_name",
@@ -156,18 +152,8 @@ impl Validate for RegisterRequest {
 
 impl Validate for LoginRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if self.email.len() > 254 {
-            return Err(ValidationError {
-                field: "email",
-                message: "email must not exceed 254 characters".to_string(),
-            });
-        }
-        if !self.email.contains('@') {
-            return Err(ValidationError {
-                field: "email",
-                message: "email must contain '@'".to_string(),
-            });
-        }
+        // Email format and length are enforced by the MaskedEmail parse at
+        // deserialization; nothing left to check here.
         if self.password.expose_secret().is_empty() {
             return Err(ValidationError {
                 field: "password",
@@ -190,7 +176,7 @@ mod tests {
 
     fn valid_register() -> RegisterRequest {
         RegisterRequest {
-            email: "user@example.com".to_string(),
+            email: "user@example.com".parse().expect("valid test email"),
             first_name: "Alice".to_string(),
             last_name: "Smith".to_string(),
             password: SecretString::new("password123"),
@@ -204,19 +190,31 @@ mod tests {
     }
 
     #[test]
-    fn register_email_too_long() {
-        let mut req = valid_register();
-        req.email = format!("{}@x.com", "a".repeat(250));
-        let err = req.validate().unwrap_err();
-        assert_eq!(err.field, "email");
+    fn register_rejects_email_without_at() {
+        let json = r#"{"email":"notanemail","first_name":"Alice","last_name":"Smith","password":"password123"}"#;
+        let err = serde_json::from_str::<RegisterRequest>(json)
+            .err()
+            .expect("should reject");
+        assert!(err.to_string().contains("must contain '@'"));
     }
 
     #[test]
-    fn register_email_no_at_sign() {
-        let mut req = valid_register();
-        req.email = "notanemail".to_string();
-        let err = req.validate().unwrap_err();
-        assert_eq!(err.field, "email");
+    fn register_rejects_over_long_email() {
+        let json = format!(
+            r#"{{"email":"{}@x.com","first_name":"Alice","last_name":"Smith","password":"password123"}}"#,
+            "a".repeat(uptrakit_shared_types::MAX_EMAIL_LEN)
+        );
+        let err = serde_json::from_str::<RegisterRequest>(&json)
+            .err()
+            .expect("should reject");
+        assert!(err.to_string().contains("must not exceed"));
+    }
+
+    #[test]
+    fn register_deserialize_canonicalizes_email() {
+        let json = r#"{"email":" User@Example.COM ","first_name":"Alice","last_name":"Smith","password":"password123"}"#;
+        let req: RegisterRequest = serde_json::from_str(json).expect("valid");
+        assert_eq!(req.email.expose_email(), "user@example.com");
     }
 
     #[test]
@@ -247,7 +245,7 @@ mod tests {
 
     fn valid_login() -> LoginRequest {
         LoginRequest {
-            email: "user@example.com".to_string(),
+            email: "user@example.com".parse().expect("valid test email"),
             password: SecretString::new("password123"),
         }
     }
@@ -258,19 +256,31 @@ mod tests {
     }
 
     #[test]
-    fn login_email_too_long() {
-        let mut req = valid_login();
-        req.email = format!("{}@x.com", "a".repeat(250));
-        let err = req.validate().unwrap_err();
-        assert_eq!(err.field, "email");
+    fn login_rejects_email_without_at() {
+        let json = r#"{"email":"notanemail","password":"password123"}"#;
+        let err = serde_json::from_str::<LoginRequest>(json)
+            .err()
+            .expect("should reject");
+        assert!(err.to_string().contains("must contain '@'"));
     }
 
     #[test]
-    fn login_email_no_at_sign() {
-        let mut req = valid_login();
-        req.email = "notanemail".to_string();
-        let err = req.validate().unwrap_err();
-        assert_eq!(err.field, "email");
+    fn login_rejects_over_long_email() {
+        let json = format!(
+            r#"{{"email":"{}@x.com","password":"password123"}}"#,
+            "a".repeat(uptrakit_shared_types::MAX_EMAIL_LEN)
+        );
+        let err = serde_json::from_str::<LoginRequest>(&json)
+            .err()
+            .expect("should reject");
+        assert!(err.to_string().contains("must not exceed"));
+    }
+
+    #[test]
+    fn login_deserialize_canonicalizes_email() {
+        let json = r#"{"email":" User@Example.COM ","password":"password123"}"#;
+        let req: LoginRequest = serde_json::from_str(json).expect("valid");
+        assert_eq!(req.email.expose_email(), "user@example.com");
     }
 
     #[test]
