@@ -30,20 +30,31 @@ use serde::{Deserialize, Serialize};
 /// - `andrey.johnson@example.org` → `an***.joh***@example.org`
 /// - `john_doe@example.com` → `jo***_d***@example.com`
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(try_from = "String")]
 pub struct MaskedEmail(String);
 
+/// Maximum stored length of an email address in bytes, measured post-trim.
+pub const MAX_EMAIL_LEN: usize = 254;
+
 /// Error returned when parsing an email address fails.
-#[derive(Debug, Clone)]
-pub struct ParseMaskedEmailError;
-
-impl fmt::Display for ParseMaskedEmailError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("invalid email address")
-    }
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ParseMaskedEmailError {
+    /// The address contains no `@`.
+    #[error("email must contain '@'")]
+    MissingAt,
+    /// The address contains more than one `@`.
+    #[error("email must contain exactly one '@'")]
+    MultipleAt,
+    /// The part before `@` is empty.
+    #[error("email local part must not be empty")]
+    EmptyLocal,
+    /// The part after `@` is empty.
+    #[error("email domain part must not be empty")]
+    EmptyDomain,
+    /// The trimmed address exceeds [`MAX_EMAIL_LEN`] bytes.
+    #[error("email must not exceed {MAX_EMAIL_LEN} bytes")]
+    TooLong,
 }
-
-impl std::error::Error for ParseMaskedEmailError {}
 
 impl MaskedEmail {
     /// Wrap a raw email address.
@@ -55,24 +66,65 @@ impl MaskedEmail {
     pub fn expose_email(&self) -> &str {
         &self.0
     }
+
+    /// Canonical form: trim, then ASCII-lowercase. No validation, no Unicode folding.
+    pub fn canonical_form(s: &str) -> String {
+        s.trim().to_ascii_lowercase()
+    }
+
+    /// Re-canonicalize an already-loaded value without validation.
+    ///
+    /// Used by the `db-migrate` copy path, which must tolerate stored rows
+    /// that the validating [`FromStr`] would reject.
+    pub fn canonicalized(&self) -> MaskedEmail {
+        MaskedEmail(Self::canonical_form(&self.0))
+    }
+
+    /// Wrap a stored value verbatim. DB reads only — no canonicalization.
+    /// Private by design: everything else goes through [`FromStr`].
+    /// Gated on `sea-orm`: its only callers live in the gated child module,
+    /// and an unused private fn is a deny-level warning without that feature.
+    #[cfg(feature = "sea-orm")]
+    fn from_stored(email: String) -> Self {
+        Self(email)
+    }
 }
 
 impl FromStr for MaskedEmail {
     type Err = ParseMaskedEmailError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        // Minimal validation: must contain exactly one `@` with non-empty parts.
-        let at_pos = s.find('@').ok_or(ParseMaskedEmailError)?;
-        let (local, domain) = s.split_at(at_pos);
+        let canonical = Self::canonical_form(s);
+        if canonical.len() > MAX_EMAIL_LEN {
+            return Err(ParseMaskedEmailError::TooLong);
+        }
+        let at_pos = canonical
+            .find('@')
+            .ok_or(ParseMaskedEmailError::MissingAt)?;
+        let (local, domain) = canonical.split_at(at_pos);
         #[expect(
             clippy::string_slice,
             reason = "safe: skipping '@' which is ASCII (1 byte), so index 1 is always a valid boundary"
         )]
         let domain = &domain[1..]; // skip '@'
-        if local.is_empty() || domain.is_empty() || domain.find('@').is_some() {
-            return Err(ParseMaskedEmailError);
+        if local.is_empty() {
+            return Err(ParseMaskedEmailError::EmptyLocal);
         }
-        Ok(Self(s.to_string()))
+        if domain.is_empty() {
+            return Err(ParseMaskedEmailError::EmptyDomain);
+        }
+        if domain.find('@').is_some() {
+            return Err(ParseMaskedEmailError::MultipleAt);
+        }
+        Ok(Self(canonical))
+    }
+}
+
+impl TryFrom<String> for MaskedEmail {
+    type Error = ParseMaskedEmailError;
+
+    fn try_from(value: String) -> std::result::Result<Self, Self::Error> {
+        value.parse()
     }
 }
 
@@ -156,20 +208,26 @@ mod sea_orm_impl {
         }
     }
 
+    impl From<&MaskedEmail> for Value {
+        fn from(e: &MaskedEmail) -> Self {
+            Value::String(Some(e.expose_email().to_string()))
+        }
+    }
+
     impl TryGetable for MaskedEmail {
         fn try_get_by<I: sea_orm::ColIdx>(
             res: &QueryResult,
             index: I,
         ) -> std::result::Result<Self, TryGetError> {
             let val: String = res.try_get_by(index)?;
-            Ok(MaskedEmail::new(val))
+            Ok(MaskedEmail::from_stored(val))
         }
     }
 
     impl ValueType for MaskedEmail {
         fn try_from(v: Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
             match v {
-                Value::String(Some(s)) => Ok(MaskedEmail::new(s)),
+                Value::String(Some(s)) => Ok(MaskedEmail::from_stored(s)),
                 _ => Err(sea_orm::sea_query::ValueTypeErr),
             }
         }
@@ -274,23 +332,96 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_canonicalizes() {
+        let e: MaskedEmail = serde_json::from_str(r#"" User@Example.COM ""#).expect("valid");
+        assert_eq!(e.expose_email(), "user@example.com");
+    }
+
+    #[test]
+    fn serialize_stays_plaintext() {
+        let e: MaskedEmail = "user@example.com".parse().expect("valid");
+        assert_eq!(
+            serde_json::to_string(&e).expect("serialize"),
+            r#""user@example.com""#
+        );
+    }
+
+    #[test]
+    fn canonical_form_is_idempotent() {
+        let once = MaskedEmail::canonical_form(" User@Example.COM ");
+        assert_eq!(MaskedEmail::canonical_form(&once), once);
+    }
+
+    #[test]
+    fn canonicalized_recanonicalizes_without_validation() {
+        // `new` is non-canonicalizing and still public until Task 6 (which
+        // switches this fixture to the sea-orm Value read path, same as
+        // db_read_preserves_stored_bytes). "NoAtSign" is a value the
+        // validating FromStr would reject.
+        let stored = MaskedEmail::new("NoAtSign");
+        assert_eq!(stored.canonicalized().expose_email(), "noatsign");
+    }
+
+    #[test]
+    fn non_ascii_case_is_preserved() {
+        // ASCII letters fold; the non-ASCII 'Ü' is deliberately preserved
+        // (the spec's own example line writes `ÜSER@example.com`, which is
+        // wrong — S/E/R are ASCII and fold; the invariant text is authoritative).
+        let e: MaskedEmail = "ÜSER@Example.com".parse().expect("valid");
+        assert_eq!(e.expose_email(), "Üser@example.com");
+    }
+
+    #[test]
+    fn from_str_trims() {
+        let e: MaskedEmail = "  a@b.c  ".parse().expect("valid");
+        assert_eq!(e.expose_email(), "a@b.c");
+    }
+
+    #[test]
     fn from_str_rejects_no_at() {
-        assert!("nodomain".parse::<MaskedEmail>().is_err());
-    }
-
-    #[test]
-    fn from_str_rejects_empty_local() {
-        assert!("@domain.com".parse::<MaskedEmail>().is_err());
-    }
-
-    #[test]
-    fn from_str_rejects_empty_domain() {
-        assert!("user@".parse::<MaskedEmail>().is_err());
+        assert_eq!(
+            "nodomain".parse::<MaskedEmail>(),
+            Err(ParseMaskedEmailError::MissingAt)
+        );
     }
 
     #[test]
     fn from_str_rejects_multiple_at() {
-        assert!("a@b@c.com".parse::<MaskedEmail>().is_err());
+        assert_eq!(
+            "a@b@c.com".parse::<MaskedEmail>(),
+            Err(ParseMaskedEmailError::MultipleAt)
+        );
+    }
+
+    #[test]
+    fn from_str_rejects_empty_local() {
+        assert_eq!(
+            "@domain.com".parse::<MaskedEmail>(),
+            Err(ParseMaskedEmailError::EmptyLocal)
+        );
+    }
+
+    #[test]
+    fn from_str_rejects_empty_domain() {
+        assert_eq!(
+            "user@".parse::<MaskedEmail>(),
+            Err(ParseMaskedEmailError::EmptyDomain)
+        );
+    }
+
+    #[test]
+    fn length_cap_is_measured_post_trim() {
+        // Derived from MAX_EMAIL_LEN by name (never a bare literal): the local
+        // part alone exceeds the cap only before trimming is irrelevant — the
+        // canonical (trimmed) form must exceed MAX_EMAIL_LEN to trip TooLong,
+        // and a trimmed-to-fit value must pass.
+        let too_long = format!("{}@x.com", "a".repeat(MAX_EMAIL_LEN));
+        assert_eq!(
+            too_long.parse::<MaskedEmail>(),
+            Err(ParseMaskedEmailError::TooLong)
+        );
+        let fits_after_trim = format!("   {}@x.com   ", "a".repeat(MAX_EMAIL_LEN - 6));
+        assert!(fits_after_trim.parse::<MaskedEmail>().is_ok());
     }
 
     #[test]
@@ -338,5 +469,14 @@ mod tests {
         use sea_orm::sea_query::Nullable;
         let null_val = MaskedEmail::null();
         assert!(matches!(null_val, sea_orm::Value::String(None)));
+    }
+
+    #[cfg(feature = "sea-orm")]
+    #[test]
+    fn db_read_preserves_stored_bytes() {
+        use sea_orm::sea_query::ValueType;
+        let value: sea_orm::Value = MaskedEmail::new("MiXeD@Case.COM").into();
+        let loaded = <MaskedEmail as ValueType>::try_from(value).expect("should recover");
+        assert_eq!(loaded.expose_email(), "MiXeD@Case.COM");
     }
 }

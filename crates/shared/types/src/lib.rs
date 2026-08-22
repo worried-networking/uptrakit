@@ -40,7 +40,7 @@ pub use discovery_target::DiscoveryTarget;
 pub use hook_shell::{HookShell, ParseHookShellError};
 pub use host_capabilities::HostCapabilities;
 pub use host_feature::{HostFeature, PROBEABLE_FEATURES, host_features};
-pub use masked_email::{MaskedEmail, ParseMaskedEmailError};
+pub use masked_email::{MAX_EMAIL_LEN, MaskedEmail, ParseMaskedEmailError};
 pub use os_family::OsFamily;
 pub use output_stream_type::{OutputStreamType, ParseOutputStreamTypeError};
 pub use plugin_capability::PluginCapability;
