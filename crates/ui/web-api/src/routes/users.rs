@@ -824,7 +824,7 @@ pub async fn update_user_active(
         (status = 403, description = "Not authorized or account uses OIDC"),
         (status = 404, description = "User not found"),
         (status = 409, description = "Email already in use"),
-        (status = 422, description = "Validation error"),
+        (status = 400, description = "Invalid request body"),
         (status = 503, description = "Email delivery unavailable")
     ),
     tag = "Users",
@@ -837,11 +837,12 @@ pub async fn initiate_email_change(
     Path(user_id): Path<Uuid>,
     external_base_url: Option<axum::Extension<crate::extract::ExternalBaseUrl>>,
     headers: axum::http::HeaderMap,
-    Json(req): Json<uptrakit_web_api_types::profile::InitiateEmailChangeRequest>,
+    crate::extract::Validated(req): crate::extract::Validated<
+        uptrakit_web_api_types::profile::InitiateEmailChangeRequest,
+    >,
 ) -> Response {
     use crate::auth::AuthMethod;
     use uptrakit_shared_db::entity::{email_change_request, prelude::*};
-    use uptrakit_web_api_types::validation::Validate;
 
     // OIDC accounts cannot change email via this flow
     if !matches!(auth_user.auth_method, AuthMethod::Password) {
@@ -853,13 +854,6 @@ pub async fn initiate_email_change(
 
     if auth_user.user_id != user_id {
         return error_response(StatusCode::FORBIDDEN, "Cannot change another user's email");
-    }
-
-    if let Err(e) = req.validate() {
-        return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            format!("{}: {}", e.field, e.message),
-        );
     }
 
     let user = match User::find_by_id(user_id).one(state.db()).await {
@@ -2470,6 +2464,42 @@ mod tests {
             status,
             StatusCode::OK,
             "system.access:manage must permit assigning system_administrator"
+        );
+    }
+
+    #[tokio::test]
+    async fn initiate_email_change_malformed_new_email_returns_400_error_response() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = fixtures::register_and_get_token(&client).await;
+
+        let caller = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &"owner@test.local".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query caller user")
+        .expect("caller user row");
+
+        let body = serde_json::json!({
+            "current_password": "TestPassword123!",
+            "new_email": "notanemail",
+        });
+
+        let (status, err): (StatusCode, uptrakit_web_api_types::error::ErrorResponse) = client
+            .post_json(&format!("/api/v1/users/{}/email", caller.id), &body)
+            .bearer(&access_token)
+            .send_json()
+            .await;
+
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a malformed new_email must be rejected at deserialization with 400, not 422"
+        );
+        assert!(
+            !err.error.is_empty(),
+            "ErrorResponse.error must carry a non-empty message"
         );
     }
 }

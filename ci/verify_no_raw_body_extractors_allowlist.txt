@@ -13,7 +13,6 @@ raw_extractor|crates/ui/web-api/src/routes/system_services.rs|fn batch_system_se
 raw_extractor|crates/ui/web-api/src/routes/hosts.rs|fn batch_hosts\b
 raw_extractor|crates/ui/web-api/src/routes/users.rs|fn update_user_roles\b
 raw_extractor|crates/ui/web-api/src/routes/users.rs|fn update_profile\b
-raw_extractor|crates/ui/web-api/src/routes/users.rs|fn initiate_email_change\b
 raw_extractor|crates/ui/web-api/src/routes/users.rs|fn change_password\b
 raw_extractor|crates/ui/web-api/src/routes/host_tags.rs|fn create_host_tag\b
 raw_extractor|crates/ui/web-api/src/routes/host_tags.rs|fn update_host_tag\b
