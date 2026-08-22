@@ -220,6 +220,77 @@ async fn login_wrong_password_returns_401() {
 }
 
 #[tokio::test]
+async fn login_mixed_case_email_succeeds() {
+    let app = TestApp::new().await;
+    let client = app.client();
+
+    register_user(&client, "case@test.local", "StrongPassword1!").await;
+    let status = client
+        .post_json(
+            "/api/v1/auth/login",
+            &serde_json::json!({
+                "email": "  CASE@Test.LOCAL ",
+                "password": "StrongPassword1!"
+            }),
+        )
+        .send_status()
+        .await;
+    assert_eq!(status, http::StatusCode::OK);
+}
+
+#[tokio::test]
+async fn register_case_variant_email_returns_409() {
+    let app = TestApp::new().await;
+    let client = app.client();
+
+    // First-user registration auto-closes registration; reopen so the
+    // duplicate attempt below hits the conflict check, not the closed gate.
+    open_registration(&app).await;
+
+    register_user(&client, "dup@test.local", "StrongPassword1!").await;
+    let status = client
+        .post_json(
+            "/api/v1/auth/register",
+            &serde_json::json!({
+                "email": "DUP@test.local",
+                "first_name": "Test",
+                "last_name": "User",
+                "password": "StrongPassword1!"
+            }),
+        )
+        .send_status()
+        .await;
+    // Canonical pre-insert check fires: 409, not a unique-violation 500.
+    assert_eq!(status, http::StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn email_change_to_case_variant_of_taken_address_returns_409() {
+    let app = TestApp::new().await;
+    let client = app.client();
+
+    // First-user registration auto-closes registration; reopen so the
+    // second registration below succeeds.
+    open_registration(&app).await;
+
+    register_user(&client, "taken@test.local", "StrongPassword1!").await;
+    let (_, auth) = register_user(&client, "changer@test.local", "StrongPassword1!").await;
+
+    let status = client
+        .post_json(
+            &format!("/api/v1/users/{}/email", auth.user.id),
+            &serde_json::json!({
+                "current_password": "StrongPassword1!",
+                "new_email": " TAKEN@Test.LOCAL "
+            }),
+        )
+        .bearer(auth.access_token.expose_secret())
+        .send_status()
+        .await;
+    assert_eq!(status, http::StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn login_nonexistent_user_returns_401() {
     let app = TestApp::new().await;
     let client = app.client();
