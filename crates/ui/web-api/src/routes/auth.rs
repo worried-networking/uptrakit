@@ -313,11 +313,8 @@ pub async fn register(
         }
     };
 
-    // Check if user already exists
-    let existing = User::find()
-        .filter(user::Column::Email.eq(&req.email))
-        .one(&txn)
-        .await;
+    // Check if user already exists (canonical comparison via the chokepoint)
+    let existing = uptrakit_shared_db::users::find_by_canonical_email(&txn, &req.email).await;
 
     if let Ok(Some(_)) = existing {
         emit_user_register_audit(
@@ -533,32 +530,29 @@ pub async fn login(
     }
 
     // Find user by email
-    let user = match User::find()
-        .filter(user::Column::Email.eq(&req.email))
-        .one(state.db())
-        .await
-    {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            emit_auth_login_audit(
-                &state,
-                None,
-                uptrakit_audit_log::AuditOutcome::Denied,
-                Some("invalid_credentials"),
-            );
-            return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
-        }
-        Err(e) => {
-            tracing::error!("Failed to load user during login: {e}");
-            emit_auth_login_audit(
-                &state,
-                None,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                Some("user_lookup_failed"),
-            );
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    let user =
+        match uptrakit_shared_db::users::find_by_canonical_email(state.db(), &req.email).await {
+            Ok(Some(user)) => user,
+            Ok(None) => {
+                emit_auth_login_audit(
+                    &state,
+                    None,
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    Some("invalid_credentials"),
+                );
+                return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
+            }
+            Err(e) => {
+                tracing::error!("Failed to load user during login: {e}");
+                emit_auth_login_audit(
+                    &state,
+                    None,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    Some("user_lookup_failed"),
+                );
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
 
     // Check if user is active.
     // Return 401 with the same generic message to avoid leaking whether an
@@ -1658,12 +1652,13 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::CREATED);
 
-        let created_user = User::find()
-            .filter(user::Column::Email.eq("new-user@example.com"))
-            .one(&db)
-            .await
-            .expect("query created user")
-            .expect("created user row");
+        let created_user = uptrakit_shared_db::users::find_by_canonical_email(
+            &db,
+            &"new-user@example.com".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query created user")
+        .expect("created user row");
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
@@ -2243,12 +2238,13 @@ mod tests {
         };
         assert_eq!(response2.status(), StatusCode::CREATED);
 
-        let second = User::find()
-            .filter(user::Column::Email.eq("second-user@example.com"))
-            .one(&db)
-            .await
-            .expect("query")
-            .expect("second user");
+        let second = uptrakit_shared_db::users::find_by_canonical_email(
+            &db,
+            &"second-user@example.com".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query")
+        .expect("second user");
         assert_eq!(
             role_names_for_user(&db, state.default_tenant_id, second.id).await,
             vec!["viewer".to_string()],
@@ -2321,12 +2317,13 @@ mod tests {
                 Err(_) => panic!("registration must succeed"),
             };
             assert_eq!(response.status(), StatusCode::CREATED);
-            User::find()
-                .filter(user::Column::Email.eq(email))
-                .one(db)
-                .await
-                .expect("query")
-                .expect("registered user")
+            uptrakit_shared_db::users::find_by_canonical_email(
+                db,
+                &email.parse().expect("valid test email"),
+            )
+            .await
+            .expect("query")
+            .expect("registered user")
         }
 
         async fn assigned_role_ids(
@@ -2602,16 +2599,23 @@ pub async fn confirm_email_change(
     let user_id = request_row.user_id;
     let new_email_plain = request_row.new_email.expose_secret().to_string();
 
+    // Every surviving email_change_requests row was created from a typed
+    // MaskedEmail after the canonicalization migration (which deleted all
+    // pre-deploy rows), so a parse failure here is an internal-invariant
+    // violation: 500, no silent fallback, row retained for diagnosis.
+    let new_email: uptrakit_shared_types::MaskedEmail = match new_email_plain.parse() {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!(error = %e, "stored email change request holds an unparseable address");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
     // Race condition check: new email not taken by another user
-    let conflict = User::find()
-        .filter(
-            uptrakit_shared_db::entity::user::Column::Email
-                .eq(uptrakit_shared_types::MaskedEmail::new(&new_email_plain)),
-        )
-        .filter(uptrakit_shared_db::entity::user::Column::Id.ne(user_id))
-        .one(&txn)
-        .await;
-    if let Ok(Some(_)) = conflict {
+    let conflict = uptrakit_shared_db::users::find_by_canonical_email(&txn, &new_email).await;
+    if let Ok(Some(other)) = conflict
+        && other.id != user_id
+    {
         let _ = EmailChangeRequest::delete_by_id(request_row.id)
             .exec(&txn)
             .await;
@@ -2625,7 +2629,7 @@ pub async fn confirm_email_change(
     };
 
     let mut active: uptrakit_shared_db::entity::user::ActiveModel = user.into();
-    active.email = Set(uptrakit_shared_types::MaskedEmail::new(&new_email_plain));
+    active.email = Set(new_email);
     active.updated_at = Set(now);
     if let Err(e) = active.update(&txn).await {
         tracing::error!(error = %e, "failed to update user email");

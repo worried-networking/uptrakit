@@ -890,11 +890,9 @@ pub async fn initiate_email_change(
         }
     }
 
-    // Check new email is not already taken
-    if let Ok(Some(_)) = User::find()
-        .filter(user::Column::Email.eq(&req.new_email))
-        .one(state.db())
-        .await
+    // Check new email is not already taken (canonical comparison via the chokepoint)
+    if let Ok(Some(_)) =
+        uptrakit_shared_db::users::find_by_canonical_email(state.db(), &req.new_email).await
     {
         return error_response(StatusCode::CONFLICT, "Email address is already in use");
     }
@@ -1411,12 +1409,13 @@ mod tests {
         let access_token = fixtures::register_and_get_token(&client).await;
         let target_user = insert_target_user(&app.db, "roles-target@test.local").await;
 
-        let caller = User::find()
-            .filter(user::Column::Email.eq("owner@test.local"))
-            .one(&app.db)
-            .await
-            .expect("query caller user")
-            .expect("caller user row");
+        let caller = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &"owner@test.local".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query caller user")
+        .expect("caller user row");
 
         let viewer_role = Role::find()
             .filter(role::Column::Name.eq("viewer"))
@@ -1470,12 +1469,13 @@ mod tests {
         let access_token = fixtures::register_and_get_token(&client).await;
         let target_user = insert_target_user(&app.db, "active-target@test.local").await;
 
-        let caller = User::find()
-            .filter(user::Column::Email.eq("owner@test.local"))
-            .one(&app.db)
-            .await
-            .expect("query caller user")
-            .expect("caller user row");
+        let caller = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &"owner@test.local".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query caller user")
+        .expect("caller user row");
 
         let req = UpdateUserActiveRequest { is_active: false };
         let status = client
@@ -1519,12 +1519,13 @@ mod tests {
         let client = app.client();
         let access_token = fixtures::register_and_get_token(&client).await;
 
-        let caller = User::find()
-            .filter(user::Column::Email.eq("owner@test.local"))
-            .one(&app.db)
-            .await
-            .expect("query caller user")
-            .expect("caller user row");
+        let caller = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &"owner@test.local".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query caller user")
+        .expect("caller user row");
 
         let req = UpdateUserActiveRequest { is_active: false };
         let status = client
@@ -1767,12 +1768,13 @@ mod tests {
         let client = app.client();
         fixtures::open_registration(&app).await;
 
-        let owner = User::find()
-            .filter(user::Column::Email.eq("owner@test.local"))
-            .one(&app.db)
-            .await
-            .expect("query owner user")
-            .expect("owner user row");
+        let owner = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &"owner@test.local".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query owner user")
+        .expect("owner user row");
         let settings_manager_role_id = fixtures::role_id_by_name(&app, "settings_manager").await;
         UserRole::delete_many()
             .filter(user_role::Column::TenantId.eq(app.tenant_id))
@@ -1822,12 +1824,13 @@ mod tests {
         let client = app.client();
         fixtures::open_registration(&app).await;
 
-        let owner = User::find()
-            .filter(user::Column::Email.eq("owner@test.local"))
-            .one(&app.db)
-            .await
-            .expect("query owner user")
-            .expect("owner user row");
+        let owner = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &"owner@test.local".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query owner user")
+        .expect("owner user row");
         let settings_manager_role_id = fixtures::role_id_by_name(&app, "settings_manager").await;
         UserRole::delete_many()
             .filter(user_role::Column::TenantId.eq(app.tenant_id))
@@ -1899,12 +1902,13 @@ mod tests {
         assert_eq!(self_status, StatusCode::NO_CONTENT);
 
         // Updating another user's profile without users:manage is denied.
-        let owner = User::find()
-            .filter(user::Column::Email.eq("owner@test.local"))
-            .one(&app.db)
-            .await
-            .expect("query owner user")
-            .expect("owner user row");
+        let owner = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &"owner@test.local".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query owner user")
+        .expect("owner user row");
         let other_status = client
             .put_json(
                 &format!("/api/v1/users/{}/profile", owner.id),
@@ -2037,12 +2041,13 @@ mod tests {
         let client = app.client();
         fixtures::open_registration(&app).await;
 
-        let owner = User::find()
-            .filter(user::Column::Email.eq("owner@test.local"))
-            .one(&app.db)
-            .await
-            .expect("query owner user")
-            .expect("owner user row");
+        let owner = uptrakit_shared_db::users::find_by_canonical_email(
+            &app.db,
+            &"owner@test.local".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query owner user")
+        .expect("owner user row");
         let settings_manager_role_id = fixtures::role_id_by_name(&app, "settings_manager").await;
         UserRole::delete_many()
             .filter(user_role::Column::TenantId.eq(app.tenant_id))
@@ -2163,12 +2168,13 @@ mod tests {
         .await
         .expect("grant role B access:manage coverage");
 
-        let owner2 = User::find()
-            .filter(user::Column::Email.eq("owner@test.local"))
-            .one(&app2.db)
-            .await
-            .expect("query owner user")
-            .expect("owner user row");
+        let owner2 = uptrakit_shared_db::users::find_by_canonical_email(
+            &app2.db,
+            &"owner@test.local".parse().expect("valid test email"),
+        )
+        .await
+        .expect("query owner user")
+        .expect("owner user row");
         let settings_manager_role_id2 = fixtures::role_id_by_name(&app2, "settings_manager").await;
         UserRole::delete_many()
             .filter(user_role::Column::TenantId.eq(app2.tenant_id))

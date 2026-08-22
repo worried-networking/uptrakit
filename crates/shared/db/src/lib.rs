@@ -8,6 +8,7 @@ pub mod migrate_core_tables;
 pub mod migration;
 pub mod provider_settings;
 pub mod raw_settings;
+pub mod users;
 pub use uptrakit_db_tx::begin_immediate;
 pub use uptrakit_tenant_db::{TenantDb, TenantScoped};
 
