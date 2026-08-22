@@ -178,6 +178,13 @@ mod tests {
         assert!(err.to_string().contains("must not exceed"));
     }
 
+    #[test]
+    fn initiate_email_change_deserialize_canonicalizes_email() {
+        let json = r#"{"current_password":"currentpassword123","new_email":" New@Example.COM "}"#;
+        let req: InitiateEmailChangeRequest = serde_json::from_str(json).expect("valid");
+        assert_eq!(req.new_email.expose_email(), "new@example.com");
+    }
+
     // ── ChangePasswordRequest ────────────────────────────────────────────────
 
     fn valid_change_password() -> ChangePasswordRequest {
