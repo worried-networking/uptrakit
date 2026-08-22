@@ -605,7 +605,6 @@ mod mcp_token_tests {
         oauth_authorization_code, oauth_authorization_request, oauth_client, oauth_consent, role,
         user, user_role,
     };
-    use uptrakit_shared_types::MaskedEmail;
     use uptrakit_web_api_auth::auth::token::hash_token;
     use uuid::Uuid;
 
@@ -679,9 +678,9 @@ mod mcp_token_tests {
 
         user::ActiveModel {
             id: Set(user_id),
-            email: Set(MaskedEmail::new(format!(
-                "test-token-{user_id}@example.com"
-            ))),
+            email: Set(format!("test-token-{user_id}@example.com")
+                .parse()
+                .expect("valid test email")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),

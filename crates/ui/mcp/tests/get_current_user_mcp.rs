@@ -31,7 +31,6 @@ use uptrakit_mcp::state::McpState;
 use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
 use uptrakit_shared_db::entity::{audit_log, role, tenant, user, user_role};
 use uptrakit_shared_db::migration::run_migrations;
-use uptrakit_shared_types::MaskedEmail;
 use uptrakit_shared_types::access::{Action, ActionPattern, Resource, Selector, Verb};
 use uptrakit_web_api_auth::auth::api_token::ApiTokenService;
 use uptrakit_web_api_auth::auth::registration::{RegistrationMode, RegistrationSettings};
@@ -234,12 +233,13 @@ async fn insert_tenant(db: &DatabaseConnection) -> Uuid {
 }
 
 #[expect(clippy::unwrap_used, reason = "test fixture — panic on setup failure")]
+#[expect(clippy::expect_used, reason = "test fixture — panic on setup failure")]
 async fn insert_user(db: &DatabaseConnection, email: &str) -> Uuid {
     let user_id = Uuid::now_v7();
     let now = OffsetDateTime::now_utc();
     user::ActiveModel {
         id: Set(user_id),
-        email: Set(MaskedEmail::new(email)),
+        email: Set(email.parse().expect("valid test email")),
         first_name: Set("Test".to_string()),
         last_name: Set("User".to_string()),
         password_hash: Set(None),

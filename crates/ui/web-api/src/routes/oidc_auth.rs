@@ -3006,7 +3006,7 @@ mod audit_tests {
             password::hash_password(password_plaintext).expect("hash user test password");
         user::ActiveModel {
             id: Set(user_id),
-            email: Set(MaskedEmail::new(email.to_string())),
+            email: Set(email.to_string().parse().expect("valid test email")),
             first_name: Set("Oidc".to_string()),
             last_name: Set("Audit".to_string()),
             password_hash: Set(Some(password_hash)),
@@ -4121,7 +4121,7 @@ mod audit_tests {
         let now = OffsetDateTime::now_utc();
         user::ActiveModel {
             id: Set(user_id),
-            email: Set(MaskedEmail::new(email.to_string())),
+            email: Set(email.to_string().parse().expect("valid test email")),
             first_name: Set("Oidc".to_string()),
             last_name: Set("First".to_string()),
             password_hash: Set(None),

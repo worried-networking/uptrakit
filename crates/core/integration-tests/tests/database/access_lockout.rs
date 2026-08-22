@@ -10,7 +10,6 @@ use uptrakit_shared_db::access_grants::{
     check_lockout, delete_grant, insert_grant,
 };
 use uptrakit_shared_db::entity::user;
-use uptrakit_shared_types::MaskedEmail;
 use uptrakit_shared_types::access::{ActionPattern, Selector};
 use uuid::Uuid;
 
@@ -34,7 +33,9 @@ async fn insert_active_user(db: &DatabaseConnection) -> Uuid {
     let now = OffsetDateTime::now_utc();
     user::ActiveModel {
         id: Set(id),
-        email: Set(MaskedEmail::new(format!("{id}@access-lockout.test"))),
+        email: Set(format!("{id}@access-lockout.test")
+            .parse()
+            .expect("valid test email")),
         first_name: Set("Lockout".to_string()),
         last_name: Set("Holder".to_string()),
         password_hash: Set(None),

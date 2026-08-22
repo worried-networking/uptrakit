@@ -886,7 +886,6 @@ mod tests {
         QueryFilter, QueryOrder,
     };
     use uptrakit_shared_db::entity::{audit_log, tenant};
-    use uptrakit_shared_types::MaskedEmail;
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
@@ -900,7 +899,7 @@ mod tests {
             password::hash_password("correct-horse-battery-staple").expect("password hash");
         let user = user::ActiveModel {
             id: Set(generate_uuid()),
-            email: Set(MaskedEmail::new("test@example.com")),
+            email: Set("test@example.com".parse().expect("valid test email")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(Some(password_hash)),
@@ -1233,7 +1232,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let other_user = user::ActiveModel {
             id: Set(generate_uuid()),
-            email: Set(MaskedEmail::new("other@example.com")),
+            email: Set("other@example.com".parse().expect("valid test email")),
             first_name: Set("Other".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),
@@ -1864,7 +1863,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let user = user::ActiveModel {
             id: Set(generate_uuid()),
-            email: Set(MaskedEmail::new("first@example.com")),
+            email: Set("first@example.com".parse().expect("valid test email")),
             first_name: Set("First".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),
@@ -1910,7 +1909,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let second = user::ActiveModel {
             id: Set(generate_uuid()),
-            email: Set(MaskedEmail::new("second@example.com")),
+            email: Set("second@example.com".parse().expect("valid test email")),
             first_name: Set("Second".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),
@@ -1947,7 +1946,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let user = user::ActiveModel {
             id: Set(generate_uuid()),
-            email: Set(MaskedEmail::new("oidc-first@example.com")),
+            email: Set("oidc-first@example.com".parse().expect("valid test email")),
             first_name: Set("Oidc".to_string()),
             last_name: Set("First".to_string()),
             password_hash: Set(None),
@@ -2437,7 +2436,9 @@ mod tests {
         let user_id = crate::auth::token::generate_uuid();
         user::ActiveModel {
             id: Set(user_id),
-            email: Set(MaskedEmail::new("owner-shadow-target@example.com")),
+            email: Set("owner-shadow-target@example.com"
+                .parse()
+                .expect("valid test email")),
             first_name: Set("Owner".to_string()),
             last_name: Set("Shadow".to_string()),
             password_hash: Set(None),

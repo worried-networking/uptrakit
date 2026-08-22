@@ -392,7 +392,6 @@ mod tests {
     use sea_orm::{ActiveModelTrait, Set};
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{oauth_client, oauth_consent, user};
-    use uptrakit_shared_types::MaskedEmail;
 
     use crate::oauth::OAuthState;
     use crate::oauth::canonical_url::CanonicalUrlConfig;
@@ -498,7 +497,9 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         user::ActiveModel {
             id: Set(id),
-            email: Set(MaskedEmail::new(format!("test-oauth-{id}@example.com"))),
+            email: Set(format!("test-oauth-{id}@example.com")
+                .parse()
+                .expect("valid test email")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),

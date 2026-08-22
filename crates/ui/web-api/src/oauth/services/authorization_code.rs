@@ -254,7 +254,6 @@ mod tests {
     use sha2::{Digest, Sha256};
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{oauth_authorization_request, oauth_client, user};
-    use uptrakit_shared_types::MaskedEmail;
 
     /// Insert a minimal `oauth_clients` row (required by FK).
     async fn insert_oauth_client(db: &sea_orm::DatabaseConnection) -> String {
@@ -299,7 +298,7 @@ mod tests {
 
         user::ActiveModel {
             id: Set(id),
-            email: Set(MaskedEmail::new("testuser@example.com")),
+            email: Set("testuser@example.com".parse().expect("valid test email")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),

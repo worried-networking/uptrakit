@@ -292,7 +292,6 @@ mod tests {
     #[tokio::test]
     async fn deletes_expired_email_change_requests() {
         use uptrakit_shared_db::entity::{email_change_request, user};
-        use uptrakit_shared_types::MaskedEmail;
 
         let db = setup_db().await;
         let now = OffsetDateTime::now_utc();
@@ -304,7 +303,7 @@ mod tests {
         let user2_id = uuid::Uuid::now_v7();
         user::ActiveModel {
             id: Set(user_id),
-            email: Set(MaskedEmail::new("test-ecr1@example.com")),
+            email: Set("test-ecr1@example.com".parse().expect("valid test email")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),
@@ -319,7 +318,7 @@ mod tests {
 
         user::ActiveModel {
             id: Set(user2_id),
-            email: Set(MaskedEmail::new("test-ecr2@example.com")),
+            email: Set("test-ecr2@example.com".parse().expect("valid test email")),
             first_name: Set("Test2".to_string()),
             last_name: Set("User2".to_string()),
             password_hash: Set(None),
@@ -388,9 +387,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         user::ActiveModel {
             id: Set(user_id),
-            email: Set(uptrakit_shared_types::MaskedEmail::new(
-                "test-sess@example.com",
-            )),
+            email: Set("test-sess@example.com".parse().expect("valid test email")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),

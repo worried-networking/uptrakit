@@ -9,7 +9,6 @@ use sea_orm::{
 };
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{role, tenant, user, user_role};
-use uptrakit_shared_types::MaskedEmail;
 use uuid::Uuid;
 
 use crate::queries::roles::{
@@ -77,7 +76,9 @@ async fn active_user(db: &DatabaseConnection) -> Uuid {
     let now = OffsetDateTime::now_utc();
     user::ActiveModel {
         id: Set(id),
-        email: Set(MaskedEmail::new(format!("{id}@roles.test"))),
+        email: Set(format!("{id}@roles.test")
+            .parse()
+            .expect("valid test email")),
         first_name: Set("Role".to_string()),
         last_name: Set("Holder".to_string()),
         password_hash: Set(None),

@@ -2038,9 +2038,7 @@ mod tests {
             let now = time::OffsetDateTime::now_utc();
             let user = uptrakit_shared_db::entity::user::ActiveModel {
                 id: Set(Uuid::now_v7()),
-                email: Set(uptrakit_shared_types::MaskedEmail::new(
-                    "staged-admin@test.local",
-                )),
+                email: Set("staged-admin@test.local".parse().expect("valid test email")),
                 first_name: Set("Staged".to_string()),
                 last_name: Set("Admin".to_string()),
                 password_hash: Set(None),
@@ -2357,9 +2355,11 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         uptrakit_shared_db::entity::user::ActiveModel {
             id: sea_orm::Set(Uuid::nil()),
-            email: sea_orm::Set(uptrakit_shared_types::MaskedEmail::new(
-                "denied-viewer@test.local",
-            )),
+            email: sea_orm::Set(
+                "denied-viewer@test.local"
+                    .parse()
+                    .expect("valid test email"),
+            ),
             first_name: sea_orm::Set("Denied".to_string()),
             last_name: sea_orm::Set("Viewer".to_string()),
             password_hash: sea_orm::Set(None),

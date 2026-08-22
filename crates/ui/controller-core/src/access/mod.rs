@@ -455,7 +455,6 @@ mod tests {
     use time::OffsetDateTime;
     use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
     use uptrakit_shared_db::entity::{host, host_tag, host_tag_assignment, role, tenant, user};
-    use uptrakit_shared_types::MaskedEmail;
     use uptrakit_shared_types::access::Selector;
     use uptrakit_shared_types::access::{Resource, Verb, actions};
 
@@ -485,7 +484,9 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         user::ActiveModel {
             id: Set(id),
-            email: Set(MaskedEmail::new(format!("u-{id}@example.com"))),
+            email: Set(format!("u-{id}@example.com")
+                .parse()
+                .expect("valid test email")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),

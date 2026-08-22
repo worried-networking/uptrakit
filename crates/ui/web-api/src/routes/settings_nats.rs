@@ -645,7 +645,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let user = user::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
-            email: Set(uptrakit_shared_types::MaskedEmail::new("admin@example.com")),
+            email: Set("admin@example.com".parse().expect("valid test email")),
             first_name: Set("Admin".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(Some(
@@ -710,7 +710,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let user = user::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
-            email: Set(uptrakit_shared_types::MaskedEmail::new("admin@example.com")),
+            email: Set("admin@example.com".parse().expect("valid test email")),
             first_name: Set("Admin".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(Some(
@@ -756,7 +756,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let user = user::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
-            email: Set(uptrakit_shared_types::MaskedEmail::new("admin@example.com")),
+            email: Set("admin@example.com".parse().expect("valid test email")),
             first_name: Set("Admin".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(Some(
@@ -821,9 +821,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let user = user::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
-            email: Set(uptrakit_shared_types::MaskedEmail::new(
-                "token-user@example.com",
-            )),
+            email: Set("token-user@example.com".parse().expect("valid test email")),
             first_name: Set("Token".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(Some(
@@ -880,7 +878,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let user = user::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
-            email: Set(uptrakit_shared_types::MaskedEmail::new("admin@example.com")),
+            email: Set("admin@example.com".parse().expect("valid test email")),
             first_name: Set("Admin".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(Some(
@@ -939,7 +937,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let user = user::ActiveModel {
             id: Set(uuid::Uuid::now_v7()),
-            email: Set(uptrakit_shared_types::MaskedEmail::new("admin@example.com")),
+            email: Set("admin@example.com".parse().expect("valid test email")),
             first_name: Set("Admin".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(Some(

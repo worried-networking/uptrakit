@@ -516,7 +516,6 @@ mod tests {
     use time::OffsetDateTime;
     use uptrakit_audit_log::{AuditEmitter, AuditLogDispatcher, NoopBackend};
     use uptrakit_shared_db::entity::{oauth_client, oauth_consent, role, tenant, user, user_role};
-    use uptrakit_shared_types::MaskedEmail;
 
     const TEST_SECRET: &[u8] = b"test-secret-32-bytes-minimum-aaa";
     const TEST_ISSUER: &str = "https://issuer.example.com";
@@ -573,7 +572,9 @@ mod tests {
         let user_id = Uuid::now_v7();
         user::ActiveModel {
             id: Set(user_id),
-            email: Set(MaskedEmail::new(format!("test-{user_id}@example.com"))),
+            email: Set(format!("test-{user_id}@example.com")
+                .parse()
+                .expect("valid test email")),
             first_name: Set("Test".into()),
             last_name: Set("User".into()),
             password_hash: Set(None),

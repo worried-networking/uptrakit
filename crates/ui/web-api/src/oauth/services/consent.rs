@@ -212,7 +212,6 @@ mod tests {
     use sea_orm::{ActiveModelTrait, Set};
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{oauth_client, oauth_consent, oauth_refresh_token, user};
-    use uptrakit_shared_types::MaskedEmail;
 
     fn make_clock(
         cell: Arc<Mutex<OffsetDateTime>>,
@@ -225,7 +224,9 @@ mod tests {
         let id = Uuid::now_v7();
         user::ActiveModel {
             id: Set(id),
-            email: Set(MaskedEmail::new(format!("test-{id}@example.com"))),
+            email: Set(format!("test-{id}@example.com")
+                .parse()
+                .expect("valid test email")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),

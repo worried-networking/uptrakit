@@ -1351,8 +1351,8 @@ mod tests {
     };
     use uptrakit_shared_db::access_grants::{GrantSubject, NewGrant, insert_grant};
     use uptrakit_shared_db::entity::audit_log;
+    use uptrakit_shared_types::SecretString;
     use uptrakit_shared_types::access::Selector;
-    use uptrakit_shared_types::{MaskedEmail, SecretString};
 
     async fn latest_audit_row_for_target(
         db: &DatabaseConnection,
@@ -1382,7 +1382,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         user::ActiveModel {
             id: Set(Uuid::now_v7()),
-            email: Set(MaskedEmail::new(email.to_string())),
+            email: Set(email.to_string().parse().expect("valid test email")),
             first_name: Set("Target".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),
@@ -1556,7 +1556,10 @@ mod tests {
             let now = OffsetDateTime::now_utc();
             user::ActiveModel {
                 id: Set(Uuid::now_v7()),
-                email: Set(MaskedEmail::new("hash-check@test.local".to_string())),
+                email: Set("hash-check@test.local"
+                    .to_string()
+                    .parse()
+                    .expect("valid test email")),
                 first_name: Set("Hash".to_string()),
                 last_name: Set("Check".to_string()),
                 password_hash: Set(Some(SecretString::new("$argon2id$known-secret-hash-value"))),
@@ -2304,9 +2307,10 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let inactive_target = user::ActiveModel {
             id: Set(Uuid::now_v7()),
-            email: Set(MaskedEmail::new(
-                "adding-authority-inactive@test.local".to_string(),
-            )),
+            email: Set("adding-authority-inactive@test.local"
+                .to_string()
+                .parse()
+                .expect("valid test email")),
             first_name: Set("Inactive".to_string()),
             last_name: Set("Target".to_string()),
             password_hash: Set(None),

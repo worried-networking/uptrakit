@@ -453,7 +453,6 @@ mod tests {
     use time::OffsetDateTime;
     use tower::ServiceExt;
     use uptrakit_shared_db::entity::{oauth_authorization_request, user};
-    use uptrakit_shared_types::MaskedEmail;
 
     use crate::oauth::OAuthState;
     use crate::oauth::canonical_url::CanonicalUrlConfig;
@@ -562,7 +561,9 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         user::ActiveModel {
             id: Set(id),
-            email: Set(MaskedEmail::new(format!("consent-test-{id}@example.com"))),
+            email: Set(format!("consent-test-{id}@example.com")
+                .parse()
+                .expect("valid test email")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),

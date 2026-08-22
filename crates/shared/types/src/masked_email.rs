@@ -57,11 +57,6 @@ pub enum ParseMaskedEmailError {
 }
 
 impl MaskedEmail {
-    /// Wrap a raw email address.
-    pub fn new(email: impl Into<String>) -> Self {
-        Self(email.into())
-    }
-
     /// Borrow the full, unmasked email address.
     pub fn expose_email(&self) -> &str {
         &self.0
@@ -262,49 +257,65 @@ mod tests {
 
     #[test]
     fn mask_simple_email() {
-        let email = MaskedEmail::new("andrey@example.com");
+        let email = "andrey@example.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         assert_eq!(format!("{email}"), "an***@example.com");
     }
 
     #[test]
     fn mask_dot_separated() {
-        let email = MaskedEmail::new("andrey.johnson@example.org");
+        let email = "andrey.johnson@example.org"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         assert_eq!(format!("{email}"), "an***.joh***@example.org");
     }
 
     #[test]
     fn mask_single_char() {
-        let email = MaskedEmail::new("a@example.com");
+        let email = "a@example.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         assert_eq!(format!("{email}"), "a***@example.com");
     }
 
     #[test]
     fn mask_two_char() {
-        let email = MaskedEmail::new("ab@example.com");
+        let email = "ab@example.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         assert_eq!(format!("{email}"), "a***@example.com");
     }
 
     #[test]
     fn mask_underscore() {
-        let email = MaskedEmail::new("john_doe@example.com");
+        let email = "john_doe@example.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         assert_eq!(format!("{email}"), "jo***_d***@example.com");
     }
 
     #[test]
     fn mask_plus_tag() {
-        let email = MaskedEmail::new("user+tag@example.com");
+        let email = "user+tag@example.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         assert_eq!(format!("{email}"), "us***+t***@example.com");
     }
 
     #[test]
     fn mask_hyphen() {
-        let email = MaskedEmail::new("first-last@example.com");
+        let email = "first-last@example.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         assert_eq!(format!("{email}"), "fi***-la***@example.com");
     }
 
     #[test]
     fn debug_shows_masked() {
-        let email = MaskedEmail::new("secret@test.com");
+        let email = "secret@test.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         let debug = format!("{email:?}");
         assert!(!debug.contains("secret@"));
         assert!(debug.contains("se***@test.com"));
@@ -312,13 +323,17 @@ mod tests {
 
     #[test]
     fn expose_email_returns_full() {
-        let email = MaskedEmail::new("user@test.com");
+        let email = "user@test.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         assert_eq!(email.expose_email(), "user@test.com");
     }
 
     #[test]
     fn serde_roundtrip() {
-        let email = MaskedEmail::new("test@example.com");
+        let email = "test@example.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         let json = serde_json::to_string(&email).expect("serialize");
         assert_eq!(json, r#""test@example.com""#);
         let recovered: MaskedEmail = serde_json::from_str(&json).expect("deserialize");
@@ -352,13 +367,16 @@ mod tests {
         assert_eq!(MaskedEmail::canonical_form(&once), once);
     }
 
+    #[cfg(feature = "sea-orm")]
     #[test]
     fn canonicalized_recanonicalizes_without_validation() {
-        // `new` is non-canonicalizing and still public until Task 6 (which
-        // switches this fixture to the sea-orm Value read path, same as
-        // db_read_preserves_stored_bytes). "NoAtSign" is a value the
-        // validating FromStr would reject.
-        let stored = MaskedEmail::new("NoAtSign");
+        // `MaskedEmail::new` no longer exists; the non-canonicalizing read
+        // path is exercised via the sea-orm Value/ValueType round trip
+        // instead, same as db_read_preserves_stored_bytes. "NoAtSign" is a
+        // value the validating FromStr would reject.
+        use sea_orm::sea_query::ValueType;
+        let value = sea_orm::Value::String(Some("NoAtSign".to_string()));
+        let stored = <MaskedEmail as ValueType>::try_from(value).expect("should recover");
         assert_eq!(stored.canonicalized().expose_email(), "noatsign");
     }
 
@@ -426,9 +444,15 @@ mod tests {
 
     #[test]
     fn equality() {
-        let a = MaskedEmail::new("same@test.com");
-        let b = MaskedEmail::new("same@test.com");
-        let c = MaskedEmail::new("other@test.com");
+        let a = "same@test.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
+        let b = "same@test.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
+        let c = "other@test.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
@@ -437,8 +461,12 @@ mod tests {
     fn hash_consistent() {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::Hasher;
-        let a = MaskedEmail::new("test@test.com");
-        let b = MaskedEmail::new("test@test.com");
+        let a = "test@test.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
+        let b = "test@test.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         let hash_a = {
             let mut h = DefaultHasher::new();
             a.hash(&mut h);
@@ -457,7 +485,9 @@ mod tests {
     fn sea_orm_value_roundtrip() {
         use sea_orm::entity::prelude::*;
         use sea_orm::sea_query::ValueType;
-        let e = MaskedEmail::new("db@test.com");
+        let e = "db@test.com"
+            .parse::<MaskedEmail>()
+            .expect("valid test email");
         let value: Value = e.into();
         let recovered = <MaskedEmail as ValueType>::try_from(value).expect("should recover");
         assert_eq!(recovered.expose_email(), "db@test.com");
@@ -475,7 +505,7 @@ mod tests {
     #[test]
     fn db_read_preserves_stored_bytes() {
         use sea_orm::sea_query::ValueType;
-        let value: sea_orm::Value = MaskedEmail::new("MiXeD@Case.COM").into();
+        let value = sea_orm::Value::String(Some("MiXeD@Case.COM".to_string()));
         let loaded = <MaskedEmail as ValueType>::try_from(value).expect("should recover");
         assert_eq!(loaded.expose_email(), "MiXeD@Case.COM");
     }

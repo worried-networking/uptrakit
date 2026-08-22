@@ -815,7 +815,6 @@ mod tests {
     use sea_orm::{ConnectOptions, Database, DatabaseConnection, EntityTrait, Set};
     use time::OffsetDateTime;
     use uptrakit_shared_db::entity::{tenant, user};
-    use uptrakit_shared_types::MaskedEmail;
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
@@ -832,7 +831,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
         user::ActiveModel {
             id: Set(user_id),
-            email: Set(MaskedEmail::new("2fa-test@example.com")),
+            email: Set("2fa-test@example.com".parse().expect("valid test email")),
             first_name: Set("Two".to_string()),
             last_name: Set("Fa".to_string()),
             password_hash: Set(Some(hash)),

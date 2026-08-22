@@ -839,9 +839,9 @@ mod tests {
         let user_id = Uuid::now_v7();
         user::ActiveModel {
             id: Set(user_id),
-            email: Set(uptrakit_shared_types::MaskedEmail::new(format!(
-                "u-{user_id}@example.com"
-            ))),
+            email: Set(format!("u-{user_id}@example.com")
+                .parse()
+                .expect("valid test email")),
             first_name: Set("U".into()),
             last_name: Set("Ser".into()),
             password_hash: Set(None),
@@ -952,9 +952,9 @@ mod tests {
         let user_id = Uuid::now_v7();
         user::ActiveModel {
             id: Set(user_id),
-            email: Set(uptrakit_shared_types::MaskedEmail::new(format!(
-                "u-{user_id}@example.com"
-            ))),
+            email: Set(format!("u-{user_id}@example.com")
+                .parse()
+                .expect("valid test email")),
             first_name: Set("U".into()),
             last_name: Set("Ser".into()),
             password_hash: Set(None),

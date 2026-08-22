@@ -1084,7 +1084,6 @@ fn apply_mutation(
 #[cfg(test)]
 mod tests {
     use sea_orm::{ConnectOptions, Database, DatabaseConnection, QueryFilter};
-    use uptrakit_shared_types::MaskedEmail;
     use uptrakit_shared_types::access::bounds::MAX_GRANTS_PER_SUBJECT;
 
     use super::*;
@@ -1130,7 +1129,9 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         user::ActiveModel {
             id: Set(id),
-            email: Set(MaskedEmail::new(format!("{id}@lockout-guard.test"))),
+            email: Set(format!("{id}@lockout-guard.test")
+                .parse()
+                .expect("valid test email")),
             first_name: Set("Guard".to_string()),
             last_name: Set("Holder".to_string()),
             password_hash: Set(None),
