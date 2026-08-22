@@ -7,7 +7,8 @@ vi.mock('$lib/api', async (importOriginal) => ({
 	authMethods: vi.fn(),
 	deviceAuthApprove: vi.fn(),
 	deviceAuthDeny: vi.fn(),
-	deviceAuthLookup: vi.fn().mockResolvedValue({ data: { client_name: null, expires_at: '2026-05-12T12:00:00Z' } })
+	deviceAuthLookup: vi.fn().mockResolvedValue({ data: { client_name: null, expires_at: '2026-05-12T12:00:00Z' } }),
+	loginRaw: vi.fn()
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
@@ -361,5 +362,37 @@ describe('Public entry shell contract', () => {
 		render(RegisterPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Register' })).toBeInTheDocument());
 		expect(document.body.innerHTML).not.toContain('checkbox h-4 w-4 rounded border-[var(--border-default)]');
+	});
+
+	it('login submits the trimmed email', async () => {
+		vi.mocked(api.loginRaw).mockResolvedValue(new Response(null, { status: 401 }));
+		render(LoginPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Login' })).toBeInTheDocument());
+
+		await fireEvent.input(screen.getByLabelText('Email'), { target: { value: '  User@Example.com  ' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+		const form = screen.getByRole('button', { name: 'Login' }).closest('form');
+		await fireEvent.submit(form!);
+
+		await waitFor(() =>
+			expect(api.loginRaw).toHaveBeenCalledWith({ email: 'User@Example.com', password: 'password123' })
+		);
+	});
+
+	it('register submits the trimmed email', async () => {
+		page.url = new URL('http://localhost/register') as typeof page.url;
+		render(RegisterPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Register' })).toBeInTheDocument());
+
+		await fireEvent.input(screen.getByLabelText('Email'), { target: { value: ' New@User.dev ' } });
+		await fireEvent.input(screen.getByLabelText('First name'), { target: { value: 'A' } });
+		await fireEvent.input(screen.getByLabelText('Last name'), { target: { value: 'B' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+		const form = screen.getByRole('button', { name: 'Register' }).closest('form');
+		await fireEvent.submit(form!);
+
+		await waitFor(() =>
+			expect(auth.handleRegister).toHaveBeenCalledWith(expect.objectContaining({ email: 'New@User.dev' }))
+		);
 	});
 });

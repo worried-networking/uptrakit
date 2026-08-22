@@ -490,6 +490,27 @@ describe('Account Tab — Change Email Modal', () => {
 		await waitFor(() => expect(screen.getByText(/A confirmation email has been sent/)).toBeInTheDocument());
 		expect(screen.getByRole('button', { name: 'Cancel email change' })).toBeInTheDocument();
 	});
+
+	it('submits the trimmed new email address', async () => {
+		vi.mocked(api.initiateEmailChange).mockResolvedValue(
+			{} as unknown as Awaited<ReturnType<typeof api.initiateEmailChange>>
+		);
+		vi.mocked(auth.initialize).mockResolvedValue(undefined);
+		render(ProfilePage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Change email' })).toBeInTheDocument());
+		await userEvent.click(screen.getByRole('button', { name: 'Change email' }));
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Change Email' })).toBeInTheDocument());
+
+		await userEvent.type(screen.getByLabelText('New email address'), ' spaced@mail.dev ');
+		await userEvent.type(screen.getByLabelText('Current password'), 'password123');
+		await userEvent.click(screen.getByRole('button', { name: 'Send confirmation email' }));
+
+		await waitFor(() =>
+			expect(api.initiateEmailChange).toHaveBeenCalledWith(
+				expect.objectContaining({ body: expect.objectContaining({ new_email: 'spaced@mail.dev' }) })
+			)
+		);
+	});
 });
 
 describe('Account Tab — Security Card', () => {

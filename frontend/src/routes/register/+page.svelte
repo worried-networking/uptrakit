@@ -66,7 +66,7 @@
 		if (!validateRegisterFields()) return;
 		try {
 			await handleRegister({
-				email,
+				email: email.trim(),
 				first_name: firstName,
 				last_name: lastName,
 				password,

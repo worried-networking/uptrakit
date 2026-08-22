@@ -113,6 +113,7 @@
 				account_deactivated: 'Your account has been deactivated',
 				oidc_state_expired: 'Authentication session expired, please try again',
 				oidc_no_email: 'Email address is required from the provider',
+				oidc_invalid_email: 'The email address provided by the identity provider is not valid.',
 				oidc_discovery_failed: 'Failed to connect to the authentication provider',
 				oidc_token_exchange_failed: 'Authentication failed during token exchange',
 				oidc_token_validation_failed: 'Failed to validate authentication token'
@@ -231,7 +232,7 @@
 		bannerError = '';
 		if (!validateLoginFields()) return;
 		try {
-			const res = await loginRaw({ email, password });
+			const res = await loginRaw({ email: email.trim(), password });
 
 			if (res.status === 202) {
 				mfaChallenge = (await res.json()) as MfaChallengeResponse;

@@ -91,7 +91,7 @@
 		try {
 			await initiateEmailChange({
 				path: { id: user.id },
-				body: { new_email: newEmail, current_password: emailCurrentPassword }
+				body: { new_email: newEmail.trim(), current_password: emailCurrentPassword }
 			});
 			newEmail = '';
 			emailCurrentPassword = '';
