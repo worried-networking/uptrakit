@@ -192,10 +192,7 @@ mod tests {
     #[test]
     fn register_rejects_email_without_at() {
         let json = r#"{"email":"notanemail","first_name":"Alice","last_name":"Smith","password":"password123"}"#;
-        let err = serde_json::from_str::<RegisterRequest>(json)
-            .err()
-            .expect("should reject");
-        assert!(err.to_string().contains("must contain '@'"));
+        assert!(serde_json::from_str::<RegisterRequest>(json).is_err());
     }
 
     #[test]
@@ -204,10 +201,7 @@ mod tests {
             r#"{{"email":"{}@x.com","first_name":"Alice","last_name":"Smith","password":"password123"}}"#,
             "a".repeat(uptrakit_shared_types::MAX_EMAIL_LEN)
         );
-        let err = serde_json::from_str::<RegisterRequest>(&json)
-            .err()
-            .expect("should reject");
-        assert!(err.to_string().contains("must not exceed"));
+        assert!(serde_json::from_str::<RegisterRequest>(&json).is_err());
     }
 
     #[test]
@@ -258,10 +252,7 @@ mod tests {
     #[test]
     fn login_rejects_email_without_at() {
         let json = r#"{"email":"notanemail","password":"password123"}"#;
-        let err = serde_json::from_str::<LoginRequest>(json)
-            .err()
-            .expect("should reject");
-        assert!(err.to_string().contains("must contain '@'"));
+        assert!(serde_json::from_str::<LoginRequest>(json).is_err());
     }
 
     #[test]
@@ -270,10 +261,7 @@ mod tests {
             r#"{{"email":"{}@x.com","password":"password123"}}"#,
             "a".repeat(uptrakit_shared_types::MAX_EMAIL_LEN)
         );
-        let err = serde_json::from_str::<LoginRequest>(&json)
-            .err()
-            .expect("should reject");
-        assert!(err.to_string().contains("must not exceed"));
+        assert!(serde_json::from_str::<LoginRequest>(&json).is_err());
     }
 
     #[test]

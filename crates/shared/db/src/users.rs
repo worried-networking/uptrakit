@@ -1,11 +1,18 @@
 //! Query helpers for the global `users` table.
 //!
 //! [`find_by_canonical_email`] is the sole sanctioned comparison site for
-//! `user::Column::Email` (enforced by `ci/verify_email_canonical_ingress.sh`).
+//! `user::Column::Email`. That convention is enforced by review today;
+//! `ci/verify_email_canonical_ingress.sh` takes over once Plan 3 of
+//! `docs/superpowers/specs/2026-08-09-email-canonicalization-design.md`
+//! lands.
+//!
 //! `MaskedEmail` values are canonical by construction (`FromStr` trims and
-//! ASCII-lowercases), and the stored column is canonical after the
-//! canonicalize-user-emails migration, so plain equality on the canonical
-//! value is a case-insensitive match.
+//! ASCII-lowercases), so plain equality is a case-insensitive match for every
+//! row written through the converted ingress paths. Rows written earlier are
+//! **not** canonical yet: the backfill arrives with the
+//! canonicalize-user-emails migration (Plan 2 of the same spec, shipping in
+//! the same release). Until that migration runs, a legacy row stored with
+//! mixed case or surrounding whitespace will not match.
 
 use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};

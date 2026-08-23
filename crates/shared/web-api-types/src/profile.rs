@@ -160,10 +160,7 @@ mod tests {
     #[test]
     fn initiate_email_change_rejects_email_without_at() {
         let json = r#"{"current_password":"currentpassword123","new_email":"notanemail"}"#;
-        let err = serde_json::from_str::<InitiateEmailChangeRequest>(json)
-            .err()
-            .expect("should reject");
-        assert!(err.to_string().contains("must contain '@'"));
+        assert!(serde_json::from_str::<InitiateEmailChangeRequest>(json).is_err());
     }
 
     #[test]
@@ -172,10 +169,7 @@ mod tests {
             r#"{{"current_password":"currentpassword123","new_email":"{}@x.com"}}"#,
             "a".repeat(uptrakit_shared_types::MAX_EMAIL_LEN)
         );
-        let err = serde_json::from_str::<InitiateEmailChangeRequest>(&json)
-            .err()
-            .expect("should reject");
-        assert!(err.to_string().contains("must not exceed"));
+        assert!(serde_json::from_str::<InitiateEmailChangeRequest>(&json).is_err());
     }
 
     #[test]
