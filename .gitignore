@@ -50,3 +50,7 @@ rust_out
 # Gas City
 .beads/*
 !.beads/identity.toml
+.gc/
+.claude/skills/.gc-skill-ownership.json
+.claude/skills/core.gc-*
+.claude/skills/gascity.*
