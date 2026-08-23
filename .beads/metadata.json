@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "uptrakit",
-  "project_id": "d07271a1-f4bc-4ef4-adb7-838175e562f2"
-}
