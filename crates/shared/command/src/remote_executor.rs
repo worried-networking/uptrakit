@@ -27,6 +27,14 @@ pub struct RemoteCommandResult {
 /// `pct exec`, `qm guest exec`, etc.) and expose a uniform interface.
 ///
 /// All implementations must be `Send + Sync` to allow use behind `Arc<dyn RemoteExecutor>`.
+///
+/// # Invariant
+///
+/// Implementations enforce a per-command execution deadline — no
+/// `exec_command` call is unbounded. The SSH-backed implementation bounds
+/// every command at `DEFAULT_COMMAND_TIMEOUT`; adapters that delegate to
+/// another `RemoteExecutor` (e.g. Proxmox guest exec) inherit the bound
+/// transitively.
 #[async_trait]
 pub trait RemoteExecutor: Send + Sync {
     /// Execute a shell command on the remote machine and return the result.

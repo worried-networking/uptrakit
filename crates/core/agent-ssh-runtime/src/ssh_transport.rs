@@ -17,7 +17,7 @@ use russh::keys::ssh_key::HashAlg;
 use russh::keys::{self};
 use russh::{ChannelMsg, Disconnect, MethodKind};
 use tokio::sync::{Mutex, mpsc};
-use uptrakit_command::UpdateOutputLine;
+use uptrakit_command::{DEFAULT_COMMAND_TIMEOUT, UpdateOutputLine};
 use uptrakit_shared_types::OutputStreamType;
 
 use crate::error::{Error, Result};
@@ -219,22 +219,27 @@ impl LineBuffer {
 
     /// Push raw bytes into the buffer. Complete lines are sent to the
     /// channel (if present) and appended to the accumulated output.
-    async fn push(&mut self, data: &[u8]) {
+    fn push(&mut self, data: &[u8]) {
         let text = String::from_utf8_lossy(data);
         for ch in text.chars() {
             if ch == '\n' {
                 // Complete line — send and accumulate.
                 if let Some(ref tx) = self.sender {
+                    // Best-effort live streaming: drop the line when the channel
+                    // is full (consumer >= capacity behind) or closed (subscriber
+                    // gone). The authoritative full output is still accumulated
+                    // below and returned in RemoteCommandResult, so a dropped live
+                    // line loses nothing durable — and a non-blocking send can
+                    // never stall the read loop or defeat the command deadline.
+                    // Mirrors the interactive PTY path.
                     #[expect(
                         clippy::let_underscore_must_use,
-                        reason = "send failures are expected when the receiver is dropped (subscriber disconnected); recovery is impossible and the loss is harmless"
+                        reason = "try_send failures (Full or Closed) are expected — a full channel means the consumer is behind and a closed one means the subscriber disconnected; recovery is impossible and the loss is harmless because the accumulated output is still returned"
                     )]
-                    let _ = tx
-                        .send(UpdateOutputLine {
-                            text: self.partial.clone(),
-                            stream: self.stream,
-                        })
-                        .await;
+                    let _ = tx.try_send(UpdateOutputLine {
+                        text: self.partial.clone(),
+                        stream: self.stream,
+                    });
                 }
                 if self.total_bytes < MAX_OUTPUT_BYTES {
                     self.accumulated.push_str(&self.partial);
@@ -257,19 +262,18 @@ impl LineBuffer {
 
     /// Flush any remaining partial line. Call once after the channel
     /// closes to capture trailing output without a terminating newline.
-    async fn flush(&mut self) {
+    fn flush(&mut self) {
         if !self.partial.is_empty() {
             if let Some(ref tx) = self.sender {
+                // See `push` above for why this is a non-blocking, best-effort send.
                 #[expect(
                     clippy::let_underscore_must_use,
-                    reason = "send failures are expected when the receiver is dropped (subscriber disconnected); recovery is impossible and the loss is harmless"
+                    reason = "try_send failures (Full or Closed) are expected — a full channel means the consumer is behind and a closed one means the subscriber disconnected; recovery is impossible and the loss is harmless because the accumulated output is still returned"
                 )]
-                let _ = tx
-                    .send(UpdateOutputLine {
-                        text: self.partial.clone(),
-                        stream: self.stream,
-                    })
-                    .await;
+                let _ = tx.try_send(UpdateOutputLine {
+                    text: self.partial.clone(),
+                    stream: self.stream,
+                });
             }
             if self.total_bytes < MAX_OUTPUT_BYTES {
                 self.accumulated.push_str(&self.partial);
@@ -291,6 +295,28 @@ impl LineBuffer {
     fn into_output(self) -> String {
         self.accumulated
     }
+}
+
+/// Bound a channel-setup await by the same fixed deadline as the read loop.
+async fn setup_bounded<T>(
+    deadline: Option<(Duration, tokio::time::Instant)>,
+    fut: impl std::future::Future<Output = T>,
+) -> Result<T> {
+    match deadline {
+        Some((d, at)) => tokio::time::timeout_at(at, fut)
+            .await
+            .map_err(|_elapsed| report!(Error::SshCommandTimedOut(d))),
+        None => Ok(fut.await),
+    }
+}
+
+/// Whether the read loop may terminate before `Close`: the server has
+/// signalled both stream end (`Eof`) and command completion (`ExitStatus`),
+/// in either arrival order. `ExitStatus` alone is NOT sufficient — output
+/// may still be in flight; a server that never sends `Eof`/`Close` after
+/// `ExitStatus` is bounded by the command deadline instead.
+fn remote_command_finished(eof_seen: bool, exit_code: Option<u32>) -> bool {
+    eof_seen && exit_code.is_some()
 }
 
 // ── Session wrapper ──────────────────────────────────────────────────
@@ -339,52 +365,79 @@ impl SshSession {
     /// Execute a raw command on the remote host, returning combined stdout + stderr.
     ///
     /// This is a low-level helper that makes no POSIX assumptions about the remote
-    /// shell. The timeout is optional; `None` means no deadline.
+    /// shell. `timeout: None` now means the default deadline
+    /// ([`DEFAULT_COMMAND_TIMEOUT`]) applies — `None` no longer means unbounded.
     pub(crate) async fn exec_raw(
         &self,
         cmd: &str,
         timeout: Option<std::time::Duration>,
     ) -> std::result::Result<String, SshExecError> {
-        let fut = self.exec_command(cmd);
-        let result = if let Some(dur) = timeout {
-            tokio::time::timeout(dur, fut)
-                .await
-                .map_err(|_elapsed| SshExecError::TimedOut)?
-                .map_err(|e| SshExecError::Exec(e.to_string()))?
-        } else {
-            fut.await.map_err(|e| SshExecError::Exec(e.to_string()))?
+        let result = match self
+            .exec_command_with_timeout(cmd, timeout.or(Some(DEFAULT_COMMAND_TIMEOUT)))
+            .await
+        {
+            Ok(result) => result,
+            Err(e) if matches!(e.current_context(), Error::SshCommandTimedOut(_)) => {
+                return Err(SshExecError::TimedOut);
+            }
+            Err(e) => return Err(SshExecError::Exec(e.to_string())),
         };
         let mut out = result.stdout;
         out.push_str(&result.stderr);
         Ok(out)
     }
 
-    /// Execute a command on the remote host and collect stdout/stderr.
+    /// Execute a command and collect stdout/stderr, bounded at
+    /// [`DEFAULT_COMMAND_TIMEOUT`]. Use [`Self::exec_command_with_timeout`]
+    /// for a caller-chosen deadline.
     pub(crate) async fn exec_command(&self, command: &str) -> Result<RemoteCommandResult> {
-        self.exec_command_streaming(command, None).await
+        self.exec_command_with_timeout(command, Some(DEFAULT_COMMAND_TIMEOUT))
+            .await
+    }
+
+    /// Execute a command with an explicit deadline (`None` = unbounded; only
+    /// for callers that provably bound execution themselves).
+    pub(crate) async fn exec_command_with_timeout(
+        &self,
+        command: &str,
+        timeout: Option<Duration>,
+    ) -> Result<RemoteCommandResult> {
+        self.exec_command_streaming(command, None, timeout).await
     }
 
     /// Execute a command on the remote host, optionally streaming output
     /// lines through `output_tx` in real time.
+    ///
+    /// `timeout` bounds the whole call — channel setup and the read loop —
+    /// with a single fixed deadline. `None` means unbounded; only callers
+    /// that provably bound execution themselves (e.g. via an outer timeout)
+    /// should pass `None`.
     pub(crate) async fn exec_command_streaming(
         &self,
         command: &str,
         output_tx: Option<&mpsc::Sender<UpdateOutputLine>>,
+        timeout: Option<Duration>,
     ) -> Result<RemoteCommandResult> {
         tracing::trace!(hostname = %self.hostname, command = %redact_for_log(command), "executing SSH command");
-        let mut channel = self.handle.channel_open_session().await.map_err(|e| {
-            report!(Error::SshCommand(format!(
-                "failed to open session channel: {e}"
-            )))
-        })?;
 
-        channel
-            .exec(true, command)
-            .await
+        // Fixed instant: the deadline covers the whole command — including
+        // channel setup — not each read.
+        let deadline = timeout.map(|d| (d, tokio::time::Instant::now() + d));
+
+        let mut channel = setup_bounded(deadline, self.handle.channel_open_session())
+            .await?
+            .map_err(|e| {
+                report!(Error::SshCommand(format!(
+                    "failed to open session channel: {e}"
+                )))
+            })?;
+
+        setup_bounded(deadline, channel.exec(true, command))
+            .await?
             .map_err(|e| report!(Error::SshCommand(format!("failed to execute command: {e}"))))?;
 
         // Close stdin so remote scripts cannot block on `read`.
-        channel.eof().await.map_err(|e| {
+        setup_bounded(deadline, channel.eof()).await?.map_err(|e| {
             report!(Error::SshCommand(format!(
                 "failed to close channel stdin: {e}"
             )))
@@ -393,30 +446,72 @@ impl SshSession {
         let mut stdout_buf = LineBuffer::new(OutputStreamType::Stdout, output_tx.cloned());
         let mut stderr_buf = LineBuffer::new(OutputStreamType::Stderr, output_tx.cloned());
         let mut exit_code: Option<u32> = None;
+        let mut eof_seen = false;
+        let mut exit_signal: Option<String> = None;
 
-        while let Some(msg) = channel.wait().await {
+        // Build the deadline timer ONCE and reuse it across iterations —
+        // recreating a `Sleep` inside `select!` on every message churns the
+        // timer wheel (tokio's select! docs call this out). With no timeout
+        // the branch is disabled and the placeholder timer is never polled.
+        let sleep =
+            tokio::time::sleep_until(deadline.map_or_else(tokio::time::Instant::now, |(_, at)| at));
+        tokio::pin!(sleep);
+        loop {
+            let maybe = tokio::select! {
+                m = channel.wait() => Some(m),
+                () = &mut sleep, if deadline.is_some() => None,
+            };
+            let Some(msg) = maybe else {
+                // Deadline fired. Best-effort close; the server may already be gone.
+                if let Err(e) = channel.close().await {
+                    tracing::trace!(error = %e, "channel close after deadline failed");
+                }
+                let dur = deadline.map_or(Duration::ZERO, |(d, _)| d);
+                tracing::warn!(timeout = ?dur, "remote command exceeded its deadline; channel closed");
+                stdout_buf.flush();
+                stderr_buf.flush();
+                bail!(Error::SshCommandTimedOut(dur));
+            };
+            let Some(msg) = msg else { break };
             match msg {
                 ChannelMsg::Data { ref data } => {
-                    stdout_buf.push(data).await;
+                    stdout_buf.push(data);
                 }
                 ChannelMsg::ExtendedData { ref data, ext: 1 } => {
-                    stderr_buf.push(data).await;
+                    stderr_buf.push(data);
                 }
                 ChannelMsg::ExitStatus { exit_status } => {
                     exit_code = Some(exit_status);
+                    if remote_command_finished(eof_seen, exit_code) {
+                        break;
+                    }
                 }
-                ChannelMsg::Eof => {}
+                ChannelMsg::Eof => {
+                    eof_seen = true;
+                    if remote_command_finished(eof_seen, exit_code) {
+                        break;
+                    }
+                }
+                ChannelMsg::ExitSignal { signal_name, .. } => {
+                    exit_signal = Some(format!("{signal_name:?}"));
+                }
                 ChannelMsg::Close => break,
                 _ => {}
             }
         }
 
-        stdout_buf.flush().await;
-        stderr_buf.flush().await;
+        stdout_buf.flush();
+        stderr_buf.flush();
+
+        let mut stderr = stderr_buf.into_output();
+        if let Some(sig) = exit_signal {
+            tracing::warn!(signal = %sig, "remote process terminated by signal");
+            stderr.push_str(&format!("\n[remote process terminated by signal {sig}]"));
+        }
 
         Ok(RemoteCommandResult {
             stdout: stdout_buf.into_output(),
-            stderr: stderr_buf.into_output(),
+            stderr,
             exit_code: exit_code.unwrap_or(u32::MAX),
         })
     }
@@ -1477,7 +1572,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(100);
         let mut buf = LineBuffer::new(OutputStreamType::Stdout, Some(tx));
 
-        buf.push(b"hello\nworld\n").await;
+        buf.push(b"hello\nworld\n");
 
         let line1 = rx.recv().await.expect("should receive first line");
         assert_eq!(line1.text, "hello");
@@ -1492,7 +1587,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(100);
         let mut buf = LineBuffer::new(OutputStreamType::Stdout, Some(tx));
 
-        buf.push(b"partial").await;
+        buf.push(b"partial");
 
         // No complete line yet — channel should be empty.
         assert!(
@@ -1501,7 +1596,7 @@ mod tests {
         );
 
         // Now complete the line.
-        buf.push(b" end\n").await;
+        buf.push(b" end\n");
         let line = rx.recv().await.expect("should receive completed line");
         assert_eq!(line.text, "partial end");
     }
@@ -1511,8 +1606,8 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(100);
         let mut buf = LineBuffer::new(OutputStreamType::Stderr, Some(tx));
 
-        buf.push(b"trailing").await;
-        buf.flush().await;
+        buf.push(b"trailing");
+        buf.flush();
 
         let line = rx.recv().await.expect("flush should emit partial");
         assert_eq!(line.text, "trailing");
@@ -1531,7 +1626,7 @@ mod tests {
         for _ in 0..12 {
             let mut data = big_line.clone();
             data.push('\n');
-            buf.push(data.as_bytes()).await;
+            buf.push(data.as_bytes());
         }
 
         assert!(buf.truncated, "buffer should be marked as truncated");
@@ -1552,7 +1647,7 @@ mod tests {
         for _ in 0..12 {
             let mut data = big_line.clone();
             data.push('\n');
-            buf.push(data.as_bytes()).await;
+            buf.push(data.as_bytes());
         }
 
         // All 12 lines should be streamed even though accumulation is truncated.
@@ -1570,8 +1665,8 @@ mod tests {
     async fn line_buffer_works_without_sender() {
         let mut buf = LineBuffer::new(OutputStreamType::Stdout, None);
 
-        buf.push(b"line1\nline2\n").await;
-        buf.flush().await;
+        buf.push(b"line1\nline2\n");
+        buf.flush();
 
         let output = buf.into_output();
         assert_eq!(output, "line1\nline2\n");
@@ -1580,9 +1675,17 @@ mod tests {
     #[tokio::test]
     async fn line_buffer_flush_noop_when_empty() {
         let mut buf = LineBuffer::new(OutputStreamType::Stdout, None);
-        buf.flush().await;
+        buf.flush();
         let output = buf.into_output();
         assert!(output.is_empty());
+    }
+
+    #[test]
+    fn remote_command_finished_requires_both_eof_and_exit_status() {
+        assert!(!remote_command_finished(false, None));
+        assert!(!remote_command_finished(true, None));
+        assert!(!remote_command_finished(false, Some(0)));
+        assert!(remote_command_finished(true, Some(1)));
     }
 
     #[test]

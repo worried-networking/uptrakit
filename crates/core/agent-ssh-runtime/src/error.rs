@@ -55,6 +55,10 @@ pub enum Error {
 
     #[error("invalid input: {0}")]
     InvalidInput(String),
+
+    /// A remote SSH command exceeded its execution deadline.
+    #[error("remote command timed out after {0:?}")]
+    SshCommandTimedOut(std::time::Duration),
 }
 
 pub type Result<T> = std::result::Result<T, Report<Error>>;

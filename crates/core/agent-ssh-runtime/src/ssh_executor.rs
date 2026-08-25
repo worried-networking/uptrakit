@@ -17,9 +17,11 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use tokio::sync::mpsc;
 use uptrakit_command::{
-    CommandError, CommandExecutor, CommandOutput, CommandSpec, StdioTunnel, UpdateOutputLine,
+    CommandError, CommandExecutor, CommandOutput, CommandSpec, DEFAULT_COMMAND_TIMEOUT,
+    StdioTunnel, UpdateOutputLine,
 };
 
+use crate::error::Error;
 use crate::ssh_stdio_tunnel::SshStdioTunnel;
 use crate::ssh_transport::{SshExecError, SshSession};
 
@@ -112,29 +114,24 @@ impl PosixSshCommandExecutor {
         let remote_cmd = build_remote_command_string(spec)?;
         tracing::debug!(cmd_len = remote_cmd.len(), "executing remote SSH command");
 
+        let resolved = spec.timeout.unwrap_or(DEFAULT_COMMAND_TIMEOUT);
+
         let fut = self
             .inner
             .session
-            .exec_command_streaming(&remote_cmd, output_tx);
+            .exec_command_streaming(&remote_cmd, output_tx, Some(resolved));
 
-        let dur = spec
-            .timeout
-            .unwrap_or(uptrakit_command::DEFAULT_COMMAND_TIMEOUT);
-        #[expect(
-            clippy::map_err_ignore,
-            reason = "tokio Elapsed carries no additional context beyond the timeout duration already logged"
-        )]
-        let result = tokio::time::timeout(dur, fut)
-            .await
-            .map_err(|_| {
-                tracing::warn!(timeout = ?dur, "SSH command timed out");
-                report!(CommandError::TimedOut)
-            })?
-            .map_err(|e| {
-                report!(CommandError::CommandSpawn(std::io::Error::other(
+        let result = match fut.await {
+            Ok(result) => result,
+            Err(e) if matches!(e.current_context(), Error::SshCommandTimedOut(_)) => {
+                return Err(report!(CommandError::TimedOut));
+            }
+            Err(e) => {
+                return Err(report!(CommandError::CommandSpawn(std::io::Error::other(
                     e.to_string()
-                )))
-            })?;
+                ))));
+            }
+        };
 
         if result.exit_code != 0 {
             let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);
