@@ -43,6 +43,9 @@ pub enum HopGuardError {
     },
 }
 
+/// Result alias for redirect-hop classification.
+pub type Result<T> = std::result::Result<T, Report<HopGuardError>>;
+
 /// Classify one redirect hop.
 ///
 /// `Ok(None)`: the hop is clean. `Ok(Some(err))`: the hop trips a guard
@@ -53,7 +56,7 @@ pub fn check_hop(
     previous: &reqwest::Url,
     target: &reqwest::Url,
     mode: SsrfMode,
-) -> Result<Option<HopGuardError>, Report<HopGuardError>> {
+) -> Result<Option<HopGuardError>> {
     if previous.scheme() == "https" && target.scheme() == "http" {
         bail!(HopGuardError::SchemeDowngrade {
             previous: previous.to_string(),

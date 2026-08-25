@@ -74,6 +74,12 @@ impl PluginConfig for NpmConfig {
             FormFieldDescriptor::new("include_prereleases", "Include Pre-releases")
                 .with_type(FormFieldType::Toggle)
                 .with_help_text("Include pre-release dist-tags (next, beta, alpha, rc, canary)"),
+            FormFieldDescriptor::new("registry_url", "Registry URL")
+                .with_type(FormFieldType::Text)
+                .with_help_text(
+                    "Override the npm registry. Defaults to https://registry.npmjs.org. \
+                     Must use https. Set for a private registry or self-hosted mirror.",
+                ),
         ]
     }
 }
@@ -136,6 +142,16 @@ mod tests {
     fn validate_accepts_default_config() {
         use uptrakit_plugin_infrastructure_core::PluginConfig;
         assert!(NpmConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn form_schema_exposes_registry_url() {
+        use uptrakit_plugin_infrastructure_core::PluginConfig;
+        let fields = NpmConfig::form_schema();
+        assert!(
+            fields.iter().any(|f| f.key == "registry_url"),
+            "form_schema() must expose registry_url so operators can configure a private registry"
+        );
     }
 
     // ── validate_inner ────────────────────────────────────────────────────
