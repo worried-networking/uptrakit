@@ -47,6 +47,12 @@ pub fn is_private_ip(addr: IpAddr) -> bool {
 ///
 /// Non-parseable hostnames that don't match the blocked DNS patterns
 /// return `false`.
+///
+/// Config-time convention: release-source `validate_inner` impls call
+/// this to reject private upstream hosts at write time. Plugins whose
+/// upstream may be legitimately private (npm/cargo/uv custom registries)
+/// deliberately skip this check and flip their HTTP client to
+/// `SsrfMode::Permissive` instead.
 #[must_use]
 pub fn is_private_host(host: &str) -> bool {
     let lower = host.to_lowercase();

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationError};
+use url::Url;
 
 /// Configuration for the npm package manager plugin.
 ///
@@ -23,7 +24,44 @@ pub struct NpmConfig {
     pub registry_url: Option<String>,
 }
 
+impl NpmConfig {
+    /// Validate the configuration. An entirely empty `{}` config is valid.
+    ///
+    /// `registry_url` deliberately accepts private hosts: a custom npm
+    /// registry is operator infrastructure (for example Verdaccio on a
+    /// LAN), and setting it flips the HTTP client to
+    /// `SsrfMode::Permissive`. This is the documented exception to the
+    /// config-time `is_private_host` convention.
+    pub fn validate_inner(&self) -> std::result::Result<(), PluginConfigValidationError> {
+        if let Some(ref url) = self.registry_url {
+            let parsed = Url::parse(url).map_err(|e| {
+                PluginConfigValidationError::invalid_field(
+                    "registry_url",
+                    format!("invalid URL: {e}"),
+                )
+            })?;
+            if parsed.scheme() != "https" {
+                return Err(PluginConfigValidationError::invalid_field(
+                    "registry_url",
+                    "must use https",
+                ));
+            }
+            if parsed.host_str().is_none() {
+                return Err(PluginConfigValidationError::invalid_field(
+                    "registry_url",
+                    "must include a host",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 impl PluginConfig for NpmConfig {
+    fn validate(&self) -> std::result::Result<(), PluginConfigValidationError> {
+        self.validate_inner()
+    }
+
     fn validate_identifier(value: &str) -> Result<(), PluginConfigValidationError> {
         crate::validate_identifier(value)
     }
@@ -98,5 +136,56 @@ mod tests {
     fn validate_accepts_default_config() {
         use uptrakit_plugin_infrastructure_core::PluginConfig;
         assert!(NpmConfig::default().validate().is_ok());
+    }
+
+    // ── validate_inner ────────────────────────────────────────────────────
+
+    #[test]
+    fn empty_config_is_valid() {
+        let config = NpmConfig::default();
+        assert!(config.validate_inner().is_ok());
+    }
+
+    #[test]
+    fn https_private_host_registry_is_accepted() {
+        // Deliberate exception: custom registries may point at private/LAN
+        // hosts (e.g. Verdaccio), unlike release-source plugins.
+        let config = NpmConfig {
+            include_prereleases: false,
+            registry_url: Some("https://npm.internal.lan".to_string()),
+        };
+        assert!(config.validate_inner().is_ok());
+    }
+
+    #[test]
+    fn http_registry_is_rejected() {
+        let config = NpmConfig {
+            include_prereleases: false,
+            registry_url: Some("http://registry.example.com".to_string()),
+        };
+        let err = config.validate_inner().expect_err("should fail");
+        assert!(matches!(
+            err,
+            PluginConfigValidationError::InvalidField {
+                field: "registry_url",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn garbage_url_is_rejected() {
+        let config = NpmConfig {
+            include_prereleases: false,
+            registry_url: Some("not a url".to_string()),
+        };
+        let err = config.validate_inner().expect_err("should fail");
+        assert!(matches!(
+            err,
+            PluginConfigValidationError::InvalidField {
+                field: "registry_url",
+                ..
+            }
+        ));
     }
 }

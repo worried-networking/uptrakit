@@ -11,10 +11,13 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfigValidationError,
-    PluginFamily, Result, SudoCommandEntry, UpstreamRelease, Version, declare_plugin,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfig,
+    PluginConfigValidationError, PluginFamily, Result, SudoCommandEntry, UpstreamRelease, Version,
+    declare_plugin,
 };
-use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
+use uptrakit_plugin_infrastructure_core::{
+    PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
+};
 
 use crate::config::NpmConfig;
 
@@ -203,12 +206,22 @@ impl NpmPlugin {
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
         let executor = runtime.executor();
+        config.validate().map_err(|e| e.to_string())?;
+
+        // Use a permissive SSRF resolver for custom (potentially private/LAN)
+        // registries and a strict resolver for the default npm registry.
+        let ssrf_mode = if config.registry_url.is_some() {
+            SsrfMode::Permissive
+        } else {
+            SsrfMode::Strict
+        };
 
         let client = build_plugin_http_client(PluginHttpClientConfig {
             user_agent: concat!(
                 "uptrakit-plugin-package-manager-npm/",
                 env!("CARGO_PKG_VERSION")
             ),
+            ssrf_mode,
             ..Default::default()
         })
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;

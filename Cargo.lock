@@ -8373,6 +8373,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "url",
 ]
 
 [[package]]
