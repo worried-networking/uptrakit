@@ -23,6 +23,7 @@ use uptrakit_plugin_infrastructure_core::{
 };
 use uptrakit_plugin_infrastructure_core::{
     PluginHttpClientConfig, RedirectMode, build_plugin_http_client, read_bytes_capped,
+    rebase_to_origin,
 };
 
 use crate::api_types::{AttestationsApiResponse, GitHubApiError, GitHubAsset, GitHubRelease};
@@ -604,7 +605,23 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for GitHubPlugin {
                 return Err(report!(GitHubError::ApiError { status, message })).context_to();
             }
 
-            let next_url = parse_link_next(response.headers());
+            let next_url = parse_link_next(response.headers()).and_then(|next| {
+                match next.parse::<reqwest::Url>() {
+                    Ok(candidate) => match url.parse::<reqwest::Url>() {
+                        Ok(current_page_url) => {
+                            Some(rebase_to_origin(&current_page_url, &candidate).to_string())
+                        }
+                        Err(e) => {
+                            tracing::warn!(url, error = %e, "unparseable current page URL; stopping pagination");
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!(next, error = %e, "unparseable pagination link; stopping pagination");
+                        None
+                    }
+                }
+            });
             let body = read_bytes_capped(response, MAX_RELEASE_PAGE_BYTES)
                 .await
                 .map_err(|e| {
@@ -1852,5 +1869,65 @@ mod tests {
             "expected Serialization error, got: {err:?}"
         );
         mock.assert_async().await;
+    }
+
+    /// A hostile forge can point `Link: ...; rel="next"` at any origin, carrying
+    /// our authenticated pagination request wherever it says. `rebase_to_origin`
+    /// pins pagination to the request origin, keeping only the candidate's path
+    /// and query — this proves page 2 is fetched from the mock server itself,
+    /// never from the attacker-controlled origin the header names.
+    ///
+    /// gitlab's and forgejo's pagination glue use the identical
+    /// `rebase_to_origin` call; the origin-pinning behavior itself is covered
+    /// by that shared helper's unit tests in `http_client.rs`.
+    #[tokio::test]
+    async fn fetch_releases_rebases_cross_origin_pagination_link_onto_request_origin() {
+        let server = httpmock::MockServer::start_async().await;
+        let page1 = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/releases");
+                then.status(200)
+                    .header(
+                        "link",
+                        r#"<http://evil.example/api/steal?page=2>; rel="next""#,
+                    )
+                    .json_body(serde_json::json!([{
+                        "tag_name": "v1.0.0",
+                        "name": null,
+                        "draft": false,
+                        "prerelease": false,
+                        "html_url": "https://example.com/r/v1.0.0",
+                        "body": null,
+                        "published_at": null,
+                        "assets": []
+                    }]));
+            })
+            .await;
+        let page2 = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/steal")
+                    .query_param("page", "2");
+                then.status(200).json_body(serde_json::json!([]));
+            })
+            .await;
+
+        let plugin = plugin_for_mock(GitHubConfig {
+            api_base_url: Some(server.base_url()),
+            ..GitHubConfig::default()
+        });
+        let releases = plugin
+            .fetch_releases("o/r")
+            .await
+            .expect("page 1's single release must survive");
+        assert_eq!(releases.len(), 1);
+
+        page1.assert_async().await;
+        assert_eq!(
+            page2.calls_async().await,
+            1,
+            "rebased next-page URL must be fetched from the mock server, not evil.example"
+        );
     }
 }

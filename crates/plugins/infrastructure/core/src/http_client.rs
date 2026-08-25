@@ -111,6 +111,28 @@ pub fn build_plugin_http_client(
         .map_err(|source| PluginHttpClientBuildError::Build { source })
 }
 
+/// Rebase `candidate` onto `origin`'s scheme/host/port, keeping only
+/// `candidate`'s path and query.
+///
+/// Pagination `Link` headers come from the untrusted upstream response;
+/// honoring a cross-origin `next` URL would send our authenticated
+/// pagination requests wherever the server says. A mismatch is logged
+/// and the path is rebased onto the trusted origin regardless.
+#[must_use]
+pub fn rebase_to_origin(origin: &reqwest::Url, candidate: &reqwest::Url) -> reqwest::Url {
+    if candidate.origin() != origin.origin() {
+        tracing::warn!(
+            origin = %origin,
+            candidate = %candidate,
+            "cross-origin pagination link rebased onto the request origin"
+        );
+    }
+    let mut rebased = origin.clone();
+    rebased.set_path(candidate.path());
+    rebased.set_query(candidate.query());
+    rebased
+}
+
 /// Build a shared base [`reqwest::Client`] with SSRF protection for controller-side use.
 ///
 /// This creates a reusable HTTP client intended to be stored in [`CatalogConfig`] and
@@ -139,4 +161,48 @@ pub fn build_base_http_client(
         redirect: RedirectMode::Limited { hops: 10 },
         ..PluginHttpClientConfig::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn url(s: &str) -> reqwest::Url {
+        s.parse::<reqwest::Url>().expect("test url")
+    }
+
+    #[test]
+    fn rebase_to_origin_is_a_no_op_for_same_origin() {
+        let origin = url("https://api.github.com/repos/foo/bar/releases");
+        let candidate = url("https://api.github.com/repos/foo/bar/releases?page=2");
+
+        let rebased = rebase_to_origin(&origin, &candidate);
+
+        assert_eq!(rebased.as_str(), candidate.as_str());
+    }
+
+    #[test]
+    fn rebase_to_origin_pins_cross_origin_candidate_to_the_origin_host() {
+        let origin = url("https://api.github.com/repos/foo/bar/releases");
+        let candidate = url("http://evil.example/api/steal?page=2&token=x");
+
+        let rebased = rebase_to_origin(&origin, &candidate);
+
+        assert_eq!(rebased.scheme(), "https");
+        assert_eq!(rebased.host_str(), Some("api.github.com"));
+        assert_eq!(rebased.path(), "/api/steal");
+        assert_eq!(rebased.query(), Some("page=2&token=x"));
+    }
+
+    #[test]
+    fn rebase_to_origin_treats_a_port_mismatch_as_cross_origin() {
+        let origin = url("https://api.example.com:8443/releases");
+        let candidate = url("https://api.example.com/releases?page=2");
+
+        let rebased = rebase_to_origin(&origin, &candidate);
+
+        assert_eq!(rebased.port(), Some(8443));
+        assert_eq!(rebased.path(), "/releases");
+        assert_eq!(rebased.query(), Some("page=2"));
+    }
 }

@@ -103,7 +103,7 @@ pub type PluginResult<T> = std::result::Result<T, rootcause::Report<PluginError>
 
 pub use uptrakit_plugin_infrastructure_core::{
     BodyReadError, HopGuardError, PluginHttpClientBuildError, PluginHttpClientConfig, RedirectMode,
-    SsrfMode, build_plugin_http_client, read_bytes_capped, read_text_capped,
+    SsrfMode, build_plugin_http_client, read_bytes_capped, read_text_capped, rebase_to_origin,
 };
 
 pub use uptrakit_notification_plugin_core::{

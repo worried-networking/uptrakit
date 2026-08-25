@@ -9,6 +9,7 @@ pub mod http_client;
 #[cfg(feature = "http-client")]
 pub use http_client::{
     PluginHttpClientBuildError, PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
+    rebase_to_origin,
 };
 #[cfg(feature = "http-client")]
 pub mod redirect;

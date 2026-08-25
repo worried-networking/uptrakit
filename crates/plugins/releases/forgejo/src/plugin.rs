@@ -10,6 +10,7 @@ use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, FilteredOutDiagnostic, HostRequirements, HostRuntime,
     PluginCapability, PluginError, PluginFamily, PluginHttpClientConfig, ReleaseAsset,
     UpstreamRelease, Version, build_plugin_http_client, declare_plugin, read_bytes_capped,
+    rebase_to_origin,
 };
 
 use crate::api_types::{ForgejoApiError, ForgejoRelease};
@@ -378,7 +379,23 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ForgejoPlugin {
                 return Err(report!(ForgejoError::ApiError { status, message })).context_to();
             }
 
-            let next_url = parse_link_next(response.headers());
+            let next_url = parse_link_next(response.headers()).and_then(|next| {
+                match next.parse::<reqwest::Url>() {
+                    Ok(candidate) => match url.parse::<reqwest::Url>() {
+                        Ok(current_page_url) => {
+                            Some(rebase_to_origin(&current_page_url, &candidate).to_string())
+                        }
+                        Err(e) => {
+                            tracing::warn!(url, error = %e, "unparseable current page URL; stopping pagination");
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!(next, error = %e, "unparseable pagination link; stopping pagination");
+                        None
+                    }
+                }
+            });
             let body = read_bytes_capped(response, MAX_RELEASE_PAGE_BYTES)
                 .await
                 .map_err(|e| {
