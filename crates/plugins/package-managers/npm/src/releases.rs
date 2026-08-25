@@ -1,11 +1,17 @@
 use async_trait::async_trait;
 use backon::{ExponentialBuilder, Retryable};
 use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::{PluginError, Result, UpstreamRelease};
+use uptrakit_plugin_infrastructure_core::{
+    PluginError, Result, UpstreamRelease, read_bytes_capped,
+};
 
 use crate::plugin::{
     FETCH_BACKOFF_BASE, FETCH_BACKOFF_MAX, FETCH_MAX_RETRIES, NpmPlugin, npm_registry_url,
 };
+
+/// Cap for npm packument responses. Large packuments (react, typescript)
+/// run a few MiB; 8 MiB bounds a hostile registry without breaking them.
+const MAX_PACKUMENT_BYTES: usize = 8 * 1024 * 1024;
 
 #[async_trait]
 impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for NpmPlugin {
@@ -58,8 +64,16 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for NpmPlugin {
                 )));
             }
 
-            // Malformed body on a 2xx — terminal, retrying won't help → Serialization.
-            let json: serde_json::Value = response.json().await.map_err(|e| {
+            // Malformed body / over-cap body on a 2xx — terminal, retrying won't
+            // help → Serialization.
+            let body = read_bytes_capped(response, MAX_PACKUMENT_BYTES)
+                .await
+                .map_err(|e| {
+                    report!(PluginError::Serialization(format!(
+                        "failed to read npm registry response (cap {MAX_PACKUMENT_BYTES} bytes): {e}"
+                    )))
+                })?;
+            let json: serde_json::Value = serde_json::from_slice(&body).map_err(|e| {
                 report!(PluginError::Serialization(format!(
                     "failed to parse npm registry response: {e}"
                 )))
@@ -177,5 +191,31 @@ mod fetch_branch_tests {
 
         assert!(result.is_err(), "expected Err after all retries exhausted");
         mock.assert_calls_async(3).await;
+    }
+
+    /// An over-cap packument body is terminal (Serialization) with no retry —
+    /// mirrors the "malformed body" branch this cap replaces.
+    #[tokio::test]
+    async fn packument_over_cap_is_rejected() {
+        use uptrakit_plugin_infrastructure_core::PluginError;
+
+        let server = MockServer::start_async().await;
+        let over_cap_body = "x".repeat(super::MAX_PACKUMENT_BYTES + 1);
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/lodash");
+                then.status(200).body(&over_cap_body);
+            })
+            .await;
+
+        let plugin = test_plugin_for_mock(&server);
+        let result = plugin.fetch_releases("lodash").await;
+
+        let err = result.expect_err("over-cap packument body must be rejected");
+        assert!(
+            matches!(err.current_context(), PluginError::Serialization(_)),
+            "expected Serialization error, got: {err:?}"
+        );
+        mock.assert_calls_async(1).await;
     }
 }
