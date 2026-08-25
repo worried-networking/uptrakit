@@ -18,13 +18,19 @@ use crate::config::ForgejoConfig;
 use crate::error::{ForgejoError, Result};
 use crate::tag::strip_tag_prefix;
 
-/// Pagination window: at most `MAX_PAGES` pages of `PER_PAGE` releases.
-const MAX_PAGES: usize = 10;
+/// Pagination window: at most `MAX_RELEASE_PAGES` pages of `PER_PAGE` releases.
 const PER_PAGE: usize = 50;
 
 /// Cap for one release-listing page. 100 releases with long bodies stay
 /// well under this; 8 MiB bounds a hostile or misconfigured forge.
 const MAX_RELEASE_PAGE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Hard cap on release-listing pages per fetch. At the crate's page size
+/// this is ample history; an endless Link chain is hostile.
+const MAX_RELEASE_PAGES: usize = 20;
+/// Hard cap on accumulated releases per fetch (page-size ceiling is
+/// 100/page x 20 pages; forgejo pages at 50).
+const MAX_TOTAL_RELEASES: usize = 2000;
 
 /// Parse `"owner/repo"` from a package identifier string.
 ///
@@ -181,7 +187,7 @@ impl ForgejoPlugin {
             baseline_count,
             surviving_count,
             window_exhausted,
-            max_pages: MAX_PAGES,
+            max_pages: MAX_RELEASE_PAGES,
             per_page: PER_PAGE,
             tag_prefix: self.config.tag_prefix.as_deref(),
             asset_patterns: &self.config.asset_patterns,
@@ -345,8 +351,16 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ForgejoPlugin {
         let mut all_releases: Vec<ForgejoRelease> = Vec::new();
         let mut url = initial_url;
         let mut window_exhausted = true;
+        let mut pages_fetched: usize = 0;
 
-        'pages: for _ in 0..MAX_PAGES {
+        'pages: loop {
+            if pages_fetched >= MAX_RELEASE_PAGES {
+                bail!(PluginError::Configuration(format!(
+                    "release pagination exceeded {MAX_RELEASE_PAGES} pages; refusing runaway listing"
+                )));
+            }
+            pages_fetched += 1;
+
             let response = self
                 .client()
                 .context_to()?
@@ -415,6 +429,11 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ForgejoPlugin {
             }
             let page_full = page.len() >= PER_PAGE;
             all_releases.extend(page);
+            if all_releases.len() > MAX_TOTAL_RELEASES {
+                bail!(PluginError::Configuration(format!(
+                    "release listing exceeded {MAX_TOTAL_RELEASES} releases; refusing runaway listing"
+                )));
+            }
             match next_url {
                 Some(next) => url = next,
                 None => {
@@ -838,13 +857,13 @@ mod tests {
     #[test]
     fn filtered_out_error_window_exhausted_reads_differently() {
         let plugin = series_plugin("uptrakit-controller-standalone-");
-        // Counts deliberately distinct from the 10x50=500 window numbers so
+        // Counts deliberately distinct from the 20x50=1000 window numbers so
         // no assert can pass by matching the wrong figure.
         let msg = plugin
             .filtered_out_error(70, 60, 0, true)
             .expect("error expected");
         assert!(msg.contains("exhausted"));
-        assert!(msg.contains("500"), "window bound must be named");
+        assert!(msg.contains("1000"), "window bound must be named");
         assert!(msg.contains("70"), "raw count must be named");
         assert!(msg.contains("60"), "baseline count must be named");
     }
@@ -1066,5 +1085,65 @@ mod tests {
             "expected Serialization error, got: {err:?}"
         );
         mock.assert_async().await;
+    }
+
+    /// A hostile forge can serve an endless `Link: next` chain. Register one
+    /// more page than `MAX_RELEASE_PAGES` allows and prove the fetch is
+    /// terminal instead of silently truncating: the (`MAX_RELEASE_PAGES`+1)th
+    /// page is never requested.
+    #[tokio::test]
+    async fn pagination_stops_at_page_cap() {
+        let server = httpmock::MockServer::start_async().await;
+        let total_pages = MAX_RELEASE_PAGES + 1;
+        let mut mocks = Vec::with_capacity(total_pages);
+        for n in 1..=total_pages {
+            let path = if n == 1 {
+                "/api/v1/repos/o/r/releases".to_string()
+            } else {
+                format!("/api/v1/repos/o/r/releases/p{n}")
+            };
+            let next_page = n + 1;
+            let link_header = format!(
+                r#"<{}/api/v1/repos/o/r/releases/p{next_page}>; rel="next""#,
+                server.base_url()
+            );
+            let mock = server
+                .mock_async(move |when, then| {
+                    when.method(httpmock::Method::GET).path(path.clone());
+                    then.status(200)
+                        .header("link", &link_header)
+                        .json_body(serde_json::json!([{
+                            "tag_name": format!("v1.0.{n}"),
+                            "name": null,
+                            "draft": false,
+                            "prerelease": false,
+                            "html_url": "https://example.com/r/v1.0.0",
+                            "body": null,
+                            "published_at": null,
+                            "assets": []
+                        }]));
+                })
+                .await;
+            mocks.push(mock);
+        }
+
+        let plugin = plugin_for_mock(ForgejoConfig {
+            api_base_url: Some(server.base_url()),
+            ..ForgejoConfig::default()
+        });
+        let err = plugin
+            .fetch_releases("o/r")
+            .await
+            .expect_err("runaway Link chain must be rejected");
+        assert!(
+            matches!(err.current_context(), PluginError::Configuration(_)),
+            "expected Configuration error, got: {err:?}"
+        );
+
+        mocks
+            .last()
+            .expect("at least one mock registered")
+            .assert_calls_async(0)
+            .await;
     }
 }

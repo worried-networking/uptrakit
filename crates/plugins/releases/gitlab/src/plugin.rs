@@ -21,6 +21,13 @@ use crate::tag::strip_tag_prefix;
 /// well under this; 8 MiB bounds a hostile or misconfigured forge.
 const MAX_RELEASE_PAGE_BYTES: usize = 8 * 1024 * 1024;
 
+/// Hard cap on release-listing pages per fetch. At the crate's page size
+/// this is ample history; an endless Link chain is hostile.
+const MAX_RELEASE_PAGES: usize = 20;
+/// Hard cap on accumulated releases per fetch (page-size ceiling is
+/// 100/page x 20 pages; forgejo pages at 50).
+const MAX_TOTAL_RELEASES: usize = 2000;
+
 /// Parse and validate a GitLab project path from a package identifier string.
 ///
 /// Returns the **percent-encoded** project path (all `/` replaced with `%2F`),
@@ -276,11 +283,18 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for GitLabPlugin {
         let initial_url = self.releases_url(&encoded_path);
         tracing::debug!(url = %initial_url, "fetching GitLab releases");
 
-        const MAX_PAGES: usize = 10;
         let mut all_releases: Vec<GitLabRelease> = Vec::new();
         let mut url = initial_url;
+        let mut pages_fetched: usize = 0;
 
-        'pages: for _ in 0..MAX_PAGES {
+        'pages: loop {
+            if pages_fetched >= MAX_RELEASE_PAGES {
+                bail!(PluginError::Configuration(format!(
+                    "release pagination exceeded {MAX_RELEASE_PAGES} pages; refusing runaway listing"
+                )));
+            }
+            pages_fetched += 1;
+
             let response = self
                 .client()
                 .context_to()?
@@ -347,6 +361,11 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for GitLabPlugin {
                 break 'pages;
             }
             all_releases.extend(page);
+            if all_releases.len() > MAX_TOTAL_RELEASES {
+                bail!(PluginError::Configuration(format!(
+                    "release listing exceeded {MAX_TOTAL_RELEASES} releases; refusing runaway listing"
+                )));
+            }
             match next_url {
                 Some(next) => url = next,
                 None => break 'pages,
@@ -786,5 +805,63 @@ mod tests {
             "expected Serialization error, got: {err:?}"
         );
         mock.assert_async().await;
+    }
+
+    /// A hostile forge can serve an endless `Link: next` chain. Register one
+    /// more page than `MAX_RELEASE_PAGES` allows and prove the fetch is
+    /// terminal instead of silently truncating: the (`MAX_RELEASE_PAGES`+1)th
+    /// page is never requested.
+    #[tokio::test]
+    async fn pagination_stops_at_page_cap() {
+        let server = httpmock::MockServer::start_async().await;
+        let total_pages = MAX_RELEASE_PAGES + 1;
+        let mut mocks = Vec::with_capacity(total_pages);
+        for n in 1..=total_pages {
+            let path = if n == 1 {
+                "/api/v4/projects/o%2Fr/releases".to_string()
+            } else {
+                format!("/api/v4/projects/o%2Fr/releases/p{n}")
+            };
+            let next_page = n + 1;
+            let link_header = format!(
+                r#"<{}/api/v4/projects/o%2Fr/releases/p{next_page}>; rel="next""#,
+                server.base_url()
+            );
+            let mock = server
+                .mock_async(move |when, then| {
+                    when.method(httpmock::Method::GET).path(path.clone());
+                    then.status(200)
+                        .header("link", &link_header)
+                        .json_body(serde_json::json!([{
+                            "tag_name": format!("v1.0.{n}"),
+                            "name": "Release",
+                            "description": "notes",
+                            "released_at": "2024-01-28T12:00:00Z",
+                            "upcoming_release": false,
+                            "assets": { "links": [] }
+                        }]));
+                })
+                .await;
+            mocks.push(mock);
+        }
+
+        let plugin = plugin_for_mock(GitLabConfig {
+            api_base_url: Some(server.base_url()),
+            ..GitLabConfig::default()
+        });
+        let err = plugin
+            .fetch_releases("o/r")
+            .await
+            .expect_err("runaway Link chain must be rejected");
+        assert!(
+            matches!(err.current_context(), PluginError::Configuration(_)),
+            "expected Configuration error, got: {err:?}"
+        );
+
+        mocks
+            .last()
+            .expect("at least one mock registered")
+            .assert_calls_async(0)
+            .await;
     }
 }
