@@ -82,9 +82,14 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
         }
     }
 
+    // SsrfSafeResolver intentionally omitted: this client only ever connects
+    // to the operator-provided controller/PKI `base_url` — the documented
+    // operator-context exception in docs/security/secure-development.md
+    // (SSRF section).
     let client = builder
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(60))
+        .redirect(reqwest::redirect::Policy::limited(10))
         .build()
         .map_err(|e| report!(EnrollmentError::Ca(CaError::Fetch(e.to_string()))))?;
 

@@ -79,6 +79,7 @@ async fn fetch_ca(server: &str) -> Result<(String, String)> {
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(60))
         .tls_danger_accept_invalid_certs(true)
+        .redirect(reqwest::redirect::Policy::limited(10))
         .build()
         .context_to()?;
 

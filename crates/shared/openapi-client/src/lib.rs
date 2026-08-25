@@ -187,14 +187,20 @@ impl UptrakitClient {
         request_timeout: Option<Duration>,
     ) -> Result<Self> {
         let timeout = request_timeout.unwrap_or(Self::DEFAULT_REQUEST_TIMEOUT);
+        // SsrfSafeResolver intentionally omitted: this client only ever
+        // connects to the operator-provided controller `base_url` — the
+        // documented operator-context exception in
+        // docs/security/secure-development.md (SSRF section).
         let http = tls_configured_builder(insecure, ca_pem)?
             .connect_timeout(Self::DEFAULT_CONNECT_TIMEOUT)
             .timeout(timeout)
+            .redirect(reqwest::redirect::Policy::limited(10))
             .build()
             .context_to()?;
         let stream_http = tls_configured_builder(insecure, ca_pem)?
             .connect_timeout(Self::DEFAULT_CONNECT_TIMEOUT)
             .read_timeout(Self::STREAM_READ_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::limited(10))
             .build()
             .context_to()?;
 

@@ -27,7 +27,7 @@ serde = { workspace = true }
 backon = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-wire = { workspace = true }
-uptrakit-shared-types = { workspace = true }
+uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon"] }
 uptrakit-service-sdk = { workspace = true }
 uptrakit-directories = { workspace = true }
