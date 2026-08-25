@@ -3,9 +3,8 @@
 use std::time::{Duration, Instant};
 
 use rootcause::prelude::*;
-use std::sync::Arc;
-use uptrakit_shared_types::ssrf::{
-    SsrfSafeResolver, danger_accept_any_cert_client_config, webpki_client_config,
+use uptrakit_plugin_infrastructure_core::{
+    PluginHttpClientConfig, RedirectMode, SsrfMode, build_plugin_http_client,
 };
 
 use crate::api_types::*;
@@ -58,25 +57,18 @@ impl ProxmoxClient {
 
         let auth_header = format!("PVEAPIToken={}", config.api_token.expose_secret());
 
-        // `use_preconfigured_tls` supersedes `danger_accept_invalid_certs` in
-        // reqwest 0.13 (the latter is silently ignored when the former is set).
-        // Select the appropriate config based on the user's `verify_tls` setting.
-        let tls_config = if config.verify_tls {
-            webpki_client_config()
-        } else {
-            danger_accept_any_cert_client_config()
-        };
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(60))
-            .dns_resolver(Arc::new(SsrfSafeResolver::permissive()))
-            .use_preconfigured_tls(tls_config)
-            .build()
-            .map_err(|e| {
-                report!(ProxmoxError::Request(format!(
-                    "failed to build HTTP client: {e}"
-                )))
-            })?;
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: "uptrakit-plugin-infrastructure-proxmox",
+            ssrf_mode: SsrfMode::Permissive,
+            redirect: RedirectMode::Limited { hops: 10 },
+            danger_accept_invalid_certs: !config.verify_tls,
+            ..PluginHttpClientConfig::default()
+        })
+        .map_err(|e| {
+            report!(ProxmoxError::Request(format!(
+                "failed to build HTTP client: {e}"
+            )))
+        })?;
 
         // Normalize base URL: strip trailing slash
         let base_url = config.api_url.trim_end_matches('/').to_string();

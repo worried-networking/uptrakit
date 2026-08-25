@@ -7,7 +7,9 @@
 
 use std::sync::Arc;
 
-use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
+use uptrakit_shared_types::ssrf::{
+    SsrfSafeResolver, danger_accept_any_cert_client_config, webpki_client_config,
+};
 
 use crate::RedirectMode;
 
@@ -57,6 +59,12 @@ pub struct PluginHttpClientConfig<'a> {
     pub redirect: RedirectMode,
     /// Optional default headers to include on every request.
     pub default_headers: Option<reqwest::header::HeaderMap>,
+    /// Accept invalid/self-signed TLS certificates.
+    ///
+    /// Only for operator-owned infrastructure endpoints that default to
+    /// self-signed certs (Proxmox VE). Everything else keeps webpki
+    /// verification.
+    pub danger_accept_invalid_certs: bool,
 }
 
 impl Default for PluginHttpClientConfig<'_> {
@@ -67,6 +75,7 @@ impl Default for PluginHttpClientConfig<'_> {
             request_timeout_secs: 60,
             redirect: RedirectMode::None,
             default_headers: None,
+            danger_accept_invalid_certs: false,
         }
     }
 }
@@ -90,10 +99,15 @@ pub fn build_plugin_http_client(
     cfg: PluginHttpClientConfig<'_>,
 ) -> Result<reqwest::Client, PluginHttpClientBuildError> {
     let resolved_redirect = cfg.redirect.into_policy(cfg.ssrf_mode);
+    let tls = if cfg.danger_accept_invalid_certs {
+        danger_accept_any_cert_client_config()
+    } else {
+        webpki_client_config()
+    };
     let mut builder = reqwest::Client::builder()
         .user_agent(cfg.user_agent)
         .redirect(resolved_redirect)
-        .use_preconfigured_tls(webpki_client_config())
+        .use_preconfigured_tls(tls)
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(cfg.request_timeout_secs));
 
@@ -169,6 +183,11 @@ mod tests {
 
     fn url(s: &str) -> reqwest::Url {
         s.parse::<reqwest::Url>().expect("test url")
+    }
+
+    #[test]
+    fn default_config_verifies_tls() {
+        assert!(!PluginHttpClientConfig::default().danger_accept_invalid_certs);
     }
 
     #[test]
