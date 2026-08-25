@@ -9,13 +9,17 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginCapability, PluginError,
     PluginFamily, PluginHttpClientConfig, ReleaseAsset, UpstreamRelease, Version,
-    build_plugin_http_client, declare_plugin,
+    build_plugin_http_client, declare_plugin, read_bytes_capped,
 };
 
 use crate::api_types::{GitLabApiError, GitLabRelease};
 use crate::config::GitLabConfig;
 use crate::error::{GitLabError, Result};
 use crate::tag::strip_tag_prefix;
+
+/// Cap for one release-listing page. 100 releases with long bodies stay
+/// well under this; 8 MiB bounds a hostile or misconfigured forge.
+const MAX_RELEASE_PAGE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Parse and validate a GitLab project path from a package identifier string.
 ///
@@ -310,7 +314,14 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for GitLabPlugin {
             }
 
             let next_url = parse_link_next(response.headers());
-            let page: Vec<GitLabRelease> = response.json().await.map_err(|e| {
+            let body = read_bytes_capped(response, MAX_RELEASE_PAGE_BYTES)
+                .await
+                .map_err(|e| {
+                    report!(PluginError::Serialization(format!(
+                        "failed to read GitLab API response (cap {MAX_RELEASE_PAGE_BYTES} bytes): {e}"
+                    )))
+                })?;
+            let page: Vec<GitLabRelease> = serde_json::from_slice(&body).map_err(|e| {
                 report!(PluginError::Serialization(format!(
                     "failed to parse GitLab API response: {e}"
                 )))
@@ -361,7 +372,7 @@ mod tests {
     use super::*;
     use crate::api_types::{GitLabRelease, GitLabReleaseAssets, GitLabReleaseLink};
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, PluginCapability, PluginMeta, StandardHostRuntime,
+        HostCapabilities, PluginCapability, PluginMeta, ReleaseFetcher, StandardHostRuntime,
     };
 
     fn test_config() -> GitLabConfig {
@@ -687,5 +698,77 @@ mod tests {
     fn parse_link_next_absent_when_no_link_header() {
         let headers = reqwest::header::HeaderMap::new();
         assert!(parse_link_next(&headers).is_none());
+    }
+
+    // ── wired fetch_releases seam tests (httpmock) ────────────────────────────
+
+    fn plugin_for_mock(config: GitLabConfig) -> GitLabPlugin {
+        let plugin = GitLabPlugin::new(config, test_runtime()).expect("valid config");
+        // Same-crate test: seed the lazy client cache with a permissive-SSRF
+        // client so the plugin can reach the httpmock server on 127.0.0.1
+        // (idiom from the npm plugin's release tests).
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: "uptrakit-plugin-releases-gitlab-test",
+            ssrf_mode: uptrakit_plugin_infrastructure_core::SsrfMode::Permissive,
+            ..PluginHttpClientConfig::default()
+        })
+        .expect("build test HTTP client");
+        *plugin.client.lock() = Some(client);
+        plugin
+    }
+
+    #[tokio::test]
+    async fn fetch_releases_single_page_success() {
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/projects/o%2Fr/releases");
+                then.status(200).json_body(serde_json::json!([{
+                    "tag_name": "v1.0.0",
+                    "name": "Release 1.0.0",
+                    "description": "notes",
+                    "released_at": "2024-01-28T12:00:00Z",
+                    "upcoming_release": false,
+                    "assets": { "links": [] }
+                }]));
+            })
+            .await;
+        let plugin = plugin_for_mock(GitLabConfig {
+            api_base_url: Some(server.base_url()),
+            ..GitLabConfig::default()
+        });
+        let releases = plugin.fetch_releases("o/r").await.expect("must succeed");
+        assert_eq!(releases.len(), 1);
+        assert_eq!(releases[0].tag, "v1.0.0");
+        mock.assert_async().await;
+    }
+
+    /// An over-cap release-page body is terminal (`PluginError::Serialization`)
+    /// — mirrors the "malformed body" branch this cap replaces.
+    #[tokio::test]
+    async fn release_page_over_cap_is_rejected() {
+        let server = httpmock::MockServer::start_async().await;
+        let over_cap_body = "x".repeat(MAX_RELEASE_PAGE_BYTES + 1);
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/projects/o%2Fr/releases");
+                then.status(200).body(&over_cap_body);
+            })
+            .await;
+        let plugin = plugin_for_mock(GitLabConfig {
+            api_base_url: Some(server.base_url()),
+            ..GitLabConfig::default()
+        });
+        let err = plugin
+            .fetch_releases("o/r")
+            .await
+            .expect_err("over-cap release page must be rejected");
+        assert!(
+            matches!(err.current_context(), PluginError::Serialization(_)),
+            "expected Serialization error, got: {err:?}"
+        );
+        mock.assert_async().await;
     }
 }

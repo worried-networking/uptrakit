@@ -25,6 +25,7 @@ url = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+httpmock = { workspace = true }
 
 [lints]
 workspace = true

@@ -9,7 +9,7 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, FilteredOutDiagnostic, HostRequirements, HostRuntime,
     PluginCapability, PluginError, PluginFamily, PluginHttpClientConfig, ReleaseAsset,
-    UpstreamRelease, Version, build_plugin_http_client, declare_plugin,
+    UpstreamRelease, Version, build_plugin_http_client, declare_plugin, read_bytes_capped,
 };
 
 use crate::api_types::{ForgejoApiError, ForgejoRelease};
@@ -20,6 +20,10 @@ use crate::tag::strip_tag_prefix;
 /// Pagination window: at most `MAX_PAGES` pages of `PER_PAGE` releases.
 const MAX_PAGES: usize = 10;
 const PER_PAGE: usize = 50;
+
+/// Cap for one release-listing page. 100 releases with long bodies stay
+/// well under this; 8 MiB bounds a hostile or misconfigured forge.
+const MAX_RELEASE_PAGE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Parse `"owner/repo"` from a package identifier string.
 ///
@@ -375,7 +379,14 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ForgejoPlugin {
             }
 
             let next_url = parse_link_next(response.headers());
-            let page: Vec<ForgejoRelease> = response.json().await.map_err(|e| {
+            let body = read_bytes_capped(response, MAX_RELEASE_PAGE_BYTES)
+                .await
+                .map_err(|e| {
+                    report!(PluginError::Serialization(format!(
+                        "failed to read Forgejo API response (cap {MAX_RELEASE_PAGE_BYTES} bytes): {e}"
+                    )))
+                })?;
+            let page: Vec<ForgejoRelease> = serde_json::from_slice(&body).map_err(|e| {
                 report!(PluginError::Serialization(format!(
                     "failed to parse Forgejo API response: {e}"
                 )))
@@ -1010,5 +1021,33 @@ mod tests {
         });
         let releases = plugin.fetch_releases("o/r").await.expect("empty success");
         assert!(releases.is_empty());
+    }
+
+    /// An over-cap release-page body is terminal (`PluginError::Serialization`)
+    /// — mirrors the "malformed body" branch this cap replaces.
+    #[tokio::test]
+    async fn release_page_over_cap_is_rejected() {
+        let server = httpmock::MockServer::start_async().await;
+        let over_cap_body = "x".repeat(MAX_RELEASE_PAGE_BYTES + 1);
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v1/repos/o/r/releases");
+                then.status(200).body(&over_cap_body);
+            })
+            .await;
+        let plugin = plugin_for_mock(ForgejoConfig {
+            api_base_url: Some(server.base_url()),
+            ..ForgejoConfig::default()
+        });
+        let err = plugin
+            .fetch_releases("o/r")
+            .await
+            .expect_err("over-cap release page must be rejected");
+        assert!(
+            matches!(err.current_context(), PluginError::Serialization(_)),
+            "expected Serialization error, got: {err:?}"
+        );
+        mock.assert_async().await;
     }
 }

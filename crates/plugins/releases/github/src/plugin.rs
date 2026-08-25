@@ -21,7 +21,9 @@ use uptrakit_plugin_infrastructure_core::{
     ReleaseAsset, ReleaseInfo, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
     declare_plugin,
 };
-use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
+use uptrakit_plugin_infrastructure_core::{
+    PluginHttpClientConfig, build_plugin_http_client, read_bytes_capped,
+};
 
 use crate::api_types::{AttestationsApiResponse, GitHubApiError, GitHubAsset, GitHubRelease};
 use crate::config::GitHubConfig;
@@ -31,6 +33,10 @@ use crate::tag::strip_tag_prefix;
 /// Pagination window: at most `MAX_PAGES` pages of `PER_PAGE` releases.
 const MAX_PAGES: usize = 10;
 const PER_PAGE: usize = 100;
+
+/// Cap for one release-listing page. 100 releases with long bodies stay
+/// well under this; 8 MiB bounds a hostile or misconfigured forge.
+const MAX_RELEASE_PAGE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Parse `"owner/repo"` from a package identifier string.
 ///
@@ -591,7 +597,14 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for GitHubPlugin {
             }
 
             let next_url = parse_link_next(response.headers());
-            let page: Vec<GitHubRelease> = response.json().await.map_err(|e| {
+            let body = read_bytes_capped(response, MAX_RELEASE_PAGE_BYTES)
+                .await
+                .map_err(|e| {
+                    report!(PluginError::Serialization(format!(
+                        "failed to read GitHub API response (cap {MAX_RELEASE_PAGE_BYTES} bytes): {e}"
+                    )))
+                })?;
+            let page: Vec<GitHubRelease> = serde_json::from_slice(&body).map_err(|e| {
                 report!(PluginError::Serialization(format!(
                     "failed to parse GitHub API response: {e}"
                 )))
@@ -1752,5 +1765,33 @@ mod tests {
         });
         let releases = plugin.fetch_releases("o/r").await.expect("empty success");
         assert!(releases.is_empty());
+    }
+
+    /// An over-cap release-page body is terminal (`PluginError::Serialization`)
+    /// — mirrors the "malformed body" branch this cap replaces.
+    #[tokio::test]
+    async fn release_page_over_cap_is_rejected() {
+        let server = httpmock::MockServer::start_async().await;
+        let over_cap_body = "x".repeat(MAX_RELEASE_PAGE_BYTES + 1);
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/repos/o/r/releases");
+                then.status(200).body(&over_cap_body);
+            })
+            .await;
+        let plugin = plugin_for_mock(GitHubConfig {
+            api_base_url: Some(server.base_url()),
+            ..GitHubConfig::default()
+        });
+        let err = plugin
+            .fetch_releases("o/r")
+            .await
+            .expect_err("over-cap release page must be rejected");
+        assert!(
+            matches!(err.current_context(), PluginError::Serialization(_)),
+            "expected Serialization error, got: {err:?}"
+        );
+        mock.assert_async().await;
     }
 }
