@@ -298,4 +298,162 @@ mod tests {
             DedupeOutcome::Debug
         ));
     }
+
+    // Client-level wiring tests below: they prove the assembled client
+    // (build_plugin_http_client + RedirectMode::Limited + the resolver)
+    // actually enforces check_hop over real HTTP, not just that check_hop
+    // is correct in isolation.
+    //
+    // Fragility note: these tests depend on the initial-URL IP-literal
+    // short-circuit — IP literals skip the DNS resolver entirely, so even a
+    // Strict client reaches a 127.0.0.1 mock for its FIRST request; only the
+    // redirect hop trips the guard (check_hop runs on every hop regardless
+    // of whether the resolver would have blocked the initial connect). If a
+    // future guard also validates initial URLs, repoint the mocks at a
+    // hostname alias that resolves to loopback — do not delete these tests.
+    //
+    // Not covered here: the https-to-http downgrade branch of check_hop
+    // (httpmock's TLS setup makes an https test server impractical) — that
+    // branch is fully covered by `downgrade_dies_in_both_modes` above. Nor
+    // do these tests re-verify reqwest's own loop detection or exact hop
+    // accounting beyond the cap test below.
+    mod client_wiring {
+        use httpmock::MockServer;
+
+        use super::*;
+        use crate::http_client::{PluginHttpClientConfig, build_plugin_http_client};
+
+        #[tokio::test]
+        async fn strict_client_refuses_private_hop() {
+            use std::error::Error as _;
+
+            let server = MockServer::start_async().await;
+            let target_mock = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET).path("/private-target");
+                    then.status(200).body("secret");
+                })
+                .await;
+            let start_mock = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET).path("/start");
+                    then.status(302)
+                        .header("Location", format!("{}/private-target", server.base_url()));
+                })
+                .await;
+
+            let client = build_plugin_http_client(PluginHttpClientConfig {
+                ssrf_mode: SsrfMode::Strict,
+                redirect: RedirectMode::Limited { hops: 5 },
+                ..PluginHttpClientConfig::default()
+            })
+            .expect("client should build");
+
+            let result = client.get(server.url("/start")).send().await;
+            let err = result.expect_err("private-target hop must be rejected");
+
+            let mut source: Option<&(dyn std::error::Error + 'static)> = err.source();
+            let mut found = None;
+            while let Some(current) = source {
+                if let Some(hop_err) = current.downcast_ref::<HopGuardError>() {
+                    found = Some(hop_err);
+                    break;
+                }
+                source = current.source();
+            }
+            assert!(
+                matches!(found, Some(HopGuardError::PrivateTarget { .. })),
+                "expected HopGuardError::PrivateTarget in error source chain, found {found:?}"
+            );
+
+            start_mock.assert_async().await;
+            assert_eq!(target_mock.calls_async().await, 0);
+        }
+
+        #[tokio::test]
+        async fn permissive_client_follows_private_hop() {
+            let server = MockServer::start_async().await;
+            let target_mock = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET).path("/private-target");
+                    then.status(200).body("secret");
+                })
+                .await;
+            let start_mock = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET).path("/start");
+                    then.status(302)
+                        .header("Location", format!("{}/private-target", server.base_url()));
+                })
+                .await;
+
+            let client = build_plugin_http_client(PluginHttpClientConfig {
+                ssrf_mode: SsrfMode::Permissive,
+                redirect: RedirectMode::Limited { hops: 5 },
+                ..PluginHttpClientConfig::default()
+            })
+            .expect("client should build");
+
+            let resp = client
+                .get(server.url("/start"))
+                .send()
+                .await
+                .expect("permissive client should follow the private hop");
+            assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+            start_mock.assert_async().await;
+            assert_eq!(target_mock.calls_async().await, 1);
+        }
+
+        #[tokio::test]
+        async fn permissive_client_stops_at_hop_cap() {
+            let server = MockServer::start_async().await;
+            let r3_mock = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET).path("/r3");
+                    then.status(200).body("final");
+                })
+                .await;
+            let r0_mock = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET).path("/r0");
+                    then.status(302)
+                        .header("Location", format!("{}/r1", server.base_url()));
+                })
+                .await;
+            let r1_mock = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET).path("/r1");
+                    then.status(302)
+                        .header("Location", format!("{}/r2", server.base_url()));
+                })
+                .await;
+            let r2_mock = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET).path("/r2");
+                    then.status(302)
+                        .header("Location", format!("{}/r3", server.base_url()));
+                })
+                .await;
+
+            let client = build_plugin_http_client(PluginHttpClientConfig {
+                ssrf_mode: SsrfMode::Permissive,
+                redirect: RedirectMode::Limited { hops: 2 },
+                ..PluginHttpClientConfig::default()
+            })
+            .expect("client should build");
+
+            let result = client.get(server.url("/r0")).send().await;
+            let err = result.expect_err("chain longer than the hop cap must fail");
+            assert!(
+                err.is_redirect(),
+                "expected reqwest's own TooManyRedirects classification, got {err:?}"
+            );
+
+            r0_mock.assert_async().await;
+            r1_mock.assert_async().await;
+            r2_mock.assert_async().await;
+            assert_eq!(r3_mock.calls_async().await, 0);
+        }
+    }
 }
