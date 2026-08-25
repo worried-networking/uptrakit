@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
+use uptrakit_plugin_infrastructure_core::{
+    PluginHttpClientConfig, RedirectMode, build_plugin_http_client,
+};
 
 use crate::api_types::{OciManifestIndex, OciPlatform};
 use crate::auth::RegistryAuth;
@@ -100,6 +102,7 @@ impl RegistryClient {
                 "uptrakit-plugin-releases-docker/",
                 env!("CARGO_PKG_VERSION")
             ),
+            redirect: RedirectMode::None,
             ..Default::default()
         })
         .map_err(|e| report!(DockerError::Request(e.to_string())))?;
@@ -109,7 +112,7 @@ impl RegistryClient {
                 "uptrakit-plugin-releases-docker/",
                 env!("CARGO_PKG_VERSION")
             ),
-            redirect_policy: reqwest::redirect::Policy::limited(5),
+            redirect: RedirectMode::Limited { hops: 5 },
             request_timeout_secs: 30,
             ..Default::default()
         })

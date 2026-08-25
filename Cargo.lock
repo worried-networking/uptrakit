@@ -8164,6 +8164,7 @@ dependencies = [
  "uptrakit-shared-types",
  "uptrakit-surfaces",
  "uptrakit-tenant-db",
+ "url",
  "uuid",
 ]
 

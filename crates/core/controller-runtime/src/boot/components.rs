@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use rootcause::prelude::*;
 use tokio_util::sync::CancellationToken;
-use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
+use uptrakit_plugin_infrastructure_registry::{
+    PluginHttpClientConfig, RedirectMode, build_plugin_http_client,
+};
 
 use crate::AppError;
 use crate::boot::config::BootConfig;
@@ -219,7 +221,7 @@ pub(crate) async fn build(
         http_client: Some(
             build_plugin_http_client(PluginHttpClientConfig {
                 user_agent: "uptrakit-controller",
-                redirect_policy: reqwest::redirect::Policy::limited(5),
+                redirect: RedirectMode::Limited { hops: 5 },
                 ..Default::default()
             })
             .map_err(|e| report!(AppError::Config(format!("plugin catalog HTTP client: {e}"))))?,

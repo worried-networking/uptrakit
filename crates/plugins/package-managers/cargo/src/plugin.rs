@@ -14,7 +14,7 @@ use uptrakit_plugin_infrastructure_core::{
     PluginError, PluginFamily, PluginRole, Result, declare_plugin, plugin_ids,
 };
 use uptrakit_plugin_infrastructure_core::{
-    PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
+    PluginHttpClientConfig, RedirectMode, SsrfMode, build_plugin_http_client,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
 
@@ -136,7 +136,7 @@ impl CargoPlugin {
                 env!("CARGO_PKG_VERSION")
             ),
             ssrf_mode,
-            redirect_policy: reqwest::redirect::Policy::limited(10),
+            redirect: RedirectMode::Limited { hops: 10 },
             ..Default::default()
         })?;
 

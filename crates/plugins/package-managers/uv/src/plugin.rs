@@ -7,7 +7,7 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec}
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
     HostRequirements, HostRuntime, PluginCapability, PluginConfig, PluginConfigValidationError,
-    PluginError, PluginFamily, PluginHttpClientConfig, PluginRole, Result, SsrfMode,
+    PluginError, PluginFamily, PluginHttpClientConfig, PluginRole, RedirectMode, Result, SsrfMode,
     build_plugin_http_client, declare_plugin, execute_and_capture, plugin_ids,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
@@ -163,7 +163,7 @@ impl UvPlugin {
                 env!("CARGO_PKG_VERSION")
             ),
             ssrf_mode,
-            redirect_policy: reqwest::redirect::Policy::limited(10),
+            redirect: RedirectMode::Limited { hops: 10 },
             ..Default::default()
         })?;
 

@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
+use crate::RedirectMode;
+
 /// Typed error returned when building a plugin HTTP client fails.
 #[derive(Debug, thiserror::Error)]
 pub enum PluginHttpClientBuildError {
@@ -28,6 +30,7 @@ impl From<PluginHttpClientBuildError> for String {
 }
 
 /// Controls whether the SSRF-safe resolver blocks connections to private/loopback addresses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SsrfMode {
     /// Blocks connections to private IP ranges.
     ///
@@ -50,8 +53,8 @@ pub struct PluginHttpClientConfig<'a> {
     pub ssrf_mode: SsrfMode,
     /// Per-request timeout in seconds (default: 60).
     pub request_timeout_secs: u64,
-    /// Redirect-following policy (default: `Policy::none()`).
-    pub redirect_policy: reqwest::redirect::Policy,
+    /// Redirect-following policy (default: never follow).
+    pub redirect: RedirectMode,
     /// Optional default headers to include on every request.
     pub default_headers: Option<reqwest::header::HeaderMap>,
 }
@@ -62,7 +65,7 @@ impl Default for PluginHttpClientConfig<'_> {
             user_agent: "uptrakit-plugin",
             ssrf_mode: SsrfMode::Strict,
             request_timeout_secs: 60,
-            redirect_policy: reqwest::redirect::Policy::none(),
+            redirect: RedirectMode::None,
             default_headers: None,
         }
     }
@@ -86,9 +89,10 @@ impl Default for PluginHttpClientConfig<'_> {
 pub fn build_plugin_http_client(
     cfg: PluginHttpClientConfig<'_>,
 ) -> Result<reqwest::Client, PluginHttpClientBuildError> {
+    let resolved_redirect = cfg.redirect.into_policy(cfg.ssrf_mode);
     let mut builder = reqwest::Client::builder()
         .user_agent(cfg.user_agent)
-        .redirect(cfg.redirect_policy)
+        .redirect(resolved_redirect)
         .use_preconfigured_tls(webpki_client_config())
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(cfg.request_timeout_secs));
@@ -132,7 +136,7 @@ pub fn build_base_http_client(
         } else {
             SsrfMode::Strict
         },
-        redirect_policy: reqwest::redirect::Policy::limited(10),
+        redirect: RedirectMode::Limited { hops: 10 },
         ..PluginHttpClientConfig::default()
     })
 }

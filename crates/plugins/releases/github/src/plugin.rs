@@ -22,7 +22,7 @@ use uptrakit_plugin_infrastructure_core::{
     declare_plugin,
 };
 use uptrakit_plugin_infrastructure_core::{
-    PluginHttpClientConfig, build_plugin_http_client, read_bytes_capped,
+    PluginHttpClientConfig, RedirectMode, build_plugin_http_client, read_bytes_capped,
 };
 
 use crate::api_types::{AttestationsApiResponse, GitHubApiError, GitHubAsset, GitHubRelease};
@@ -162,6 +162,10 @@ impl GitHubPlugin {
             headers.insert(reqwest::header::AUTHORIZATION, header_value);
         }
 
+        // The checksums fetch reuses this client. It must NEVER follow
+        // redirects — keep the default RedirectMode::None (spec
+        // 2026-08-13-plugin-http-redirect-security; the checksums path is
+        // deleted by the digest-attestation spec).
         build_plugin_http_client(PluginHttpClientConfig {
             user_agent: concat!(
                 "uptrakit-plugin-releases-github/",
@@ -782,7 +786,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for GitHubPlugin {
                 ),
                 default_headers: Some(download_headers),
                 request_timeout_secs: 600,
-                redirect_policy: reqwest::redirect::Policy::limited(10),
+                redirect: RedirectMode::Limited { hops: 10 },
                 ..Default::default()
             })
             .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;

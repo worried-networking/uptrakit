@@ -102,8 +102,8 @@ pub use uptrakit_plugin_infrastructure_core::{HostCompatibilityError, HostRequir
 pub type PluginResult<T> = std::result::Result<T, rootcause::Report<PluginError>>;
 
 pub use uptrakit_plugin_infrastructure_core::{
-    BodyReadError, PluginHttpClientBuildError, PluginHttpClientConfig, SsrfMode,
-    build_plugin_http_client, read_bytes_capped, read_text_capped,
+    BodyReadError, HopGuardError, PluginHttpClientBuildError, PluginHttpClientConfig, RedirectMode,
+    SsrfMode, build_plugin_http_client, read_bytes_capped, read_text_capped,
 };
 
 pub use uptrakit_notification_plugin_core::{
