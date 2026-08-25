@@ -94,6 +94,7 @@ mod m20260811_000002_pending_flow_snapshot;
 mod m20260812_000001_encrypt_plugin_configs_config;
 mod m20260812_000002_encrypt_plugin_type_settings_config;
 mod m20260812_000003_encrypt_instance_plugin_setting_config;
+mod m20260817_000001_update_history_timeout_seconds;
 
 pub struct Migrator;
 
@@ -191,6 +192,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260812_000003_encrypt_instance_plugin_setting_config::Migration),
             Box::new(m20260811_000001_materialize_mcp_enabled::Migration),
             Box::new(m20260811_000002_pending_flow_snapshot::Migration),
+            Box::new(m20260817_000001_update_history_timeout_seconds::Migration),
         ]
     }
 }

@@ -709,6 +709,7 @@ mod active_update_status_tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await
@@ -762,6 +763,7 @@ mod active_update_status_tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await

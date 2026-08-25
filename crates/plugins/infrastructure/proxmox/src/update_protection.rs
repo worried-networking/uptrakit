@@ -1333,6 +1333,7 @@ mod tests {
             pre_update_protection_status: None,
             pre_update_protection_summary: None,
             recovery_hint: None,
+            timeout_seconds: None,
         }
     }
 

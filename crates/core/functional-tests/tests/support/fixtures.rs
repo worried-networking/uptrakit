@@ -256,6 +256,7 @@ impl TestFixtures {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(db)
         .await

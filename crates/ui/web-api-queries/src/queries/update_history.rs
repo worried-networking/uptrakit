@@ -466,6 +466,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(db)
         .await
@@ -518,6 +519,7 @@ mod tests {
             pre_update_protection_status: Some("protected".to_string()),
             pre_update_protection_summary: Some("snapshot created".to_string()),
             recovery_hint: Some("rollback snapshot id abc123".to_string()),
+            timeout_seconds: None,
         };
 
         let resp = build_response(
@@ -580,6 +582,7 @@ mod tests {
             pre_update_protection_status: None,
             pre_update_protection_summary: None,
             recovery_hint: None,
+            timeout_seconds: None,
         };
 
         let resp = build_response(
@@ -628,6 +631,7 @@ mod tests {
             pre_update_protection_status: None,
             pre_update_protection_summary: None,
             recovery_hint: None,
+            timeout_seconds: None,
         };
 
         let resp = build_response(
@@ -672,6 +676,7 @@ mod tests {
             pre_update_protection_status: None,
             pre_update_protection_summary: None,
             recovery_hint: None,
+            timeout_seconds: None,
         };
 
         let resp = build_response(
@@ -720,6 +725,7 @@ mod tests {
                 pre_update_protection_status: None,
                 pre_update_protection_summary: None,
                 recovery_hint: None,
+                timeout_seconds: None,
             };
 
             let resp = build_response(
@@ -826,6 +832,7 @@ mod tests {
             pre_update_protection_status: None,
             pre_update_protection_summary: None,
             recovery_hint: None,
+            timeout_seconds: None,
         };
 
         let resp = build_response(
@@ -897,6 +904,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await
@@ -971,6 +979,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await
@@ -1053,6 +1062,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await
@@ -1138,6 +1148,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await

@@ -1061,6 +1061,9 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         pre_update_protection_status: Set(None),
         pre_update_protection_summary: Set(None),
         recovery_hint: Set(None),
+        timeout_seconds: Set(Some(
+            i64::try_from(uptrakit_wire::DEFAULT_UPDATE_TIMEOUT.as_secs()).unwrap_or(i64::MAX),
+        )),
     };
 
     record.insert(db).await.context_to()?;
@@ -1452,6 +1455,11 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(row.actor_type, "uptrakit-mqtt");
+        assert_eq!(
+            row.timeout_seconds,
+            Some(7200),
+            "create_update_history_record must persist the default update budget"
+        );
     }
 
     #[tokio::test]
@@ -1488,6 +1496,7 @@ mod tests {
             pre_update_protection_status: sea_orm::Set(None),
             pre_update_protection_summary: sea_orm::Set(None),
             recovery_hint: sea_orm::Set(None),
+            timeout_seconds: sea_orm::Set(None),
         }
         .insert(&db)
         .await
@@ -1549,6 +1558,7 @@ mod tests {
             pre_update_protection_status: sea_orm::Set(None),
             pre_update_protection_summary: sea_orm::Set(None),
             recovery_hint: sea_orm::Set(None),
+            timeout_seconds: sea_orm::Set(None),
         }
         .insert(&db)
         .await
@@ -1604,6 +1614,7 @@ mod tests {
                 pre_update_protection_status: Set(None),
                 pre_update_protection_summary: Set(None),
                 recovery_hint: Set(None),
+                timeout_seconds: Set(None),
             }
             .insert(&db)
             .await
@@ -1658,6 +1669,7 @@ mod tests {
                 pre_update_protection_status: Set(None),
                 pre_update_protection_summary: Set(None),
                 recovery_hint: Set(None),
+                timeout_seconds: Set(None),
             }
             .insert(&db)
             .await
@@ -1704,6 +1716,7 @@ mod tests {
             pre_update_protection_status: sea_orm::Set(None),
             pre_update_protection_summary: sea_orm::Set(None),
             recovery_hint: sea_orm::Set(None),
+            timeout_seconds: sea_orm::Set(None),
         }
         .insert(&db)
         .await
@@ -1749,6 +1762,7 @@ mod tests {
             pre_update_protection_status: sea_orm::Set(None),
             pre_update_protection_summary: sea_orm::Set(None),
             recovery_hint: sea_orm::Set(None),
+            timeout_seconds: sea_orm::Set(None),
         }
         .insert(&db)
         .await
@@ -1808,6 +1822,7 @@ mod tests {
             pre_update_protection_status: sea_orm::Set(None),
             pre_update_protection_summary: sea_orm::Set(None),
             recovery_hint: sea_orm::Set(None),
+            timeout_seconds: sea_orm::Set(None),
         }
         .insert(&db)
         .await
@@ -1869,6 +1884,7 @@ mod tests {
             pre_update_protection_status: sea_orm::Set(Some("failed".to_string())),
             pre_update_protection_summary: sea_orm::Set(None),
             recovery_hint: sea_orm::Set(None),
+            timeout_seconds: sea_orm::Set(None),
         }
         .insert(&db)
         .await
@@ -1944,6 +1960,7 @@ mod tests {
             pre_update_protection_status: sea_orm::Set(Some("failed".to_string())),
             pre_update_protection_summary: sea_orm::Set(None),
             recovery_hint: sea_orm::Set(None),
+            timeout_seconds: sea_orm::Set(None),
         }
         .insert(&db)
         .await
@@ -1995,6 +2012,7 @@ mod tests {
             pre_update_protection_status: sea_orm::Set(Some("failed".to_string())),
             pre_update_protection_summary: sea_orm::Set(None),
             recovery_hint: sea_orm::Set(None),
+            timeout_seconds: sea_orm::Set(None),
         }
         .insert(&db)
         .await

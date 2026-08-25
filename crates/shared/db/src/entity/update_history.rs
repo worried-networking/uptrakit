@@ -50,6 +50,10 @@ pub struct Model {
     pub pre_update_protection_summary: Option<String>,
     /// Optional recovery hint for failed/protected updates.
     pub recovery_hint: Option<String>,
+    /// Per-row execution budget in seconds, recorded at dispatch time.
+    /// `NULL` = legacy row created before per-row budgets; the reaper falls
+    /// back to its default budget for those.
+    pub timeout_seconds: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

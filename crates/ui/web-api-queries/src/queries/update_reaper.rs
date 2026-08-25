@@ -46,24 +46,31 @@ pub struct StalledPendingCandidate {
     pub services: Vec<StalledCandidateService>,
 }
 
-/// Mark every `in_progress` update whose `started_at` is older than `max_age`
-/// (relative to `now`, wall-clock) as terminal `Interrupted`.
+/// Mark every `in_progress` update whose deadline (`started_at` + its own
+/// budget + `grace`) is past `now` as terminal `Interrupted`.
+///
+/// Each row's own budget (`timeout_seconds`) is honored; `default_budget` is
+/// the fallback applied to legacy rows with a `NULL` `timeout_seconds`.
 ///
 /// Returns the reaped rows so the caller can emit notifications/SSE. Keys only on
 /// the update's own budget — never on agent connectivity. `now` is injected so
 /// tests drive the wall-clock independently of the tokio clock.
 ///
 /// `Queued`/`Pending`/`AwaitingRestart` rows are left untouched: only
-/// `InProgress` rows with a non-null `started_at` older than the cutoff are
+/// `InProgress` rows with a non-null `started_at` past their deadline are
 /// reaped.
 pub async fn reap_overdue_updates(
     db: &DatabaseConnection,
     now: OffsetDateTime,
-    max_age: std::time::Duration,
+    default_budget: std::time::Duration,
+    grace: std::time::Duration,
 ) -> std::result::Result<Vec<update_history::Model>, rootcause::Report<TriggerUpdateError>> {
-    // `OffsetDateTime` implements `Sub<std::time::Duration>` directly — no
-    // `time::Duration` conversion needed.
-    let cutoff = now - max_age;
+    // Ceiling for per-row budgets on read. Bounds two hazards from a corrupt
+    // or absurd `timeout_seconds` value (e.g. a row carrying the write-side
+    // `i64::MAX` fallback): the `OffsetDateTime` deadline addition below
+    // overflowing, and the row wedging its host's one-active-update slot as
+    // unreapable forever.
+    const MAX_BUDGET_SECS: u64 = 60 * 60 * 24 * 30; // 30 days
 
     // Read-then-write: open an IMMEDIATE transaction BEFORE the read so the
     // select and the update share one write-intent txn (coding-standards.md
@@ -71,20 +78,51 @@ pub async fn reap_overdue_updates(
     // `maybe_complete_batch` in `update_batches/dispatch.rs`.
     let txn = begin_immediate(db).await.context_to()?;
 
-    let candidates = update_history::Entity::find()
+    // ponytail: loads every InProgress row and filters in memory — bounded by
+    // the one-active-update-per-host invariant (row count <= host count).
+    // Move the cutoff back into SQL only if that invariant ever changes.
+    let rows = update_history::Entity::find()
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
         .filter(update_history::Column::StartedAt.is_not_null())
-        .filter(update_history::Column::StartedAt.lt(cutoff))
         .all(&txn)
         .await
         .context_to()?;
 
-    if candidates.is_empty() {
+    if rows.is_empty() {
         txn.commit().await.context_to()?;
         return Ok(vec![]);
     }
 
-    let ids: Vec<Uuid> = candidates.iter().map(|r| r.id).collect();
+    let overdue: Vec<update_history::Model> = rows
+        .into_iter()
+        .filter(|row| {
+            // NULL = legacy row created before per-row budgets; fall back to
+            // the caller's default. New rows always write a value.
+            let budget = row
+                .timeout_seconds
+                .and_then(|s| u64::try_from(s).ok())
+                .map_or(default_budget, |s| {
+                    std::time::Duration::from_secs(s.min(MAX_BUDGET_SECS))
+                });
+            // checked_add, never a bare `started + duration` (panics on
+            // overflow; workspace builds abort on panic). An unrepresentable
+            // deadline means the row is corrupt — treat it as overdue so it
+            // cannot wedge the host's one-active-update slot.
+            row.started_at.is_some_and(|started| {
+                time::Duration::try_from(budget + grace)
+                    .ok()
+                    .and_then(|d| started.checked_add(d))
+                    .is_none_or(|deadline| deadline < now)
+            })
+        })
+        .collect();
+
+    if overdue.is_empty() {
+        txn.commit().await.context_to()?;
+        return Ok(vec![]);
+    }
+
+    let ids: Vec<Uuid> = overdue.iter().map(|r| r.id).collect();
     update_history::Entity::update_many()
         .filter(update_history::Column::Id.is_in(ids))
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
@@ -112,7 +150,7 @@ pub async fn reap_overdue_updates(
 
     // Patch the in-memory models to match what was written, so the caller's
     // event emission sees the terminal state.
-    let reaped = candidates
+    let reaped = overdue
         .into_iter()
         .map(|mut r| {
             r.status = update_history::UpdateStatus::Interrupted;
@@ -307,6 +345,7 @@ mod tests {
         status: update_history::UpdateStatus,
         started_at: Option<OffsetDateTime>,
         created_at: OffsetDateTime,
+        timeout_seconds: Option<i64>,
     ) -> Uuid {
         let id = Uuid::now_v7();
         let host_id = insert_host(db, f).await;
@@ -336,6 +375,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(timeout_seconds),
         }
         .insert(db)
         .await
@@ -356,6 +396,7 @@ mod tests {
             update_history::UpdateStatus::InProgress,
             Some(now - TDuration::hours(3)),
             now - TDuration::hours(3),
+            None,
         )
         .await;
         // (b) in_progress started 1min ago (fresh) -> left alone.
@@ -365,6 +406,7 @@ mod tests {
             update_history::UpdateStatus::InProgress,
             Some(now - TDuration::minutes(1)),
             now - TDuration::minutes(1),
+            None,
         )
         .await;
         // (c) queued -> left alone.
@@ -374,6 +416,7 @@ mod tests {
             update_history::UpdateStatus::Queued,
             None,
             now - TDuration::hours(3),
+            None,
         )
         .await;
         // (d) awaiting_restart 3h ago -> left alone.
@@ -383,12 +426,18 @@ mod tests {
             update_history::UpdateStatus::AwaitingRestart,
             Some(now - TDuration::hours(3)),
             now - TDuration::hours(3),
+            None,
         )
         .await;
 
-        let reaped = reap_overdue_updates(&db, now, std::time::Duration::from_secs(7200 + 300))
-            .await
-            .unwrap();
+        let reaped = reap_overdue_updates(
+            &db,
+            now,
+            std::time::Duration::from_secs(7200),
+            std::time::Duration::from_secs(300),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             reaped.len(),
@@ -426,6 +475,117 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn respects_per_row_budget() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+
+        // Row A: budget 60s, started 10 minutes ago -> reaped (well past its
+        // own 60s + 300s grace deadline).
+        let short_budget = insert_update(
+            &db,
+            &f,
+            update_history::UpdateStatus::InProgress,
+            Some(now - TDuration::minutes(10)),
+            now - TDuration::minutes(10),
+            Some(60),
+        )
+        .await;
+        // Row B: budget 86400s (1 day), started 3 hours ago -> NOT reaped
+        // (inside its own budget, even though it is past the default 7200s).
+        let long_budget = insert_update(
+            &db,
+            &f,
+            update_history::UpdateStatus::InProgress,
+            Some(now - TDuration::hours(3)),
+            now - TDuration::hours(3),
+            Some(86400),
+        )
+        .await;
+
+        let reaped = reap_overdue_updates(
+            &db,
+            now,
+            std::time::Duration::from_secs(7200),
+            std::time::Duration::from_secs(300),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(reaped.len(), 1, "only the short-budget row is reaped");
+        assert_eq!(reaped[0].id, short_budget);
+        assert_eq!(reaped[0].status, update_history::UpdateStatus::Interrupted);
+
+        let row = update_history::Entity::find_by_id(long_budget)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.status,
+            update_history::UpdateStatus::InProgress,
+            "row within its own (larger) budget must be untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn null_budget_falls_back_to_default() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = OffsetDateTime::now_utc();
+
+        // NULL budget, started 1 hour ago -> NOT reaped under default 7200s +
+        // 300s grace (1 hour is well inside 7200s + 300s).
+        let within_default = insert_update(
+            &db,
+            &f,
+            update_history::UpdateStatus::InProgress,
+            Some(now - TDuration::hours(1)),
+            now - TDuration::hours(1),
+            None,
+        )
+        .await;
+        // NULL budget, started 3 hours ago -> reaped (past the default
+        // 7200s + 300s grace).
+        let past_default = insert_update(
+            &db,
+            &f,
+            update_history::UpdateStatus::InProgress,
+            Some(now - TDuration::hours(3)),
+            now - TDuration::hours(3),
+            None,
+        )
+        .await;
+
+        let reaped = reap_overdue_updates(
+            &db,
+            now,
+            std::time::Duration::from_secs(7200),
+            std::time::Duration::from_secs(300),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            reaped.len(),
+            1,
+            "only the row past the default budget is reaped"
+        );
+        assert_eq!(reaped[0].id, past_default);
+
+        let row = update_history::Entity::find_by_id(within_default)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.status,
+            update_history::UpdateStatus::InProgress,
+            "row within the default budget must be untouched"
+        );
+    }
+
+    #[tokio::test]
     async fn lists_only_overdue_pending() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
@@ -438,6 +598,7 @@ mod tests {
             update_history::UpdateStatus::Pending,
             None,
             now - (grace + std::time::Duration::from_secs(1)),
+            None,
         )
         .await;
         let _fresh = insert_update(
@@ -446,6 +607,7 @@ mod tests {
             update_history::UpdateStatus::Pending,
             None,
             now - std::time::Duration::from_secs(1),
+            None,
         )
         .await;
         let _queued = insert_update(
@@ -454,6 +616,7 @@ mod tests {
             update_history::UpdateStatus::Queued,
             None,
             now - (grace + std::time::Duration::from_secs(1)),
+            None,
         )
         .await;
 
@@ -470,9 +633,24 @@ mod tests {
         let grace = std::time::Duration::from_secs(600);
         let old = now - (grace + std::time::Duration::from_secs(1));
 
-        let stalled =
-            insert_update(&db, &f, update_history::UpdateStatus::Pending, None, old).await;
-        let racing = insert_update(&db, &f, update_history::UpdateStatus::Pending, None, old).await;
+        let stalled = insert_update(
+            &db,
+            &f,
+            update_history::UpdateStatus::Pending,
+            None,
+            old,
+            None,
+        )
+        .await;
+        let racing = insert_update(
+            &db,
+            &f,
+            update_history::UpdateStatus::Pending,
+            None,
+            old,
+            None,
+        )
+        .await;
 
         // The dispatch race: `racing` starts executing between list and reap.
         let mut m: update_history::ActiveModel = update_history::Entity::find_by_id(racing)
@@ -521,8 +699,15 @@ mod tests {
         let grace = std::time::Duration::from_secs(600);
         let old = now - (grace + std::time::Duration::from_secs(1));
 
-        let overdue =
-            insert_update(&db, &f, update_history::UpdateStatus::Pending, None, old).await;
+        let overdue = insert_update(
+            &db,
+            &f,
+            update_history::UpdateStatus::Pending,
+            None,
+            old,
+            None,
+        )
+        .await;
         let row = update_history::Entity::find_by_id(overdue)
             .one(&db)
             .await

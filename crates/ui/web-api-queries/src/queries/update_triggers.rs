@@ -697,6 +697,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await
@@ -769,6 +770,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await
@@ -859,6 +861,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await
@@ -899,6 +902,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await
@@ -961,6 +965,7 @@ mod tests {
             pre_update_protection_status: Set(None),
             pre_update_protection_summary: Set(None),
             recovery_hint: Set(None),
+            timeout_seconds: Set(None),
         }
         .insert(&db)
         .await
@@ -1248,6 +1253,7 @@ mod tests {
             pre_update_protection_status: sea_orm::Set(None),
             pre_update_protection_summary: sea_orm::Set(None),
             recovery_hint: sea_orm::Set(None),
+            timeout_seconds: sea_orm::Set(None),
         }
         .insert(&db)
         .await

@@ -57,11 +57,11 @@ fn pending_row_is_reapable(
 
 /// Spawn the detached background reaper loop.
 ///
-/// Every [`REAPER_INTERVAL`] it reaps `InProgress` updates older than
-/// `DEFAULT_UPDATE_TIMEOUT + REAPER_GRACE` and, for each reaped row, emits the
-/// same `AdminEvent::UpdateCompleted` the completion path sends (with
-/// `status: "interrupted"`), refreshes per-tenant software state, and advances
-/// any owning batch.
+/// Every [`REAPER_INTERVAL`] it reaps `InProgress` updates older than each
+/// row's own budget (default `DEFAULT_UPDATE_TIMEOUT`) + `REAPER_GRACE` and,
+/// for each reaped row, emits the same `AdminEvent::UpdateCompleted` the
+/// completion path sends (with `status: "interrupted"`), refreshes
+/// per-tenant software state, and advances any owning batch.
 pub fn spawn_update_reaper(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
@@ -71,7 +71,8 @@ pub fn spawn_update_reaper(state: Arc<AppState>) {
                 match uptrakit_web_api_queries::queries::update_reaper::reap_overdue_updates(
                     state.db(),
                     now,
-                    DEFAULT_UPDATE_TIMEOUT + REAPER_GRACE,
+                    DEFAULT_UPDATE_TIMEOUT,
+                    REAPER_GRACE,
                 )
                 .await
                 {

@@ -750,6 +750,7 @@ mod tests {
             pre_update_protection_status: sea_orm::Set(Some("failed".into())),
             pre_update_protection_summary: sea_orm::Set(None),
             recovery_hint: sea_orm::Set(None),
+            timeout_seconds: sea_orm::Set(None),
         }
         .insert(&db)
         .await
