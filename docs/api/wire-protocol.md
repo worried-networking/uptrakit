@@ -195,9 +195,11 @@ and is not sent to the agent.
 `uptrakit_shared_types::op_timeouts::VERSION_CHECK_OP_TIMEOUT` (1800s). On expiry the agent always
 sends `version_check_results` -- items not yet completed get a per-item error result echoing the
 request's `software_item_id`/`host_software_item_id`, while items that already finished keep their
-real results (partial results, never silence, since the controller's dispatch dedup and watchdog
-depend on a terminal message per request). These constants are shared with the controller's
-dispatch dedup TTLs (M1.6) so the two sides cannot drift out of sync.
+real results (partial results, never silence, so the controller records per-item outcomes). The
+controller keeps no pending-op state -- no dispatch dedup, no watchdog (2026-08-22 spec amendment).
+These constants are shared with the agent-side background-op guard, whose dedup window must not
+undercut the in-operation deadline; see
+[Operation budgets and the agent-side guard](#operation-budgets-and-the-agent-side-guard).
 
 #### `execute_update` payload
 
@@ -352,7 +354,8 @@ Known `plugin_type` values for discovery: `package-manager.homebrew`, `discovery
 sends `discovery_results` -- plugins not yet completed get a per-plugin error result (empty
 `discoveries`, `error` set) echoing the request's `plugin_config_id`/`plugin_type`, while plugins
 that already finished keep their real results (partial results, never silence). Shared with the
-controller's dispatch dedup TTLs (M1.6) for the same reason as `check_versions` above.
+agent-side background-op guard for the same reason as `check_versions` above; the controller keeps
+no pending-op state (2026-08-22 spec amendment).
 
 #### `discovery_results` payload
 

@@ -43,8 +43,9 @@ impl SshCommandExecutor {
 
     /// Execute a raw command string on the remote host.
     ///
-    /// Returns combined stdout + stderr. The timeout is optional; `None` means
-    /// no deadline.
+    /// Returns combined stdout + stderr. `timeout: None` applies the default
+    /// deadline ([`uptrakit_command::DEFAULT_COMMAND_TIMEOUT`]); it does not
+    /// mean unbounded.
     pub(crate) async fn exec_raw(
         &self,
         cmd: &str,
