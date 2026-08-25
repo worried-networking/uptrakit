@@ -38,6 +38,10 @@ const PER_PAGE: usize = 100;
 /// well under this; 8 MiB bounds a hostile or misconfigured forge.
 const MAX_RELEASE_PAGE_BYTES: usize = 8 * 1024 * 1024;
 
+/// Cap for a single release-asset download. Sized generously: real-world
+/// release assets are far smaller, but the read must still be bounded.
+const MAX_ASSET_DOWNLOAD_BYTES: usize = 512 * 1024 * 1024;
+
 /// Parse `"owner/repo"` from a package identifier string.
 ///
 /// Rules:
@@ -727,6 +731,15 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for GitHubPlugin {
 
         let asset = matching_assets[0];
 
+        if let Some(size) = asset.size
+            && size > MAX_ASSET_DOWNLOAD_BYTES as u64
+        {
+            bail!(PluginError::InstallFailed(format!(
+                "asset {name} declares {size} bytes, over the {MAX_ASSET_DOWNLOAD_BYTES}-byte download cap",
+                name = asset.name
+            )));
+        }
+
         send_output(
             output_tx,
             &format!(
@@ -792,11 +805,13 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for GitHubPlugin {
             )));
         }
 
-        let body_bytes = download_resp.bytes().await.map_err(|e| {
-            report!(PluginError::InstallFailed(format!(
-                "failed to read asset body: {e}"
-            )))
-        })?;
+        let body_bytes = read_bytes_capped(download_resp, MAX_ASSET_DOWNLOAD_BYTES)
+            .await
+            .map_err(|e| {
+                report!(PluginError::InstallFailed(format!(
+                    "failed to read asset body (cap {MAX_ASSET_DOWNLOAD_BYTES} bytes): {e}"
+                )))
+            })?;
 
         send_output(
             output_tx,
@@ -1588,6 +1603,46 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("matched 2 assets"), "error: {err}");
+    }
+
+    /// Declared asset size over the download cap must be rejected before any
+    /// network request is made — the download mock must receive zero hits.
+    ///
+    /// Correctness of the enforced read cap itself at 512 MiB is NOT
+    /// integration-tested here (no 512 MiB fixtures); that is covered by
+    /// `read_bytes_capped`'s own unit tests in
+    /// `uptrakit-plugin-infrastructure-core`.
+    #[tokio::test]
+    async fn oversized_asset_is_rejected_before_download() {
+        let server = httpmock::MockServer::start_async().await;
+        let download_mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/app");
+                then.status(200).body("irrelevant");
+            })
+            .await;
+
+        let config = GitHubConfig {
+            install_path: Some("/usr/local/bin/app".to_string()),
+            ..GitHubConfig::default()
+        };
+        let plugin = GitHubPlugin::new(config, test_runtime()).expect("valid config");
+        let (tx, _rx) = mpsc::channel(100);
+
+        let mut asset = make_release_asset("app", &format!("{}/app", server.base_url()));
+        asset.size = Some(549_755_813_888); // 512 GiB
+        let release = make_release_info(vec![asset]);
+
+        let result = plugin
+            .execute_update("owner/repo", "1.0.0", Some(&release), &tx)
+            .await;
+
+        let err = result.expect_err("oversized asset must be rejected");
+        assert!(
+            matches!(err.current_context(), PluginError::InstallFailed(_)),
+            "expected InstallFailed, got: {err:?}"
+        );
+        download_mock.assert_calls_async(0).await;
     }
 
     // ── required_sudo_commands tests ─────────────────────────────────────
