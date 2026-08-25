@@ -34,7 +34,9 @@ impl UptrakitClient {
     /// The returned stream yields [`UpdateOutputEvent`] values until the update
     /// completes (indicated by a `Completed` event) or the connection closes.
     ///
-    /// This method uses no request timeout since SSE connections are long-lived.
+    /// Uses the dedicated stream client (`stream_http`), which has no total
+    /// request timeout — dead connections are instead detected via
+    /// `STREAM_READ_TIMEOUT`.
     pub async fn stream_update_output(
         &self,
         id: &uuid::Uuid,
@@ -47,18 +49,23 @@ impl UptrakitClient {
         );
 
         let mut req = self
-            .http
+            .stream_http
             .get(&url)
-            .header("Accept", "text/event-stream")
-            // Override the client's default request timeout — SSE connections
-            // are long-lived and should not be timed out by the HTTP client.
-            .timeout(std::time::Duration::from_secs(86400));
+            .header("Accept", "text/event-stream");
 
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
         }
 
-        let resp = req.send().await.context_to()?;
+        let resp = tokio::time::timeout(Self::STREAM_READ_TIMEOUT, req.send())
+            .await
+            .map_err(|_elapsed| {
+                report!(ClientError::Api {
+                    status: reqwest::StatusCode::REQUEST_TIMEOUT,
+                    message: "timed out waiting for SSE stream response headers".to_string(),
+                })
+            })?
+            .context_to()?;
 
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {

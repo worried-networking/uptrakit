@@ -49,6 +49,9 @@ const MAX_CONSECUTIVE_SERVICE_EVENTS: u32 = 16;
 /// Default shutdown timeout when `ServiceSettings` does not provide one.
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Consecutive pings without a Pong before the connection is declared dead.
+const MISSED_PONG_LIMIT: u32 = 3;
+
 /// Send a keepalive ping to the controller.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` when the send fails (indicating
@@ -160,6 +163,11 @@ pub(crate) async fn run_event_loop_connected<H: ServiceHandler>(
     // arms when a service produces rapid bursts of events (e.g. MQTT bridge).
     let mut consecutive_service_events: u32 = 0;
 
+    // Tracks pings sent without a matching Pong; reset to 0 whenever a Pong
+    // arrives. When it reaches `MISSED_PONG_LIMIT`, the connection is
+    // declared dead and the loop breaks with `Disconnected`.
+    let mut outstanding_pings: u32 = 0;
+
     let outcome = loop {
         // When the service event budget is exhausted, skip the service event
         // arm for one iteration so that ping, renewal, and controller message
@@ -186,9 +194,17 @@ pub(crate) async fn run_event_loop_connected<H: ServiceHandler>(
             // of the `if let` return `()`, which tokio's select! requires.
             _ = async { if let Some(t) = ping_timer.as_mut() { t.tick().await; } }, if ping_timer.is_some() => {
                 consecutive_service_events = 0;
+                if outstanding_pings >= MISSED_PONG_LIMIT {
+                    tracing::warn!(
+                        outstanding = outstanding_pings,
+                        "no pong for {MISSED_PONG_LIMIT} consecutive pings; treating connection as dead"
+                    );
+                    break LoopOutcome::Disconnected;
+                }
                 if let Some(outcome) = send_keepalive_ping(conn).await {
                     break outcome;
                 }
+                outstanding_pings += 1;
             }
 
             // 3. Certificate renewal timer.
@@ -208,6 +224,7 @@ pub(crate) async fn run_event_loop_connected<H: ServiceHandler>(
                     shutdown_timeout: &mut shutdown_timeout,
                     renewal_sleep: &mut renewal_sleep,
                     ping_timer: &mut ping_timer,
+                    outstanding_pings: &mut outstanding_pings,
                     cert_not_after_ts,
                     config_dir: &config_dir,
                 };
@@ -281,6 +298,7 @@ struct LoopState<'a> {
     shutdown_timeout: &'a mut Duration,
     renewal_sleep: &'a mut Pin<Box<tokio::time::Sleep>>,
     ping_timer: &'a mut Option<tokio::time::Interval>,
+    outstanding_pings: &'a mut u32,
     cert_not_after_ts: Option<i64>,
     config_dir: &'a Path,
 }
@@ -312,10 +330,17 @@ async fn handle_service_settings(
     // Use interval_at so the first tick fires after one full period, not immediately.
     let interval_duration = settings.ping_interval;
     tracing::debug!(ping_interval_secs = ?interval_duration.as_secs(), "setting ping interval from controller");
-    let new_timer = tokio::time::interval_at(
+    let mut new_timer = tokio::time::interval_at(
         tokio::time::Instant::now() + interval_duration,
         interval_duration,
     );
+    // The default `Burst` behavior replays every stall-backlogged tick
+    // back-to-back the moment the loop resumes polling (e.g. after a long
+    // GC pause or a scheduler stall), which would let missed-pong counting
+    // race through several "ticks" in one instant and misreport a healthy
+    // connection as dead. `Delay` keeps ticks spaced one real interval
+    // apart from whenever the timer is next polled instead.
+    new_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     *state.ping_timer = Some(new_timer);
 
     crate::ca::check_ca_staleness(
@@ -428,6 +453,7 @@ async fn handle_controller_message<H: ServiceHandler>(
                 rtt_ms = rtt,
                 "received pong"
             );
+            *loop_state.outstanding_pings = 0;
             Ok(None)
         }
         Some(ControllerMessage::Certificate(payload)) => cert_handler
@@ -818,6 +844,71 @@ mod tests {
         );
     }
 
+    /// Proves that a connection with no incoming Pongs is declared dead
+    /// (`LoopOutcome::Disconnected`) after `MISSED_PONG_LIMIT` consecutive
+    /// pings go unanswered.
+    ///
+    /// Feeds a single `ServiceSettings` message (with a short `ping_interval`)
+    /// to start the ping timer, then leaves the read stream pending forever —
+    /// no `Pong` ever arrives. Under `start_paused = true`, Tokio auto-advances
+    /// the virtual clock to the next timer deadline whenever no task can make
+    /// progress, so the four ping ticks (three sent pings + the disconnect
+    /// tick) fire without a real-time wait.
+    #[tokio::test(start_paused = true)]
+    async fn missed_pongs_disconnect_after_limit() {
+        // `duration_seconds` wire encoding truncates to whole seconds, so the
+        // interval must be at least 1s to survive the JSON round-trip below.
+        let ping_interval = Duration::from_secs(1);
+        let settings = ServiceSettingsPayload::new(24, ping_interval);
+        let envelope = crate::wire_api::OutgoingSeq::new().wrap_controller(
+            ControllerMessage::ServiceSettings(settings),
+            crate::wire_api::TraceContext::default(),
+        );
+        let json = serde_json::to_string(&envelope).expect("envelope must serialize");
+
+        let read_stream: Pin<Box<dyn Stream<Item = TestReadItem> + Send>> =
+            Box::pin(futures_util::StreamExt::chain(
+                stream::once(async move {
+                    Ok(tokio_tungstenite::tungstenite::Message::Text(json.into()))
+                }),
+                stream::pending(),
+            ));
+
+        let mut conn = ControllerConnection::new_test(read_stream);
+        let mut handler = SurfaceDispatchHandler::default();
+        let tmp = tempfile::tempdir().expect("tempdir must be created");
+        let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
+        let ctx = EventLoopContext {
+            base_url: "https://test.local",
+            pki_addr: None,
+            ca_pem: None,
+        };
+        let mut signals = SignalWatcher::new().expect("signal watcher must initialize");
+        let cert_resolver = make_test_cert_resolver();
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            run_event_loop_connected(
+                &mut handler,
+                &mut conn,
+                cert_resolver,
+                &mut identity,
+                &ctx,
+                &mut signals,
+            ),
+        )
+        .await;
+
+        let loop_result = result
+            .expect("test timed out waiting for missed-pong disconnect")
+            .expect("event loop should complete without loop error");
+        assert_eq!(
+            loop_result,
+            LoopOutcome::Disconnected,
+            "expected the loop to disconnect after MISSED_PONG_LIMIT consecutive pings without a pong"
+        );
+    }
+
     #[derive(Default, Clone)]
     struct SurfaceDispatchState {
         surface_request_count: usize,
@@ -900,12 +991,14 @@ mod tests {
         renewal_sleep: &'a mut Pin<Box<tokio::time::Sleep>>,
         shutdown_timeout: &'a mut Duration,
         ping_timer: &'a mut Option<tokio::time::Interval>,
+        outstanding_pings: &'a mut u32,
         config_dir: &'a std::path::Path,
     ) -> LoopState<'a> {
         LoopState {
             shutdown_timeout,
             renewal_sleep,
             ping_timer,
+            outstanding_pings,
             cert_not_after_ts: identity.cert_not_after_ms(),
             config_dir,
         }
@@ -921,11 +1014,13 @@ mod tests {
         let mut renewal_sleep = create_renewal_sleep();
         let mut shutdown_timeout = Duration::from_secs(30);
         let mut ping_timer: Option<tokio::time::Interval> = None;
+        let mut outstanding_pings: u32 = 0;
         let mut loop_state = build_loop_state_for_tests(
             &identity,
             &mut renewal_sleep,
             &mut shutdown_timeout,
             &mut ping_timer,
+            &mut outstanding_pings,
             tmp.path(),
         );
         let ctx = EventLoopContext {
@@ -982,11 +1077,13 @@ mod tests {
         let mut renewal_sleep = create_renewal_sleep();
         let mut shutdown_timeout = Duration::from_secs(30);
         let mut ping_timer: Option<tokio::time::Interval> = None;
+        let mut outstanding_pings: u32 = 0;
         let mut loop_state = build_loop_state_for_tests(
             &identity,
             &mut renewal_sleep,
             &mut shutdown_timeout,
             &mut ping_timer,
+            &mut outstanding_pings,
             tmp.path(),
         );
         let ctx = EventLoopContext {

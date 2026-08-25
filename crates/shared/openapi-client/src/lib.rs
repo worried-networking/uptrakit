@@ -125,12 +125,30 @@ impl Default for RetryConfig {
     }
 }
 
+/// Build a `reqwest::ClientBuilder` with the shared TLS configuration
+/// (insecure mode or a custom CA) applied. Shared between the two clients
+/// built in [`UptrakitClient::new`] so the insecure/ca_pem logic is written
+/// once.
+fn tls_configured_builder(insecure: bool, ca_pem: Option<&str>) -> Result<reqwest::ClientBuilder> {
+    let mut builder = reqwest::Client::builder();
+    if insecure {
+        builder = builder.tls_danger_accept_invalid_certs(true);
+    } else if let Some(pem) = ca_pem {
+        let cert = reqwest::Certificate::from_pem(pem.as_bytes()).context_to()?;
+        builder = builder.tls_certs_only(std::iter::once(cert));
+    }
+    Ok(builder)
+}
+
 /// Typed HTTP client for the Uptrakit web API.
 ///
 /// Provides compile-time type safety for all API endpoints by using shared
 /// request/response types from `uptrakit-web-api-types`.
 pub struct UptrakitClient {
     http: reqwest::Client,
+    /// Dedicated client for SSE streams: no total request timeout (streams
+    /// are long-lived), dead-path detection via `read_timeout` instead.
+    stream_http: reqwest::Client,
     base_url: String,
     token: Option<String>,
     retry: Option<RetryConfig>,
@@ -142,6 +160,10 @@ impl UptrakitClient {
 
     /// Default request timeout for the HTTP client (30 seconds).
     const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+    /// Read-timeout for SSE stream connections: 6x the server's 15s keepalive
+    /// interval — tolerant of jitter, still detects a dead TCP path in ~90s.
+    const STREAM_READ_TIMEOUT: Duration = Duration::from_secs(90);
 
     /// Create a new client. Pass `token: None` for unauthenticated endpoints
     /// (e.g. the device authorization flow).
@@ -165,19 +187,20 @@ impl UptrakitClient {
         request_timeout: Option<Duration>,
     ) -> Result<Self> {
         let timeout = request_timeout.unwrap_or(Self::DEFAULT_REQUEST_TIMEOUT);
-        let mut builder = reqwest::Client::builder()
+        let http = tls_configured_builder(insecure, ca_pem)?
             .connect_timeout(Self::DEFAULT_CONNECT_TIMEOUT)
-            .timeout(timeout);
-        if insecure {
-            builder = builder.tls_danger_accept_invalid_certs(true);
-        } else if let Some(pem) = ca_pem {
-            let cert = reqwest::Certificate::from_pem(pem.as_bytes()).context_to()?;
-            builder = builder.tls_certs_only(std::iter::once(cert));
-        }
-        let http = builder.build().context_to()?;
+            .timeout(timeout)
+            .build()
+            .context_to()?;
+        let stream_http = tls_configured_builder(insecure, ca_pem)?
+            .connect_timeout(Self::DEFAULT_CONNECT_TIMEOUT)
+            .read_timeout(Self::STREAM_READ_TIMEOUT)
+            .build()
+            .context_to()?;
 
         Ok(Self {
             http,
+            stream_http,
             base_url: base_url.trim_end_matches('/').to_string(),
             token: token.map(|t| t.to_string()),
             retry: None,

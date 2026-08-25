@@ -90,7 +90,9 @@ impl UptrakitClient {
     /// state changes occur) and should be cancelled by the caller when no longer
     /// needed.
     ///
-    /// Uses an 86400s (24h) timeout, matching other long-lived SSE connections.
+    /// Uses the dedicated stream client (`stream_http`), which has no total
+    /// request timeout — dead connections are instead detected via
+    /// `STREAM_READ_TIMEOUT`.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
     pub async fn stream_events(
         &self,
@@ -99,13 +101,20 @@ impl UptrakitClient {
         let url = format!("{}{}", self.base_url, crate::paths::events::STREAM);
 
         let req = self
-            .http
+            .stream_http
             .get(&url)
             .bearer_auth(self.token_or_err()?)
-            .header("Accept", "text/event-stream")
-            .timeout(std::time::Duration::from_secs(86400));
+            .header("Accept", "text/event-stream");
 
-        let resp = req.send().await.context_to()?;
+        let resp = tokio::time::timeout(Self::STREAM_READ_TIMEOUT, req.send())
+            .await
+            .map_err(|_elapsed| {
+                report!(crate::ClientError::Api {
+                    status: reqwest::StatusCode::REQUEST_TIMEOUT,
+                    message: "timed out waiting for SSE stream response headers".to_string(),
+                })
+            })?
+            .context_to()?;
 
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
