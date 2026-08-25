@@ -127,8 +127,13 @@ Controller-side plugins that make HTTP calls build their client via `build_plugi
 timeouts: `connect_timeout` is a fixed 10s, `timeout` defaults to 60s. Pass `SsrfMode::Strict` (uses
 `SsrfSafeResolver::new()`) for any client that will contact user-controlled URLs; use `SsrfMode::Permissive`
 (`SsrfSafeResolver::permissive()`) only for plugins/deployments that intentionally allow private-network
-targets (e.g. a self-hosted registry URL a tenant configured themselves). Apply auth headers per-request, not
-as client default headers, to avoid credential leakage across redirects.
+targets (e.g. a self-hosted registry URL a tenant configured themselves). A default header on a client is
+safe only when its credential is absent, applied per-request instead, or carried in a header reqwest strips
+on cross-origin redirect (`Authorization`/`Cookie`/`Proxy-Authorization` only) — a custom header such as
+`PRIVATE-TOKEN` is never eligible and forces `RedirectMode::None`. Every client also declares a typed
+`RedirectMode` (`None` default, `Limited { hops }` for content-delivery endpoints); direct
+`reqwest::Client::builder()` calls are clippy-banned outside `build_plugin_http_client`. See
+[ADR-0047](../../docs/adr/0047-typed-redirect-policy-for-outbound-http-clients.md).
 
 ## Capabilities
 

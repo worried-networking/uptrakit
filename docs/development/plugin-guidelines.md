@@ -814,7 +814,15 @@ let http_client = controller.http_client().clone();
 - **Connect timeout** -- always 10 s; non-configurable.
 - **Request timeout** -- 60 s default.
 
-**Auth headers are applied per-request**, not as default headers on the client. This prevents credential leakage across redirects:
+Every client also declares a typed `RedirectMode` (`crates/plugins/infrastructure/core/src/redirect.rs`): `None` (default; never follow
+redirects) or `Limited { hops }` (follow up to `hops` redirects, with every hop checked for scheme downgrade and, under `SsrfMode::Strict`,
+private-IP-literal targets). Use `Limited` only for content-delivery endpoints such as a release-asset download or CDN redirect; keep everything
+else on `None`.
+
+A default header on a `Limited` client is safe only when the credential it carries is absent, applied per-request instead, or carried in a
+header reqwest strips on a cross-origin redirect (`Authorization`, `Cookie`, `Proxy-Authorization` — exhaustively, no others). A custom auth
+header such as GitLab's `PRIVATE-TOKEN` is never eligible for that exception and forces `RedirectMode::None` for as long as it is a client
+default header:
 
 ```rust
 let mut request = self.http_client.get(&url);
@@ -824,8 +832,11 @@ if let Some(token) = &self.config.auth_token {
 let response = request.send().await?;
 ```
 
-Do **not** call `reqwest::Client::builder()` directly in plugin code. Using the shared client from `ControllerRuntime` ensures that all security
-settings are applied consistently and that future hardening improvements propagate automatically.
+See [ADR-0047](../adr/0047-typed-redirect-policy-for-outbound-http-clients.md) for the full rule and the GitLab counterexample.
+
+Do **not** call `reqwest::Client::builder()` directly in plugin code — this is clippy-enforced (`clippy.toml` `disallowed-methods`). Using the
+shared client from `ControllerRuntime` ensures that all security settings are applied consistently and that future hardening improvements
+propagate automatically.
 
 ## Command Executor Pattern
 

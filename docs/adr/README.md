@@ -47,3 +47,4 @@
 - [0044 — Shared PVE user with per-tenant privilege-separated API tokens](0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
 - [0045 — Explicit MCP OAuth opt-in and canonical OIDC redirect pinning](0045-explicit-mcp-oauth-opt-in-and-canonical-oidc-redirect-pinning.md)
 - [0046 — Agent-side guard for fire-and-forget operation overlap](0046-agent-side-guard-for-fire-and-forget-operation-overlap.md)
+- [47. Typed redirect policy for outbound HTTP clients](0047-typed-redirect-policy-for-outbound-http-clients.md)

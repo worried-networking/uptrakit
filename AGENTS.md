@@ -259,7 +259,9 @@ These are non-negotiable design constraints. Do not violate them.
    status as `StatusCode` (not `u16`). See [Coding Standards](docs/development/coding-standards.md).
 1. **Use `SsrfSafeResolver` for all outbound HTTP clients.** Any `reqwest::Client` sending to user-controlled URLs must set
    `.dns_resolver(Arc::new(SsrfSafeResolver::new()))` (or `::permissive()` for self-hosted; in `uptrakit_shared_types::ssrf` behind `http-ssrf`).
-   See [SSRF Protection](docs/security/secure-development.md#ssrf-protection).
+   Outbound clients also declare a typed `RedirectMode`; direct `reqwest::Client::builder()` is clippy-banned outside
+   `build_plugin_http_client` (see [ADR-0047](docs/adr/0047-typed-redirect-policy-for-outbound-http-clients.md)). See
+   [SSRF Protection](docs/security/secure-development.md#ssrf-protection).
 1. **Use typed action extractors for route authorization.** Never perform an inline authorization check in a handler body (there is no
    `has_permission`-style method); declare the requirement via an Axum extractor. Route families default to `action_extractor!`
    (`crates/ui/web-api/src/middleware/action.rs`), backed by the

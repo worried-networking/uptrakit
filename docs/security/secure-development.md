@@ -230,9 +230,10 @@ let client = reqwest::Client::builder()
 All plugin HTTP clients and the webhook notification channel use `SsrfSafeResolver`:
 
 - Release plugins: GitHub, GitLab, Forgejo, Docker registry
-- Package manager plugins: npm
+- Package manager plugins: npm (including custom registries), cargo, uv
 - Discovery plugins: Proxmox Helper Scripts
 - Notification channels: Webhook (permissive when `--allow-private-notification-urls`)
+- Agent-core: shared update logic (`crates/shared/agent-core`)
 
 The Docker plugin additionally validates the registry hostname in `validate_identifier()`
 via `is_private_host()`, providing defence-in-depth at config-save time.
@@ -246,6 +247,17 @@ features = ["http-ssrf"] }` to the crate's `Cargo.toml`.
 Internal-only clients (e.g. the openapi-client connecting to a known controller URL, or
 the CA certificate fetch in service-sdk) do not need SSRF protection because their
 target URLs are not user-controlled.
+
+### Residual risk: initial-URL IP literals
+
+`SsrfSafeResolver` filters addresses at DNS resolution time. An IP literal in the initial
+URL (e.g. `http://169.254.169.254/`) never reaches the resolver, so the resolver guard does
+not cover it. Redirect targets are covered separately: a `RedirectMode::Limited` client's
+per-hop guard (`check_hop`, see
+[ADR-0047](../adr/0047-typed-redirect-policy-for-outbound-http-clients.md)) rejects a
+private-IP-literal hop under `SsrfMode::Strict`, independent of DNS resolution. Hardening
+the initial-URL case — for example by classifying the URL host before the first connect —
+is deferred.
 
 ### Documented exception: operator-context CLI clients
 

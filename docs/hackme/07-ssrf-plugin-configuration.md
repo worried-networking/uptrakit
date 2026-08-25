@@ -72,10 +72,13 @@ requests to cloud metadata endpoints.
 - **Error message information leakage.** Connection errors from SSRF attempts may
   include internal IP addresses, port numbers, or service banners in error messages
   returned to the API caller or logged in version check results.
-- ~~Redirect following.~~ **Fixed.** All plugin HTTP clients now use
-  `redirect(Policy::none())`, disabling automatic redirect following.
-  `SsrfSafeResolver` provides additional defence-in-depth by blocking private-IP
-  resolution on redirect targets.
+- ~~Redirect following.~~ **Fixed.** Every plugin HTTP client declares a typed
+  `RedirectMode` (`None` or `Limited { hops }`); `None` is the default and disables
+  redirect following entirely. `Limited` is reserved for content-delivery endpoints
+  (e.g. release-asset downloads) and guards every hop: an https-to-http scheme
+  downgrade is always rejected, and under `SsrfMode::Strict` a hop targeting a
+  private-IP literal is also rejected. See
+  [ADR-0047](../adr/0047-typed-redirect-policy-for-outbound-http-clients.md).
 
 ## Recommended improvements
 
@@ -87,8 +90,9 @@ requests to cloud metadata endpoints.
   hostname.
 - ~~Block IPv6 ULA, link-local, and CGNAT ranges~~ — **Done.** Consolidated shared
   `is_private_host()` in `uptrakit_shared_types::network` covers all ranges.
-- ~~Disable HTTP redirect following in plugin HTTP clients~~ — **Done.** All plugin
-  clients use `redirect(Policy::none())`.
+- ~~Disable HTTP redirect following in plugin HTTP clients~~ — **Done.** Every client
+  declares a typed `RedirectMode`, `None` by default; `Limited { hops }` clients
+  enforce a per-hop scheme-downgrade and private-IP-literal guard.
 - Sanitize error messages from failed SSRF attempts to avoid leaking internal network
   information in API responses and logs.
 - Consider an allowlist-based approach for `api_base_url` where operators explicitly
