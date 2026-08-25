@@ -10,6 +10,10 @@ pub mod http_client;
 pub use http_client::{
     PluginHttpClientBuildError, PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
 };
+#[cfg(feature = "http-client")]
+pub mod body_read;
+#[cfg(feature = "http-client")]
+pub use body_read::{BodyReadError, read_bytes_capped, read_text_capped};
 pub mod batch_detect;
 pub mod batch_fetch;
 pub mod batch_update;
