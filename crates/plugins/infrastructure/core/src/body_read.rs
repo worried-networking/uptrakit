@@ -98,12 +98,14 @@ mod tests {
 
     #[tokio::test]
     async fn at_cap_body_is_returned() {
-        let server = MockServer::start();
+        let server = MockServer::start_async().await;
         let body = "x".repeat(CAP);
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/at-cap");
-            then.status(200).body(&body);
-        });
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/at-cap");
+                then.status(200).body(&body);
+            })
+            .await;
 
         let resp = reqwest::Client::new()
             .get(server.url("/at-cap"))
@@ -115,17 +117,19 @@ mod tests {
             .await
             .expect("body at cap should be accepted");
         assert_eq!(bytes, body.into_bytes());
-        mock.assert();
+        mock.assert_async().await;
     }
 
     #[tokio::test]
     async fn over_cap_body_is_rejected() {
-        let server = MockServer::start();
+        let server = MockServer::start_async().await;
         let body = "x".repeat(CAP + 1);
-        let mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/over-cap");
-            then.status(200).body(&body);
-        });
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/over-cap");
+                then.status(200).body(&body);
+            })
+            .await;
 
         let resp = reqwest::Client::new()
             .get(server.url("/over-cap"))
@@ -140,16 +144,18 @@ mod tests {
             err.current_context(),
             BodyReadError::TooLarge { limit: 64, .. }
         ));
-        mock.assert();
+        mock.assert_async().await;
     }
 
     #[tokio::test]
     async fn read_text_capped_decodes() {
-        let server = MockServer::start();
-        let small_mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/small");
-            then.status(200).body("hello");
-        });
+        let server = MockServer::start_async().await;
+        let small_mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/small");
+                then.status(200).body("hello");
+            })
+            .await;
 
         let resp = reqwest::Client::new()
             .get(server.url("/small"))
@@ -161,13 +167,15 @@ mod tests {
             .await
             .expect("small body should decode");
         assert_eq!(text, "hello");
-        small_mock.assert();
+        small_mock.assert_async().await;
 
         let over_body = "x".repeat(CAP + 1);
-        let over_mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/over-text");
-            then.status(200).body(&over_body);
-        });
+        let over_mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/over-text");
+                then.status(200).body(&over_body);
+            })
+            .await;
 
         let resp = reqwest::Client::new()
             .get(server.url("/over-text"))
@@ -182,7 +190,7 @@ mod tests {
             err.current_context(),
             BodyReadError::TooLarge { limit: 64, .. }
         ));
-        over_mock.assert();
+        over_mock.assert_async().await;
     }
 
     #[test]
