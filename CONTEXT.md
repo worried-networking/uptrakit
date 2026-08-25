@@ -79,6 +79,18 @@ The dispatch payload's `timeout` (7200s default), forwarded into a non-interacti
 timeout. Plugin-set timeouts are always respected over the budget.
 _Avoid_: update timeout (ambiguous with the outer pipeline timeout that races it)
 
+**Operation Budget**:
+The in-op deadline a fire-and-forget agent operation (version check, discovery, config test) runs
+under. Defined in `uptrakit_shared_types::op_timeouts`.
+_Avoid_: timeout (too generic — this is specifically the wire-level op budget, not the executor's
+Command Deadline)
+
+**Background-Op Guard**:
+The agent-side registry (`BackgroundOps`) that skips a new `CheckVersions`/`DiscoverSoftware`
+dispatch already covered by a live run, and drops a hung run's future once it passes its Operation
+Budget plus grace.
+_Avoid_: watchdog, dedup gate (there is no controller-side counterpart — the guard is agent-only)
+
 **Controller**:
 The central server that coordinates all Services.
 _Avoid_: backend, server, hub

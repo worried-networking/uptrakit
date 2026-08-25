@@ -236,6 +236,10 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Every command execution path carries a deadline.** The executor resolves `DEFAULT_COMMAND_TIMEOUT` at the execution decision point (never
    written into `CommandSpec`); update/op paths substitute explicit budgets; external cancellation behavior is per-command `AbandonmentPolicy`. See
    [Command Executor](docs/development/command-executor.md).
+1. **Fire-and-forget agent operations are budget-bounded and agent-side dedup-guarded.** Budgets live in
+   `uptrakit_shared_types::op_timeouts`; the agent's `BackgroundOps` guard (`uptrakit-agent-core`) is the sole
+   overlap-prevention mechanism — the controller keeps no pending-op state. See
+   [Operation budgets and the agent-side guard](docs/api/wire-protocol.md#operation-budgets-and-the-agent-side-guard).
 1. **Do not add any `#[allow()]`** without explicit confirmation. Workspace lints enforce `warnings = "deny"` and `clippy::all = "deny"`. Sole
    exception (feature-gated dead code with an inline comment): [Lint
    Suppressions](docs/development/coding-standards.md#lint-suppressions-for-feature-gated-items).

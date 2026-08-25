@@ -42,12 +42,12 @@ Rust tool exists and they are derivable only via custom code.
 ### Rejected during implementation
 
 - **`cargo modules --acyclic` as a module-cycle gate.** Empirically unusable here: it analyses the
-  *item* graph, so any idiomatic `Debug`/`Clone`/`Display`/`Default`/`fn new() -> Self` impl reads as a
+  _item_ graph, so any idiomatic `Debug`/`Clone`/`Display`/`Default`/`fn new() -> Self` impl reads as a
   `Type ↔ Type::method` cycle. A full sweep flagged **66 of 71 crates** with **zero genuine cycles**,
-  and no flag suppresses the false positives. Rust's resolver already forbids circular *crate*
+  and no flag suppresses the false positives. Rust's resolver already forbids circular _crate_
   dependencies at build time, so the real risk this gate was meant to cover does not exist. Dropped
   entirely — including the `cargo metadata`-derived crate-allowlist helper it required.
-- **`cargo machete` as a *blocking* gate.** This workspace is macro- and feature-heavy (its weak
+- **`cargo machete` as a _blocking_ gate.** This workspace is macro- and feature-heavy (its weak
   spot): a baseline run produced ~32–45 findings dominated by false positives (macro crates,
   feature-gated TLS, build-side-effect dev-deps). Keeping it green would require an ongoing per-crate
   ignore list, fighting the zero-maintenance goal. It runs **advisory** instead — useful signal,

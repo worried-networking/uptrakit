@@ -106,20 +106,20 @@ B).
   intended consumer reads, and never by adding a predicate that tries to detect which process it is
   linked into — process scope is consumer-selected data, not producer-computed logic.
 - "Content" (what a builder function returns) stays testable per-plugin with `cargo test -p
-  <plugin>`; "presence under feature unification" is not, and was never testable that way — the
+<plugin>`; "presence under feature unification" is not, and was never testable that way — the
   plugin cannot observe another workspace member's feature choices, and proxmox's own dev-dependency
   even pins the union shape for its own tests. That guarantee now belongs to the registry-level
   guards in `contribution_monotonicity_guard.rs`, with the cross-build diff in Layer B covering
   plugins with no dedicated assertion.
 - Layers A and C are meaningful only in a build where the guarded feature is enabled; in the default
   feature lane both assertions pass trivially because nothing is being suppressed. `cargo test
-  --all-features` is the load-bearing lane, consistent with the rest of the quality-gates catalog.
+--all-features` is the load-bearing lane, consistent with the rest of the quality-gates catalog.
 - Layer B (`cargo xtask contribution-monotonicity-check`, CI-enforced in the backend lint job) now
   provides automated protection against contribution thinning under unification for plugins and axes
   without a dedicated Layer A/C assertion — closing the gap that previously relied on the exemplar
   fix, the workspace sweep, and code review alone.
 - The proxmox self dev-dependency restructure that would let `cargo test -p
-  uptrakit-plugin-infrastructure-proxmox` exercise the lean feature shape instead of always pinning
+uptrakit-plugin-infrastructure-proxmox` exercise the lean feature shape instead of always pinning
   the union remains a separate, deferred design:
   `docs/superpowers/specs/2026-07-20-proxmox-bare-crate-gates-design.md`. This ADR does not depend on
   it.
@@ -132,6 +132,6 @@ B).
 - Behavioral guard (Layers A + C):
   `crates/plugins/infrastructure/registry/tests/contribution_monotonicity_guard.rs`
 - Prior incident: commit `800975bea` (`fix(proxmox): fix update protection never running in
-  embedded builds`)
+embedded builds`)
 - Regex gate (unchanged): `ci/verify_no_new_cfg_not_feature.sh`
 - `AGENTS.md` — "Feature flags are additive only" rule

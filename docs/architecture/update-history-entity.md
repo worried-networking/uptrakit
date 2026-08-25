@@ -25,6 +25,7 @@ Records are immutable — once created they are not modified or soft-deleted.
 | `started_at`            | TIMESTAMP                          | Nullable                                                                                                         |
 | `completed_at`          | TIMESTAMP                          | Nullable                                                                                                         |
 | `created_at`            | TIMESTAMP                          |                                                                                                                  |
+| `timeout_seconds`       | INTEGER                            | Nullable; per-row execution budget recorded at dispatch                                                          |
 
 Indexes: `idx_update_history_host_id`, `idx_update_history_software_item_id`,
 `idx_update_history_status`, `idx_update_history_host_software_item` (composite),
@@ -122,6 +123,18 @@ At most one active (`Pending` or `InProgress`) update may run on a host at any t
 When a second update is triggered while the host is busy, it is **queued** instead of rejected.
 All update types (individual software item updates and batch updates) share the same
 `update_history` table and the same per-host queue.
+
+### `timeout_seconds` and the `InProgress` budget reaper
+
+`timeout_seconds` records the execution budget agreed at dispatch time. Today every new row writes
+the same value: `DEFAULT_UPDATE_TIMEOUT` (7,200s, `uptrakit-wire`). A `NULL` value marks a legacy row
+written before this column existed; the reaper falls back to its own default budget for those rows.
+
+`reap_overdue_updates` (`crates/ui/web-api-queries/src/queries/update_reaper.rs`) transitions an
+`InProgress` row to `Interrupted` once `started_at + timeout_seconds + grace` is past the current
+time. It keys purely on the row's own deadline, never on agent connectivity — an agent can hold a
+live SSH session across a websocket partition, so connection state alone says nothing about whether
+the update is still running. `Queued`, `Pending`, and `AwaitingRestart` rows are left untouched.
 
 ### Pending-row reaping
 

@@ -928,6 +928,47 @@ This prevents boundary burst attacks where a fixed-window limiter would allow
 next). When the estimate exceeds `WS_MESSAGE_RATE_LIMIT` (50), the connection
 is closed with `CloseReason::RateLimitExceeded`.
 
+## Operation budgets and the agent-side guard
+
+Fire-and-forget agent operations (`CheckVersions`, `DiscoverSoftware`, plugin config tests) run under
+a fixed in-op deadline. `uptrakit_shared_types::op_timeouts` defines each budget:
+
+| Operation              | Budget |
+| ---------------------- | ------ |
+| Version check (batch)  | 1,800s |
+| Discovery (whole host) | 1,800s |
+| Plugin config test     | 25s    |
+
+`OP_DEADLINE_GRACE` (60s) extends each budget into an in-operation deadline. The deadline bounds the
+inner per-group or per-plugin work, which always produces a result (partial or timed-out) before the
+grace expires.
+
+The agent guards `CheckVersions` and `DiscoverSoftware` spawns with an in-process registry
+(`BackgroundOps`, `uptrakit-agent-core`), keyed by `(host_machine_id, kind)`. A new dispatch is
+skipped only when a live run already covers it:
+
+- A version check is skipped when its requested item set is a subset of a live run's item set.
+  Disjoint or partially overlapping item sets run concurrently.
+- A discovery run is skipped when any live run exists for the host. Discovery scope is the whole
+  host, not a subset.
+
+The dedup window for a live run ends at `budget + OP_DEADLINE_GRACE` — the in-operation deadline
+instant. A dispatch that arrives after the window ends is never suppressed, even if the prior run's
+task has not yet been reaped. The guard drops the guarded future (a cancellation backstop, not the
+normal exit path) a further `BG_OP_ABORT_GRACE` (120s, `uptrakit-agent-core`) past the window end.
+This backstop only fires for a genuinely hung plugin; a well-behaved run always completes and sends
+its result before the window ends.
+
+Plugin config tests are request/response, correlated by a request ID, and bounded by their own 25s
+in-op deadline plus a 30s REST-level bound. They do not use the guard.
+
+The controller performs no dedup and keeps no pending-op state for these operations; it dispatches
+freely. A skipped dispatch is visible only as an agent-side `info!` log line — the controller sends
+no acknowledgment or rejection, and synthesizes no result. A lost result (agent crash, disconnect
+mid-run) is bounded by the in-op deadline on the agent side, but the controller has no matching
+timeout of its own; closing that visibility gap is the scope of the
+`uptrakit-async-op-failure-surface` epic (2026-08-22 spec amendment).
+
 ## Report Pagination
 
 When a service-to-controller report payload (`discovery_results`, `version_check_results`,

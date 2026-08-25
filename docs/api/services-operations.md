@@ -76,6 +76,10 @@ service is using the profile-based default rather than a per-service override.
 - **OpenAPI client**: `update_service(&self, id: &Uuid, req: &UpdateServiceRequest) -> Result<ServiceResponse>`
   in `crates/shared/openapi-client/src/services.rs`.
 - **Frontend**: Service page context menu includes an "Edit Ping Interval" dialog.
+- **Missed-pong disconnect**: The SDK tracks unanswered keepalive pings. `MISSED_PONG_LIMIT` is 3. On
+  the ping tick after the third unanswered ping, the SDK declares the connection dead and reconnects
+  with the standard backoff. The worst-case detection bound is `(MISSED_PONG_LIMIT + 1)` ping
+  intervals. At the 300s agent default, that is about 20 minutes.
 
 ## MQTT Service
 

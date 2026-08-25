@@ -45,11 +45,11 @@ Deferral extended indefinitely. Revisit only when a concrete deployment with
 
 ## Alternatives considered
 
-| Option                                                   | Outcome                                                                              |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Ship Path A in the current hardening spec                | Rejected — significantly enlarges scope; benefit materializes once per 5 years.      |
-| Reuse the keypair across CA rotations (same-key renewal) | Rejected — defeats the purpose of rotation (key hygiene).                            |
-| Cross-sign managed CA with a public root                 | Rejected — Baseline Requirements forbid name-unconstrained public subordinates.      |
+| Option                                                   | Outcome                                                                         |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Ship Path A in the current hardening spec                | Rejected — significantly enlarges scope; benefit materializes once per 5 years. |
+| Reuse the keypair across CA rotations (same-key renewal) | Rejected — defeats the purpose of rotation (key hygiene).                       |
+| Cross-sign managed CA with a public root                 | Rejected — Baseline Requirements forbid name-unconstrained public subordinates. |
 
 ## Related
 

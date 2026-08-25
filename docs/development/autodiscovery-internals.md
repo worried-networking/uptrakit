@@ -30,6 +30,12 @@ snapshot. See [Autodiscovery: Periodic Software Rediscovery](../end-user/autodis
 for the user-facing behavior (disappeared packages, schedule configuration, auto-updating casks
 excluded from discovery).
 
+Each `DiscoverSoftware` run is dedup-guarded on the agent. A dispatch that arrives while a discovery
+run for the same host is still inside its budget window is skipped, logged, and never queued behind
+the live run. No per-plugin errors are synthesized for a skipped dispatch — a genuinely hung run
+still produces timed-out results at its in-operation deadline. See
+[Operation budgets and the agent-side guard](../api/wire-protocol.md#operation-budgets-and-the-agent-side-guard).
+
 ## 2. No approval workflow
 
 All discovered items are created immediately with `enabled: true`. There is no pending state.

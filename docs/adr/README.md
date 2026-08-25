@@ -46,3 +46,4 @@
 - [0043 — Journald-native log sink selection](0043-journald-native-log-sink-selection.md)
 - [0044 — Shared PVE user with per-tenant privilege-separated API tokens](0044-shared-pve-user-with-per-tenant-privilege-separated-api-tokens.md)
 - [0045 — Explicit MCP OAuth opt-in and canonical OIDC redirect pinning](0045-explicit-mcp-oauth-opt-in-and-canonical-oidc-redirect-pinning.md)
+- [0046 — Agent-side guard for fire-and-forget operation overlap](0046-agent-side-guard-for-fire-and-forget-operation-overlap.md)
