@@ -4,10 +4,10 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
-    HostRequirements, HostRuntime, PluginError, PluginFamily, PluginHttpClientConfig, PluginRole,
-    SsrfMode, SudoCommandEntry, SudoHelperScript, build_plugin_http_client, declare_plugin,
-    plugin_ids,
+    BodyReadError, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
+    HostCompatibility, HostRequirements, HostRuntime, PluginError, PluginFamily,
+    PluginHttpClientConfig, PluginRole, SsrfMode, SudoCommandEntry, SudoHelperScript,
+    build_plugin_http_client, declare_plugin, plugin_ids, read_text_capped,
 };
 
 use crate::config::ProxmoxHelperScriptsConfig;
@@ -73,6 +73,10 @@ const PHS_DETECT_VERSION_CMD: &str =
 /// ```
 const PHS_INSTALL_CMD: &str = "sudo PHS_SILENT=1 TERM=xterm /usr/bin/update";
 
+/// Cap for remote text fetches. Upstream JSON is ~100s of KiB; 1 MiB is
+/// generous headroom while bounding a hostile server.
+const MAX_FETCH_TEXT_BYTES: usize = 1024 * 1024;
+
 /// Plugin for Proxmox Helper Scripts (discovery-only).
 ///
 /// Discovers PHS-managed software by:
@@ -114,7 +118,7 @@ enum FetchOutcome {
 }
 
 /// Why a fetch failed, keeping the failure typed (and the underlying
-/// `reqwest::Error` as the error source) instead of flattening it into a
+/// error as the error source) instead of flattening it into a
 /// message string at the point of failure. Rendered into
 /// [`PluginError::PluginInternal`] only at the `bail!` sites in
 /// `discover_software`; because that variant carries a `String`, each message
@@ -127,9 +131,10 @@ enum FetchError {
     /// A response arrived carrying a non-success, non-404 status.
     #[error("HTTP status {0}")]
     Status(reqwest::StatusCode),
-    /// The response arrived but its body could not be read as text.
+    /// The response arrived but its body could not be read as text
+    /// (network failure or over the fetch cap).
     #[error("body read failed: {0}")]
-    Body(#[source] reqwest::Error),
+    Body(rootcause::Report<BodyReadError>),
 }
 
 impl ProxmoxHelperScriptsPlugin {
@@ -177,9 +182,18 @@ impl ProxmoxHelperScriptsPlugin {
             tracing::warn!(url, status = %status, "HTTP fetch failed");
             return FetchOutcome::Err(FetchError::Status(status));
         }
-        match response.text().await {
+        match read_text_capped(response, MAX_FETCH_TEXT_BYTES).await {
             Ok(body) => FetchOutcome::Ok(body),
-            Err(e) => FetchOutcome::Err(FetchError::Body(e)),
+            Err(e) => {
+                if matches!(e.current_context(), BodyReadError::TooLarge { .. }) {
+                    tracing::warn!(
+                        url,
+                        limit = MAX_FETCH_TEXT_BYTES,
+                        "response body exceeded the fetch cap"
+                    );
+                }
+                FetchOutcome::Err(FetchError::Body(e))
+            }
         }
     }
 
@@ -1359,7 +1373,8 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
     /// Unlike `spawn_static_responder` (which always answers with an empty
     /// body), this proves `fetch_text` passes the response body through
     /// unchanged rather than discarding it.
-    async fn spawn_body_responder(body: &'static str) -> std::net::SocketAddr {
+    async fn spawn_body_responder(body: impl Into<String>) -> std::net::SocketAddr {
+        let body = body.into();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
@@ -1369,6 +1384,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
                 let Ok((mut socket, _)) = listener.accept().await else {
                     return;
                 };
+                let body = body.clone();
                 tokio::spawn(async move {
                     use tokio::io::{AsyncReadExt, AsyncWriteExt};
                     // `let _ =` is denied (clippy::let_underscore_must_use);
@@ -1381,13 +1397,12 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
                         return; // client closed without sending a request
                     }
                     let content_length = body.len();
-                    let response = format!(
-                        "HTTP/1.1 200 OK\r\ncontent-length: {content_length}\r\nconnection: close\r\n\r\n{body}"
-                    );
-                    socket
-                        .write_all(response.as_bytes())
-                        .await
-                        .expect("write response");
+                    let mut response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {content_length}\r\nconnection: close\r\n\r\n"
+                    )
+                    .into_bytes();
+                    response.extend_from_slice(body.as_bytes());
+                    socket.write_all(&response).await.expect("write response");
                 });
             }
         });
@@ -1398,6 +1413,34 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
     async fn fetch_text_returns_response_body() {
         let body = "#!/usr/bin/env bash\nAPP=\"demo\"\n";
         let addr = spawn_body_responder(body).await;
+        let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
+        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
+        assert!(matches!(outcome, FetchOutcome::Ok(actual) if actual == body));
+    }
+
+    // ── fetch_text cap enforcement ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn fetch_text_rejects_over_cap_body() {
+        let body = "x".repeat(MAX_FETCH_TEXT_BYTES + 1);
+        let addr = spawn_body_responder(body).await;
+        let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
+        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
+        let FetchOutcome::Err(FetchError::Body(e)) = outcome else {
+            panic!("expected FetchOutcome::Err(FetchError::Body(_)), got a different outcome");
+        };
+        assert!(matches!(
+            e.current_context(),
+            BodyReadError::TooLarge { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn fetch_text_returns_small_body() {
+        let body = "x".repeat(1024);
+        let addr = spawn_body_responder(body.clone()).await;
         let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
         let plugin = test_plugin_with(executor, reqwest::Client::new());
         let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
