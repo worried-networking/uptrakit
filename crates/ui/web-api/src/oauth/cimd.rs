@@ -10,7 +10,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::time::Duration;
 use uptrakit_shared_db::begin_immediate;
 
 use rootcause::prelude::*;
@@ -22,9 +21,11 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_audit_log::{AuditActionType, AuditEmitter, AuditEntry, AuditOutcome, Event};
+use uptrakit_plugin_infrastructure_registry::{
+    PluginHttpClientBuildError, PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
+};
 use uptrakit_shared_db::entity::{oauth_client, oauth_consent};
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_shared_types::ssrf::SsrfSafeResolver;
 
 use uptrakit_web_api_auth::auth::rate_limit::{RateLimitOutcome, RateLimitStore};
 use uptrakit_web_api_auth::{SettingKey, settings_store::load_global_setting};
@@ -112,48 +113,50 @@ pub struct CimdFetcher {
 impl CimdFetcher {
     /// Build a fetcher with the SSRF-safe DNS resolver and bounded timeouts.
     ///
-    /// Per the coding standards: `.connect_timeout(10s)` + `.timeout(60s)` +
-    /// `SsrfSafeResolver::new()` for user-controlled URLs.
+    /// Uses [`build_plugin_http_client`] with [`SsrfMode::Strict`] and the
+    /// default (never-follow) redirect policy, per spec §11.3.
     ///
     /// # Errors
-    /// Returns [`reqwest::Error`] if the TLS backend cannot be initialised.
+    /// Returns [`PluginHttpClientBuildError`] if the TLS backend cannot be
+    /// initialised.
     pub fn new(
         db: DatabaseConnection,
         clock: Arc<dyn Fn() -> OffsetDateTime + Send + Sync>,
         audit_emitter: Arc<AuditEmitter>,
-    ) -> std::result::Result<Self, reqwest::Error> {
-        Self::build(db, clock, audit_emitter, SsrfSafeResolver::new())
+    ) -> std::result::Result<Self, PluginHttpClientBuildError> {
+        Self::build(db, clock, audit_emitter, SsrfMode::Strict)
     }
 
     /// Build a fetcher that allows private/loopback addresses (tests only).
     ///
-    /// Equivalent to [`Self::new`] but uses [`SsrfSafeResolver::permissive`]
-    /// so tests can target `127.0.0.1` mock servers.  Per the coding
-    /// standards this constructor is also acceptable for self-hosted
-    /// deployments that intentionally allow private URLs.
+    /// Equivalent to [`Self::new`] but uses [`SsrfMode::Permissive`] so tests
+    /// can target `127.0.0.1` mock servers.  Per the coding standards this
+    /// constructor is also acceptable for self-hosted deployments that
+    /// intentionally allow private URLs.
     ///
     /// # Errors
-    /// Returns [`reqwest::Error`] if the TLS backend cannot be initialised.
+    /// Returns [`PluginHttpClientBuildError`] if the TLS backend cannot be
+    /// initialised.
     pub fn new_permissive(
         db: DatabaseConnection,
         clock: Arc<dyn Fn() -> OffsetDateTime + Send + Sync>,
         audit_emitter: Arc<AuditEmitter>,
-    ) -> std::result::Result<Self, reqwest::Error> {
-        Self::build(db, clock, audit_emitter, SsrfSafeResolver::permissive())
+    ) -> std::result::Result<Self, PluginHttpClientBuildError> {
+        Self::build(db, clock, audit_emitter, SsrfMode::Permissive)
     }
 
     fn build(
         db: DatabaseConnection,
         clock: Arc<dyn Fn() -> OffsetDateTime + Send + Sync>,
         audit_emitter: Arc<AuditEmitter>,
-        resolver: SsrfSafeResolver,
-    ) -> std::result::Result<Self, reqwest::Error> {
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(60))
-            .redirect(reqwest::redirect::Policy::none())
-            .dns_resolver(Arc::new(resolver))
-            .build()?;
+        ssrf_mode: SsrfMode,
+    ) -> std::result::Result<Self, PluginHttpClientBuildError> {
+        let client = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: "uptrakit-controller",
+            ssrf_mode,
+            request_timeout_secs: 60,
+            ..Default::default()
+        })?;
         let rate_limiter = OAuthRateLimiter::new(RateLimitStore::new(db.clone()));
         Ok(Self {
             client,

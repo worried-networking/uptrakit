@@ -6,11 +6,12 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::time::Duration;
 
 use openidconnect::{AsyncHttpClient, HttpClientError, HttpRequest, HttpResponse};
-use uptrakit_shared_types::ssrf::SsrfSafeResolver;
+use uptrakit_plugin_infrastructure_registry::{
+    PluginHttpClientBuildError, PluginHttpClientConfig, RedirectMode, SsrfMode,
+    build_plugin_http_client,
+};
 
 /// Wrapper around [`reqwest::Client`] (workspace v0.13) that implements
 /// [`openidconnect::AsyncHttpClient`].
@@ -25,19 +26,22 @@ impl OidcHttpClient {
     ///
     /// # Errors
     ///
-    /// Returns a [`reqwest::Error`] if the underlying client cannot be built
-    /// (e.g. TLS initialisation failure).
-    pub(crate) fn new(allow_private_network_issuers: bool) -> Result<Self, reqwest::Error> {
-        let resolver = if allow_private_network_issuers {
-            SsrfSafeResolver::permissive()
+    /// Returns a [`PluginHttpClientBuildError`] if the underlying client
+    /// cannot be built (e.g. TLS initialisation failure).
+    pub(crate) fn new(
+        allow_private_network_issuers: bool,
+    ) -> Result<Self, PluginHttpClientBuildError> {
+        let ssrf_mode = if allow_private_network_issuers {
+            SsrfMode::Permissive
         } else {
-            SsrfSafeResolver::new()
+            SsrfMode::Strict
         };
-        let inner = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(60))
-            .dns_resolver(Arc::new(resolver))
-            .build()?;
+        let inner = build_plugin_http_client(PluginHttpClientConfig {
+            user_agent: "uptrakit-controller",
+            ssrf_mode,
+            redirect: RedirectMode::Limited { hops: 10 },
+            ..Default::default()
+        })?;
         Ok(Self { inner })
     }
 }
