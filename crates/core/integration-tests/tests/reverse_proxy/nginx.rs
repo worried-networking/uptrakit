@@ -132,6 +132,10 @@ server {{
 fn build_client(agent_pki: Option<&TestPki>, ca_pki: &TestPki) -> reqwest::Client {
     let ca_cert = reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+    )]
     let mut builder = reqwest::Client::builder().tls_certs_merge([ca_cert]);
 
     if let Some(pki) = agent_pki {

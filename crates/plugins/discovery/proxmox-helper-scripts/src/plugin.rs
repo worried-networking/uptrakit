@@ -833,6 +833,15 @@ mod tests {
             .expect("create")
     }
 
+    /// Test-only HTTP client.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+    )]
+    fn test_http_client() -> reqwest::Client {
+        reqwest::Client::new()
+    }
+
     fn test_plugin_with(
         executor: Arc<dyn CommandExecutor>,
         client: reqwest::Client,
@@ -1248,6 +1257,10 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
     async fn discovery_missing_update_script_returns_empty() {
         // sentinel exit 44 = update script absent → legitimate empty (non-PHS host)
         let executor = RoutedOutputExecutor::new([("sh", "", UPDATE_SCRIPT_ABSENT_EXIT)]);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+        )]
         let client = reqwest::Client::builder()
             .resolve(
                 "raw.githubusercontent.com",
@@ -1265,6 +1278,10 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
         // non-sentinel non-zero exit = file exists but unreadable → must error,
         // not be misclassified as an empty (non-PHS) host.
         let executor = RoutedOutputExecutor::new([("sh", "", 1)]);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+        )]
         let client = reqwest::Client::builder()
             .resolve(
                 "raw.githubusercontent.com",
@@ -1282,6 +1299,10 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
         // fetch_text("raw.githubusercontent.com/...sonarr.sh") → connect refused → FetchOutcome::Err →
         // must now return Err (not Ok with partial snapshot)
         let executor = RoutedOutputExecutor::new([("sh", UPDATE_SCRIPT_WITH_ONE_CT, 0)]);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+        )]
         let client = reqwest::Client::builder()
             .resolve(
                 "raw.githubusercontent.com",
@@ -1337,7 +1358,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
     async fn fetch_text_maps_404_to_not_found() {
         let addr = spawn_static_responder("404 Not Found").await;
         let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
-        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let plugin = test_plugin_with(executor, test_http_client());
         let outcome = plugin.fetch_text(&format!("http://{addr}/gone.sh")).await;
         assert!(matches!(outcome, FetchOutcome::NotFound));
     }
@@ -1346,7 +1367,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
     async fn fetch_text_maps_500_to_err() {
         let addr = spawn_static_responder("500 Internal Server Error").await;
         let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
-        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let plugin = test_plugin_with(executor, test_http_client());
         let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
         assert!(matches!(outcome, FetchOutcome::Err(_)));
     }
@@ -1355,7 +1376,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
     async fn fetch_text_maps_200_to_ok() {
         let addr = spawn_static_responder("200 OK").await;
         let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
-        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let plugin = test_plugin_with(executor, test_http_client());
         let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
         assert!(matches!(outcome, FetchOutcome::Ok(body) if body.is_empty()));
     }
@@ -1363,7 +1384,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
     #[tokio::test]
     async fn fetch_text_maps_connect_refused_to_err() {
         let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
-        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let plugin = test_plugin_with(executor, test_http_client());
         let outcome = plugin.fetch_text("http://127.0.0.1:1/x.sh").await;
         assert!(matches!(outcome, FetchOutcome::Err(_)));
     }
@@ -1414,7 +1435,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
         let body = "#!/usr/bin/env bash\nAPP=\"demo\"\n";
         let addr = spawn_body_responder(body).await;
         let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
-        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let plugin = test_plugin_with(executor, test_http_client());
         let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
         assert!(matches!(outcome, FetchOutcome::Ok(actual) if actual == body));
     }
@@ -1426,7 +1447,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
         let body = "x".repeat(MAX_FETCH_TEXT_BYTES + 1);
         let addr = spawn_body_responder(body).await;
         let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
-        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let plugin = test_plugin_with(executor, test_http_client());
         let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
         let FetchOutcome::Err(FetchError::Body(e)) = outcome else {
             panic!("expected FetchOutcome::Err(FetchError::Body(_)), got a different outcome");
@@ -1442,7 +1463,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
         let body = "x".repeat(1024);
         let addr = spawn_body_responder(body.clone()).await;
         let executor = RoutedOutputExecutor::new([("sh", "", 0)]);
-        let plugin = test_plugin_with(executor, reqwest::Client::new());
+        let plugin = test_plugin_with(executor, test_http_client());
         let outcome = plugin.fetch_text(&format!("http://{addr}/x.sh")).await;
         assert!(matches!(outcome, FetchOutcome::Ok(actual) if actual == body));
     }

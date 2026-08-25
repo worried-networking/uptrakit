@@ -44,6 +44,20 @@ disallowed-methods = [
     { path = "sea_query::Expr::cust_with_values", reason = "raw SQL fragment inside a builder — use typed expressions" },
     { path = "sea_query::Expr::cust_with_expr", reason = "raw SQL fragment inside a builder — use typed expressions" },
     { path = "sea_query::Expr::cust_with_exprs", reason = "raw SQL fragment inside a builder — use typed expressions" },
+
+    # Outbound HTTP clients: direct builders skip the SSRF resolver and the
+    # typed RedirectMode (spec 2026-08-13-plugin-http-redirect-security).
+    # Escape hatches: build_plugin_http_client's own builder call (the
+    # enforcement point), the operator-context/internal-only clients in
+    # openapi-client/service-sdk/cli (see docs/security/secure-development.md,
+    # SSRF section), and test clients to local mock endpoints. Each carries a
+    # scoped #[expect] naming its exception. reqwest::Client::default() routes
+    # through the Default trait and cannot be listed here (clippy limitation,
+    # see bead uptrakit-6bsg7); it has zero usages today and the test canaries
+    # keep the listed entries resolving.
+    { path = "reqwest::Client::builder", reason = "use build_plugin_http_client — direct builders skip the SSRF resolver and typed RedirectMode" },
+    { path = "reqwest::Client::new", reason = "use build_plugin_http_client — direct builders skip the SSRF resolver and typed RedirectMode" },
+    { path = "reqwest::ClientBuilder::new", reason = "use build_plugin_http_client — direct builders skip the SSRF resolver and typed RedirectMode" },
 ]
 
 disallowed-macros = [

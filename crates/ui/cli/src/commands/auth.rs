@@ -75,6 +75,10 @@ fn pem_fingerprint(pem: &str) -> Result<String> {
 /// the documented operator-context exception lives in
 /// docs/security/secure-development.md (SSRF section).
 async fn fetch_ca(server: &str) -> Result<(String, String)> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "internal-only/operator-context client per docs/security/secure-development.md (SSRF section): connects to the operator's own controller; explicit limited(10) redirect policy set"
+    )]
     let bootstrap_client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(60))

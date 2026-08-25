@@ -94,6 +94,15 @@ mod tests {
 
     use super::*;
 
+    /// Test-only HTTP client.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+    )]
+    fn test_http_client() -> reqwest::Client {
+        reqwest::Client::new()
+    }
+
     const CAP: usize = 64;
 
     #[tokio::test]
@@ -107,7 +116,7 @@ mod tests {
             })
             .await;
 
-        let resp = reqwest::Client::new()
+        let resp = test_http_client()
             .get(server.url("/at-cap"))
             .send()
             .await
@@ -131,7 +140,7 @@ mod tests {
             })
             .await;
 
-        let resp = reqwest::Client::new()
+        let resp = test_http_client()
             .get(server.url("/over-cap"))
             .send()
             .await
@@ -157,7 +166,7 @@ mod tests {
             })
             .await;
 
-        let resp = reqwest::Client::new()
+        let resp = test_http_client()
             .get(server.url("/small"))
             .send()
             .await
@@ -177,7 +186,7 @@ mod tests {
             })
             .await;
 
-        let resp = reqwest::Client::new()
+        let resp = test_http_client()
             .get(server.url("/over-text"))
             .send()
             .await

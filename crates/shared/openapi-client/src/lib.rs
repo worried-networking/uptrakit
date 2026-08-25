@@ -130,6 +130,10 @@ impl Default for RetryConfig {
 /// built in [`UptrakitClient::new`] so the insecure/ca_pem logic is written
 /// once.
 fn tls_configured_builder(insecure: bool, ca_pem: Option<&str>) -> Result<reqwest::ClientBuilder> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "internal-only/operator-context client per docs/security/secure-development.md (SSRF section): connects to the operator's own controller; explicit limited(10) redirect policy set"
+    )]
     let mut builder = reqwest::Client::builder();
     if insecure {
         builder = builder.tls_danger_accept_invalid_certs(true);

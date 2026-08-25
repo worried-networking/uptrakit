@@ -337,6 +337,15 @@ async fn create_api_token(db: &DatabaseConnection, user_id: Uuid) -> String {
 
 // ── Protocol helpers ──────────────────────────────────────────────────────────
 
+/// Test-only HTTP client.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+)]
+fn test_http_client() -> Client {
+    Client::new()
+}
+
 /// Parse the first non-empty data line from an SSE body.
 ///
 /// Stateful-mode POST responses begin with a priming event (`data:` with empty
@@ -372,7 +381,7 @@ impl McpSession {
         reason = "test helper — panic on protocol failure"
     )]
     async fn initialize(addr: SocketAddr, bearer: &str) -> Self {
-        let client = Client::new();
+        let client = test_http_client();
         let base = format!("http://{addr}/mcp");
 
         let init_resp = client
@@ -627,7 +636,7 @@ async fn missing_access_mcp_permission_returns_403() {
 
     // McpAuthLayer returns 403 before the MCP protocol layer — no session
     // initialization needed.
-    let client = Client::new();
+    let client = test_http_client();
     let resp = client
         .post(format!("http://{}/mcp", app.addr))
         .header("Content-Type", "application/json")
@@ -722,7 +731,7 @@ async fn api_token_denied_when_mcp_use_grant_removed() {
     // intended semantic instead of depending on cache-warming order.
     app.engine.invalidate_subjects(&[user_id], &[]);
 
-    let client = Client::new();
+    let client = test_http_client();
     let resp = client
         .post(format!("http://{}/mcp", app.addr))
         .header("Content-Type", "application/json")
@@ -771,7 +780,7 @@ async fn oauth_denied_when_mcp_use_grant_removed() {
         .expect("delete grant");
     app.engine.invalidate_subjects(&[user_id], &[]);
 
-    let client = Client::new();
+    let client = test_http_client();
     let resp = client
         .post(format!("http://{}/mcp", app.addr))
         .header("Content-Type", "application/json")
@@ -802,7 +811,7 @@ async fn api_token_allowed_when_mcp_use_grant_present() {
     link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
     let token = create_api_token(&app.db, user_id).await;
 
-    let client = Client::new();
+    let client = test_http_client();
     let resp = client
         .post(format!("http://{}/mcp", app.addr))
         .header("Content-Type", "application/json")
@@ -827,7 +836,7 @@ async fn oauth_allowed_when_mcp_use_grant_present() {
     link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
     let token = mint_test_jwt(user_id, app.tenant_id);
 
-    let client = Client::new();
+    let client = test_http_client();
     let resp = client
         .post(format!("http://{}/mcp", app.addr))
         .header("Content-Type", "application/json")
@@ -857,7 +866,7 @@ async fn api_token_denied_immediately_after_role_removed_and_invalidated() {
     link_user_to_access_mcp_role(&app.db, app.tenant_id, user_id).await;
     let token = create_api_token(&app.db, user_id).await;
 
-    let client = Client::new();
+    let client = test_http_client();
     let init_body = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}"#;
 
     let first = client

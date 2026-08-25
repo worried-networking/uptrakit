@@ -78,6 +78,10 @@ async fn oauth_end_to_end_mcp_rs_round_trip() {
         .register_and_login_with_token(controller.registration_token())
         .await;
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+    )]
     let http = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .connect_timeout(Duration::from_secs(10))

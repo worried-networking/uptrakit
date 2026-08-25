@@ -299,6 +299,10 @@ mod tests {
     fn webpki_reqwest_client_builds_successfully() {
         use std::sync::Arc;
         // Verifies the full path: config → use_preconfigured_tls → build.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+        )]
         let result = reqwest::Client::builder()
             .use_preconfigured_tls(webpki_client_config())
             .dns_resolver(Arc::new(SsrfSafeResolver::new()))

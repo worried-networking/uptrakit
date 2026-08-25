@@ -945,6 +945,10 @@ async fn independently_verify_attestation(
     let url =
         format!("https://api.github.com/repos/{owner}/{repo}/attestations/sha256:{digest_hex}");
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "agent-side client with explicit Policy::none() and SsrfSafeResolver — publishable crate, cannot depend on infrastructure-core"
+    )]
     let client = match reqwest::Client::builder()
         .user_agent(concat!("uptrakit-agent/", env!("CARGO_PKG_VERSION")))
         .redirect(reqwest::redirect::Policy::none())

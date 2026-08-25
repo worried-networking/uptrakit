@@ -48,6 +48,10 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
 
     tracing::info!(url = %fetch_url, "fetching CA certificate");
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "internal-only/operator-context client per docs/security/secure-development.md (SSRF section): connects to the operator's own controller; explicit limited(10) redirect policy set"
+    )]
     let mut builder = reqwest::Client::builder();
     if use_plain_http {
         // Plain HTTP — no TLS configuration needed

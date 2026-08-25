@@ -1038,6 +1038,10 @@ mod tests {
     #[tokio::test]
     async fn map_send_error_strips_url_bearing_token() {
         let token = "SENTINEL-bot-token-3f9a";
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+        )]
         let err = reqwest::Client::new()
             .get(format!("http://127.0.0.1:1/bot{token}/sendMessage"))
             .send()

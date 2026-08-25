@@ -945,6 +945,10 @@ mod tests {
         // query copy guarantees the fixture precondition (reqwest always renders
         // it), while userinfo exercises the exact basic-auth leak the spec names.
         // `without_url()` nulls the whole URL, so both positions are covered.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+        )]
         let err = reqwest::Client::new()
             .get(format!(
                 "http://user:{secret}@127.0.0.1:1/hook?token={secret}"

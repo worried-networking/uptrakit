@@ -104,6 +104,10 @@ pub fn build_plugin_http_client(
     } else {
         webpki_client_config()
     };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the one sanctioned Client::builder call — this fn IS the enforcement point"
+    )]
     let mut builder = reqwest::Client::builder()
         .user_agent(cfg.user_agent)
         .redirect(resolved_redirect)
@@ -183,6 +187,17 @@ mod tests {
 
     fn url(s: &str) -> reqwest::Url {
         s.parse::<reqwest::Url>().expect("test url")
+    }
+
+    /// Canary: proves the `reqwest::ClientBuilder::new` ban in clippy.toml
+    /// still resolves against the real symbol. Never called.
+    #[expect(dead_code, reason = "canary is never called")]
+    fn clientbuilder_new_canary() -> reqwest::ClientBuilder {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "canary: proves the ClientBuilder::new ban still resolves"
+        )]
+        reqwest::ClientBuilder::new()
     }
 
     #[test]

@@ -204,6 +204,15 @@ fn extract_quoted_param<'a>(header: &'a str, param: &str) -> Option<&'a str> {
 mod tests {
     use super::*;
 
+    /// Test-only HTTP client.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+    )]
+    fn test_http_client() -> reqwest::Client {
+        reqwest::Client::new()
+    }
+
     #[test]
     fn extract_realm_from_docker_hub() {
         let header = r#"Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/nginx:pull""#;
@@ -269,7 +278,7 @@ mod tests {
         // check must pass for any non-private host (including Docker Hub's
         // `auth.docker.io` realm on `registry-1.docker.io` registries).
         let auth = RegistryAuth::new(None);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         for realm in &[
             "https://registry.example.com/token",
             "https://auth.docker.io/token",
@@ -291,7 +300,7 @@ mod tests {
     #[tokio::test]
     async fn realm_private_ip_rejected() {
         let auth = RegistryAuth::new(None);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         // Cloud metadata endpoint — link-local, always private.
         let www_auth = make_www_auth("http://169.254.169.254/latest/meta-data/");
         let result = auth.fetch_token(&client, &www_auth).await;
@@ -306,7 +315,7 @@ mod tests {
     #[tokio::test]
     async fn realm_loopback_rejected() {
         let auth = RegistryAuth::new(None);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let www_auth = make_www_auth("http://127.0.0.1/token");
         let result = auth.fetch_token(&client, &www_auth).await;
         assert!(result.is_err());
@@ -320,7 +329,7 @@ mod tests {
     #[tokio::test]
     async fn realm_rfc1918_rejected() {
         let auth = RegistryAuth::new(None);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         for realm in &[
             "http://10.0.0.1/token",
             "http://172.16.0.1/token",
@@ -343,7 +352,7 @@ mod tests {
     #[tokio::test]
     async fn realm_invalid_url_rejected() {
         let auth = RegistryAuth::new(None);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let www_auth = make_www_auth("not-a-valid-url");
         let result = auth.fetch_token(&client, &www_auth).await;
         assert!(result.is_err());

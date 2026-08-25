@@ -446,10 +446,19 @@ impl RepositoryTreeDto {
 mod tests {
     use super::*;
 
+    /// Test-only HTTP client.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+    )]
+    fn test_http_client() -> reqwest::Client {
+        reqwest::Client::new()
+    }
+
     #[test]
     fn repository_tree_endpoint_builds_expected_url() {
         let config = GitHubClientConfig::new(
-            reqwest::Client::new(),
+            test_http_client(),
             url::Url::parse("https://api.github.com").unwrap(),
             GitHubAuth::Anonymous,
             "uptrakit-test",
@@ -472,7 +481,7 @@ mod tests {
     #[test]
     fn repository_tree_endpoint_preserves_api_base_path() {
         let config = GitHubClientConfig::new(
-            reqwest::Client::new(),
+            test_http_client(),
             url::Url::parse("https://ghe.example.com/api/v3").unwrap(),
             GitHubAuth::Anonymous,
             "uptrakit-test",
@@ -495,7 +504,7 @@ mod tests {
     #[test]
     fn repository_tree_endpoint_percent_encodes_git_ref_segment() {
         let config = GitHubClientConfig::new(
-            reqwest::Client::new(),
+            test_http_client(),
             url::Url::parse("https://api.github.com").unwrap(),
             GitHubAuth::Anonymous,
             "uptrakit-test",
@@ -518,7 +527,7 @@ mod tests {
     #[test]
     fn anonymous_auth_does_not_emit_authorization_header() {
         let config = GitHubClientConfig::new(
-            reqwest::Client::new(),
+            test_http_client(),
             url::Url::parse("https://api.github.com").unwrap(),
             GitHubAuth::Anonymous,
             "uptrakit-test",
@@ -550,7 +559,7 @@ mod tests {
     #[test]
     fn bearer_auth_emits_required_headers() {
         let config = GitHubClientConfig::new(
-            reqwest::Client::new(),
+            test_http_client(),
             url::Url::parse("https://api.github.com").unwrap(),
             GitHubAuth::BearerToken(uptrakit_wire::SecretString::new("ghp_test")),
             "uptrakit-test",
@@ -683,7 +692,7 @@ mod tests {
         });
 
         let client = GitHubClient::new(GitHubClientConfig::new(
-            reqwest::Client::new(),
+            test_http_client(),
             url::Url::parse(&server.base_url()).unwrap(),
             GitHubAuth::Anonymous,
             "uptrakit-test",
@@ -701,6 +710,10 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_repository_tree_wraps_transport_failures_as_retryable_outcomes() {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+        )]
         let client = GitHubClient::new(GitHubClientConfig::new(
             reqwest::Client::builder()
                 .timeout(std::time::Duration::from_millis(25))
@@ -744,7 +757,7 @@ mod tests {
         });
 
         let client = GitHubClient::new(GitHubClientConfig::new(
-            reqwest::Client::new(),
+            test_http_client(),
             url::Url::parse(&server.base_url()).unwrap(),
             GitHubAuth::Anonymous,
             "uptrakit-test",
@@ -786,7 +799,7 @@ mod tests {
         });
 
         let client = GitHubClient::new(GitHubClientConfig::new(
-            reqwest::Client::new(),
+            test_http_client(),
             url::Url::parse(&server.base_url()).unwrap(),
             GitHubAuth::Anonymous,
             "uptrakit-test",
