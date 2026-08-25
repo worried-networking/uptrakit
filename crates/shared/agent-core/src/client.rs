@@ -306,6 +306,150 @@ pub fn spawn_background(
     });
 }
 
+/// Registry of in-flight fire-and-forget operations on this agent, keyed by
+/// `(host_machine_id, kind)`. Sole overlap-prevention mechanism for version
+/// checks and discovery (2026-08-22 spec amendment): the controller
+/// dispatches freely; the agent skips a dispatch only when a live run
+/// already covers it.
+#[derive(Clone, Default)]
+pub struct BackgroundOps {
+    inner: std::sync::Arc<parking_lot::Mutex<BgOpMap>>,
+}
+
+/// Live entries per guard key. Named alias — the inlined map type trips the
+/// denied `clippy::type_complexity` lint (precedent:
+/// `crates/plugins/infrastructure/core/src/testing.rs:189`).
+type BgOpMap = std::collections::HashMap<(String, BgOpKind), Vec<BgOpEntry>>;
+
+/// Kind of guarded background operation. Config tests are request/response
+/// (own correlator + in-op deadline + REST bound) and stay on
+/// [`spawn_background`]; update execution is overlap-protected by
+/// `update_history`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BgOpKind {
+    CheckVersions,
+    Discovery,
+}
+
+/// One in-flight guarded run.
+struct BgOpEntry {
+    /// Identity for removal — entries under one key are not otherwise unique.
+    id: uuid::Uuid,
+    /// End of the dedup window: spawn instant + budget + `OP_DEADLINE_GRACE`
+    /// — the instant the in-operation deadline must have produced a result.
+    /// A window ending at bare budget would re-dispatch an operation that is
+    /// still legitimately running (see `op_timeouts.rs` module doc). Past
+    /// this the entry no longer suppresses new dispatches; the task itself
+    /// is cancelled a further [`BG_OP_ABORT_GRACE`] later.
+    dedup_deadline: tokio::time::Instant,
+    /// Item set the run covers: `Some(software_item_ids)` for version checks
+    /// (a new request is skipped only when it is a subset of a live run),
+    /// `None` for discovery (whole-host scope; any live run suppresses).
+    items: Option<Vec<uuid::Uuid>>,
+}
+
+/// Slack past the dedup-window end (budget + `OP_DEADLINE_GRACE`) before a
+/// guarded task is cancelled (its future dropped). The in-operation deadline
+/// (see `uptrakit_shared_types::op_timeouts`) fires exactly at the window
+/// end, so a timed-out result always has this full grace to be sent before
+/// cancellation — the backstop only reaps a genuinely hung plugin.
+/// Guard-internal — not a wire-visible operation budget.
+pub const BG_OP_ABORT_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Spawn `future` like [`spawn_background`], but dedup-gated per
+/// `(host, kind, item set)` and hard-cancelled (future dropped) at
+/// `budget + OP_DEADLINE_GRACE + BG_OP_ABORT_GRACE`.
+///
+/// Returns `false` (spawning nothing) when a live run already covers the
+/// request: for `CheckVersions`, when `items` is a subset of a live run's
+/// item set; for `Discovery`, when any live run exists.
+pub fn spawn_background_guarded(
+    ops: &BackgroundOps,
+    host_machine_id: &str,
+    kind: BgOpKind,
+    budget: std::time::Duration,
+    items: Option<Vec<uuid::Uuid>>,
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+    future: impl std::future::Future<Output = ServiceMessage> + Send + 'static,
+) -> bool {
+    let key = (host_machine_id.to_string(), kind);
+    let id = uuid::Uuid::now_v7();
+    let now = tokio::time::Instant::now();
+    // Window end = the in-op deadline instant (budget + OP_DEADLINE_GRACE);
+    // cancellation a fixed BG_OP_ABORT_GRACE after that.
+    let dedup_deadline = now + budget + uptrakit_shared_types::op_timeouts::OP_DEADLINE_GRACE;
+    let cancel_at = dedup_deadline + BG_OP_ABORT_GRACE;
+    {
+        let mut map = ops.inner.lock();
+        let covering = map
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .filter(|e| now < e.dedup_deadline)
+            .find(|e| match (&items, &e.items) {
+                // Version check: skip only when a live run already covers
+                // every requested item; disjoint or partially overlapping
+                // sets run concurrently.
+                (Some(requested), Some(running)) => requested.iter().all(|r| running.contains(r)),
+                // Discovery: whole-host scope — any live run covers.
+                (None, _) => true,
+                // Kinds are keyed separately, so a version check never meets
+                // an item-less entry; treat as not covering.
+                (Some(_), None) => false,
+            });
+        if let Some(entry) = covering {
+            // This log is the ONLY user-visible trace of a skipped dispatch
+            // until the failure-surface epic — carry enough to correlate.
+            tracing::info!(
+                host_machine_id,
+                ?kind,
+                requested_items = items.as_ref().map_or(0, Vec::len),
+                covering_id = %entry.id,
+                covering_window_ends = ?entry.dedup_deadline,
+                "skipping background operation: covering run still in flight"
+            );
+            return false;
+        }
+        map.entry(key.clone()).or_default().push(BgOpEntry {
+            id,
+            dedup_deadline,
+            items,
+        });
+    }
+    let ops = ops.clone();
+    let bg_tx = bg_tx.clone();
+    tokio::spawn(async move {
+        let outcome = tokio::time::timeout_at(cancel_at, future).await;
+        // Remove the entry as soon as the future resolves — BEFORE the result
+        // send, so a slow or stalled receiver cannot pin the slot. (Guard is
+        // taken and dropped synchronously, never held across the send await.)
+        {
+            let mut map = ops.inner.lock();
+            if let Some(entries) = map.get_mut(&key) {
+                entries.retain(|e| e.id != id);
+                if entries.is_empty() {
+                    map.remove(&key);
+                }
+            }
+        }
+        match outcome {
+            Ok(result) => {
+                if let Err(e) = bg_tx.send(result).await {
+                    tracing::debug!(error = %e, "receiver dropped; agent shutting down");
+                }
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    host_machine_id = %key.0,
+                    kind = ?key.1,
+                    "guarded background operation exceeded its window + grace; cancelled"
+                );
+            }
+        }
+    });
+    true
+}
+
 /// Forward a background operation result to the controller.
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if the send fails, signalling the
@@ -363,8 +507,9 @@ pub async fn run_check_versions(
 }
 
 /// Per-assignment error results for a version-check batch that hit its
-/// operation deadline. Results are always sent — the controller's dispatch
-/// dedup and watchdog rely on a terminal message per request.
+/// operation deadline. Results are always sent so the controller records
+/// per-item failures; the controller keeps no pending-op state (no dispatch
+/// dedup, no watchdog — 2026-08-22 spec amendment).
 fn timed_out_version_results(
     assignments: &[uptrakit_wire::VersionCheckAssignment],
 ) -> Vec<VersionCheckResult> {
@@ -1388,5 +1533,192 @@ mod tests {
             0,
             "static gate must skip apt before runtime.executor() is called"
         );
+    }
+}
+
+#[cfg(test)]
+mod background_ops_tests {
+    use super::*;
+    use std::time::Duration;
+    use uptrakit_shared_types::op_timeouts::OP_DEADLINE_GRACE;
+    use uptrakit_wire::PingPayload;
+    use uuid::Uuid;
+
+    fn msg() -> ServiceMessage {
+        ServiceMessage::Ping(PingPayload::new(0))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn subset_skipped_non_subset_allowed_and_slots_reopen() {
+        let ops = BackgroundOps::default();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let (a, b, c) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        let budget = Duration::from_secs(600);
+
+        // First check covering {a, b}.
+        assert!(spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::CheckVersions,
+            budget,
+            Some(vec![a, b]),
+            &tx,
+            async { msg() },
+        ));
+        // Subset {a} of a live run: skipped.
+        assert!(!spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::CheckVersions,
+            budget,
+            Some(vec![a]),
+            &tx,
+            async { msg() },
+        ));
+        // Non-subset {a, c}: runs concurrently.
+        assert!(spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::CheckVersions,
+            budget,
+            Some(vec![a, c]),
+            &tx,
+            async { msg() },
+        ));
+        // Discovery: first allowed, duplicate (any live run) skipped.
+        assert!(spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::Discovery,
+            budget,
+            None,
+            &tx,
+            async { msg() },
+        ));
+        assert!(!spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::Discovery,
+            budget,
+            None,
+            &tx,
+            async { msg() },
+        ));
+        // Other host unaffected.
+        assert!(spawn_background_guarded(
+            &ops,
+            "h2",
+            BgOpKind::CheckVersions,
+            budget,
+            Some(vec![a]),
+            &tx,
+            async { msg() },
+        ));
+
+        // Let the four spawned futures complete and clear their entries.
+        tokio::task::yield_now().await;
+        for _ in 0..4 {
+            assert!(rx.recv().await.is_some());
+        }
+        tokio::task::yield_now().await;
+
+        // Slot must reopen after completion: the previously-skipped subset
+        // is now allowed.
+        assert!(spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::CheckVersions,
+            budget,
+            Some(vec![a]),
+            &tx,
+            async { msg() },
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn guarded_spawn_cancels_hung_task_after_budget_plus_grace() {
+        let ops = BackgroundOps::default();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let budget = Duration::from_secs(600);
+
+        assert!(spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::Discovery,
+            budget,
+            None,
+            &tx,
+            async {
+                std::future::pending::<()>().await;
+                msg()
+            },
+        ));
+
+        tokio::time::advance(
+            budget + OP_DEADLINE_GRACE + BG_OP_ABORT_GRACE + Duration::from_secs(1),
+        )
+        .await;
+        tokio::task::yield_now().await;
+
+        // Nothing was sent, and the entry is gone. (`.is_err()`, not
+        // `matches!(.., Err(_))` — `clippy::redundant_pattern_matching` is denied.)
+        assert!(
+            rx.try_recv().is_err(),
+            "hung task must not send after cancellation"
+        );
+        assert!(spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::Discovery,
+            budget,
+            None,
+            &tx,
+            async { msg() },
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dedup_window_reopens_at_window_end_before_cancellation() {
+        let ops = BackgroundOps::default();
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let budget = Duration::from_secs(600);
+
+        assert!(spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::Discovery,
+            budget,
+            None,
+            &tx,
+            async {
+                std::future::pending::<()>().await;
+                msg()
+            },
+        ));
+        // Inside the dedup window: skipped.
+        assert!(!spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::Discovery,
+            budget,
+            None,
+            &tx,
+            async { msg() },
+        ));
+
+        // Past the dedup window (budget + OP_DEADLINE_GRACE) but before the
+        // cancellation instant: the hung task is still alive, yet the window
+        // has closed — a new dispatch is allowed (accepted overlap; the in-op
+        // deadline should have fired at the window end).
+        tokio::time::advance(budget + OP_DEADLINE_GRACE + Duration::from_secs(1)).await;
+        assert!(spawn_background_guarded(
+            &ops,
+            "h1",
+            BgOpKind::Discovery,
+            budget,
+            None,
+            &tx,
+            async { msg() },
+        ));
     }
 }

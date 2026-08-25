@@ -1,14 +1,15 @@
 //! Operation-level deadlines for agent background operations.
 //!
-//! Shared between the agent (which enforces them around whole operations)
-//! and the controller (whose dispatch dedup TTLs must not undercut the
-//! agent-side deadline — a dedup window shorter than the op deadline would
-//! re-dispatch an operation that is still legitimately running).
+//! Shared between the in-operation deadlines enforced here and the agent's
+//! background-op guard (`uptrakit_agent_core::client::BackgroundOps`,
+//! 2026-08-22 spec amendment), whose dedup window must not undercut the
+//! in-op deadline: a window shorter than `budget + OP_DEADLINE_GRACE` would
+//! re-dispatch an operation that is still legitimately running.
 //!
 //! Version skew: agents predating these deadlines enforce nothing and can
-//! still hang silently — the controller-side watchdog (Plan 3, M1.6) stays
-//! the authority for those; these constants only guarantee behaviour for
-//! upgraded agents.
+//! still hang silently. There is NO controller-side watchdog — a hung
+//! legacy agent surfaces only via the missed-pong disconnect (M1.11) and,
+//! later, the `uptrakit-async-op-failure-surface` follow-up epic.
 
 use std::time::Duration;
 

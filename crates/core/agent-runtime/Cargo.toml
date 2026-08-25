@@ -30,6 +30,7 @@ uptrakit-command = { workspace = true }
 uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon"] }
 uptrakit-shared-macros = { workspace = true }
+uptrakit-shared-types = { workspace = true }
 uptrakit-wire = { workspace = true }
 
 [dev-dependencies]

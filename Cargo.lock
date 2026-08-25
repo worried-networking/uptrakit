@@ -7336,6 +7336,7 @@ dependencies = [
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
  "uptrakit-wire",
  "uuid",
 ]

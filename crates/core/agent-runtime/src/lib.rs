@@ -7,14 +7,16 @@ pub mod cli;
 pub use cli::AgentRuntimeCommand;
 
 use uptrakit_agent_core::{
-    ConnectionContext, InFlightUpdate, UpdateEvent, handle_graceful_shutdown,
-    send_background_result, send_update_output, send_update_result, spawn_background,
+    BackgroundOps, BgOpKind, ConnectionContext, InFlightUpdate, UpdateEvent,
+    handle_graceful_shutdown, send_background_result, send_update_output, send_update_result,
+    spawn_background, spawn_background_guarded,
 };
 use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};
 use uptrakit_command::{
     CommandExecutor, LocalCommandExecutor, SudoAwareCommandExecutor, SudoContext,
 };
 use uptrakit_plugin_infrastructure_core::{HostCapabilities, HostRuntime, StandardHostRuntime};
+use uptrakit_shared_types::op_timeouts::{DISCOVERY_OP_TIMEOUT, VERSION_CHECK_OP_TIMEOUT};
 use uptrakit_wire::{
     AuditEventPayload, Capability, ControllerMessage, DisconnectReason, RegisterPayload,
     ReportHostsPayload, ServiceMessage, ServiceTransport, SetUpdateFreezePayload, TransportError,
@@ -172,6 +174,7 @@ pub struct AgentRuntime {
     audit_rx: tokio::sync::mpsc::UnboundedReceiver<RuntimeAuditEvent>,
     bg_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
     bg_tx: tokio::sync::mpsc::Sender<ServiceMessage>,
+    bg_ops: BackgroundOps,
     pending_initial_report: Option<ReportHostsPayload>,
     agent_version: String,
     ctx: ConnectionContext,
@@ -201,6 +204,7 @@ impl AgentRuntime {
             audit_rx,
             bg_rx,
             bg_tx,
+            bg_ops: BackgroundOps::default(),
             pending_initial_report: None,
             agent_version,
             ctx: ConnectionContext {
@@ -298,9 +302,21 @@ impl AgentRuntime {
             {
                 let runtime = make_standard_runtime(Arc::clone(&self.executor));
                 let ctx = self.ctx.clone();
-                spawn_background(&self.bg_tx, async move {
-                    uptrakit_agent_core::run_check_versions(payload, runtime, &ctx).await
-                });
+                let host_machine_id = payload.host_machine_id.clone();
+                let items = payload
+                    .assignments
+                    .iter()
+                    .map(|a| a.software_item_id)
+                    .collect();
+                spawn_background_guarded(
+                    &self.bg_ops,
+                    &host_machine_id,
+                    BgOpKind::CheckVersions,
+                    VERSION_CHECK_OP_TIMEOUT,
+                    Some(items),
+                    &self.bg_tx,
+                    async move { uptrakit_agent_core::run_check_versions(payload, runtime, &ctx).await },
+                );
             }
             ControllerMessage::ExecuteUpdate(payload) => {
                 let allowed = self.machine_id_matches("ExecuteUpdate", &payload.host_machine_id)
@@ -322,9 +338,18 @@ impl AgentRuntime {
             {
                 let runtime = make_standard_runtime(Arc::clone(&self.executor));
                 let ctx = self.ctx.clone();
-                spawn_background(&self.bg_tx, async move {
-                    uptrakit_agent_core::run_discover_software(payload, runtime, &ctx).await
-                });
+                let host_machine_id = payload.host_machine_id.clone();
+                spawn_background_guarded(
+                    &self.bg_ops,
+                    &host_machine_id,
+                    BgOpKind::Discovery,
+                    DISCOVERY_OP_TIMEOUT,
+                    None,
+                    &self.bg_tx,
+                    async move {
+                        uptrakit_agent_core::run_discover_software(payload, runtime, &ctx).await
+                    },
+                );
             }
             ControllerMessage::ExecuteBatchUpdate(payload) => {
                 let allowed = self
@@ -334,6 +359,8 @@ impl AgentRuntime {
                 if allowed {
                     let runtime = make_standard_runtime(Arc::clone(&self.executor));
                     let ctx = self.ctx.clone();
+                    // Deliberately unguarded: updates have their own overlap
+                    // protection via `update_history` (see AGENTS.md invariant 9).
                     spawn_background(&self.bg_tx, async move {
                         uptrakit_agent_core::run_execute_batch_update(*payload, runtime, &ctx).await
                     });
@@ -347,6 +374,8 @@ impl AgentRuntime {
                 if self.machine_id_matches("TestPluginConfig", &payload.host_machine_id) =>
             {
                 let executor = Arc::clone(&self.executor);
+                // Request/response with its own correlator and in-op deadline —
+                // outside the guard (2026-08-22 spec amendment).
                 spawn_background(&self.bg_tx, async move {
                     uptrakit_agent_core::config_test::run_config_test(payload, executor).await
                 });

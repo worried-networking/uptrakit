@@ -43,6 +43,7 @@ pub struct AgentSshRuntimeSupport {
     infra_bundles: Arc<Vec<InfraBundle>>,
     agent_version: String,
     pending_config_reports: PendingConfigReports,
+    bg_ops: uptrakit_agent_core::BackgroundOps,
 }
 
 impl AgentSshRuntimeSupport {
@@ -62,6 +63,7 @@ impl AgentSshRuntimeSupport {
             infra_bundles,
             agent_version,
             pending_config_reports: Arc::new(Mutex::new(HashMap::new())),
+            bg_ops: uptrakit_agent_core::BackgroundOps::default(),
         }
     }
 
@@ -263,7 +265,7 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
         payload: CheckVersionsPayload,
         bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
     ) {
-        client::spawn_check_versions_ssh(payload, &self.db, &self.pool, bg_tx);
+        client::spawn_check_versions_ssh(&self.bg_ops, payload, &self.db, &self.pool, bg_tx);
     }
 
     async fn handle_execute_update(
@@ -297,7 +299,7 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
         payload: DiscoverSoftwarePayload,
         bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
     ) {
-        client::spawn_discover_software_ssh(payload, &self.db, &self.pool, bg_tx);
+        client::spawn_discover_software_ssh(&self.bg_ops, payload, &self.db, &self.pool, bg_tx);
     }
 
     fn spawn_config_test(

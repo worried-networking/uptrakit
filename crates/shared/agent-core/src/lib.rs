@@ -17,9 +17,10 @@ pub mod version_check;
 // ── Public re-exports ────────────────────────────────────────────────────────
 
 pub use client::{
-    InFlightUpdate, UpdateEvent, handle_execute_update, handle_graceful_shutdown,
-    run_check_versions, run_discover_software, run_execute_batch_update, send_background_result,
-    send_update_output, send_update_result, spawn_background, start_update,
+    BG_OP_ABORT_GRACE, BackgroundOps, BgOpKind, InFlightUpdate, UpdateEvent, handle_execute_update,
+    handle_graceful_shutdown, run_check_versions, run_discover_software, run_execute_batch_update,
+    send_background_result, send_update_output, send_update_result, spawn_background,
+    spawn_background_guarded, start_update,
 };
 pub use connection_context::ConnectionContext;
 pub use update::{UpdateExecutionResult, UpdateOutputMessage};

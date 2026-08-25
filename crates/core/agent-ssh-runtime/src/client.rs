@@ -818,6 +818,7 @@ pub async fn handle_execute_update_ssh(
 
 /// Spawn a `CheckVersions` operation as a background task.
 pub fn spawn_check_versions_ssh(
+    ops: &uptrakit_agent_core::BackgroundOps,
     payload: CheckVersionsPayload,
     db: &sea_orm::DatabaseConnection,
     pool: &SshConnectionPool,
@@ -829,13 +830,30 @@ pub fn spawn_check_versions_ssh(
         assignment_count = payload.assignments.len(),
         "spawning background CheckVersions task for SSH host"
     );
+    let items = payload
+        .assignments
+        .iter()
+        .map(|a| a.software_item_id)
+        .collect();
     let db = db.clone();
     let pool = pool.clone();
-    uptrakit_agent_core::spawn_background(bg_tx, async move {
-        let msg = run_check_versions_ssh(payload, &db, &pool).await;
-        tracing::debug!(host_machine_id = %host_machine_id, "background CheckVersions task completed");
-        msg
-    });
+    // Second clone needed: `host_machine_id` also moves into the async block
+    // below (used by the completion trace), so it cannot be borrowed here in
+    // the same call — E0505.
+    let guard_host = host_machine_id.clone();
+    uptrakit_agent_core::spawn_background_guarded(
+        ops,
+        &guard_host,
+        uptrakit_agent_core::BgOpKind::CheckVersions,
+        uptrakit_shared_types::op_timeouts::VERSION_CHECK_OP_TIMEOUT,
+        Some(items),
+        bg_tx,
+        async move {
+            let msg = run_check_versions_ssh(payload, &db, &pool).await;
+            tracing::debug!(host_machine_id = %host_machine_id, "background CheckVersions task completed");
+            msg
+        },
+    );
 }
 
 /// Run `CheckVersions` for an SSH host, returning the result as a
@@ -906,6 +924,7 @@ async fn run_check_versions_ssh(
 
 /// Spawn a `DiscoverSoftware` operation as a background task.
 pub fn spawn_discover_software_ssh(
+    ops: &uptrakit_agent_core::BackgroundOps,
     payload: DiscoverSoftwarePayload,
     db: &sea_orm::DatabaseConnection,
     pool: &SshConnectionPool,
@@ -919,11 +938,23 @@ pub fn spawn_discover_software_ssh(
     );
     let db = db.clone();
     let pool = pool.clone();
-    uptrakit_agent_core::spawn_background(bg_tx, async move {
-        let msg = run_discover_software_ssh(payload, &db, &pool).await;
-        tracing::debug!(host_machine_id = %host_machine_id, "background DiscoverSoftware task completed");
-        msg
-    });
+    // Second clone needed: `host_machine_id` also moves into the async block
+    // below (used by the completion trace), so it cannot be borrowed here in
+    // the same call — E0505.
+    let guard_host = host_machine_id.clone();
+    uptrakit_agent_core::spawn_background_guarded(
+        ops,
+        &guard_host,
+        uptrakit_agent_core::BgOpKind::Discovery,
+        uptrakit_shared_types::op_timeouts::DISCOVERY_OP_TIMEOUT,
+        None,
+        bg_tx,
+        async move {
+            let msg = run_discover_software_ssh(payload, &db, &pool).await;
+            tracing::debug!(host_machine_id = %host_machine_id, "background DiscoverSoftware task completed");
+            msg
+        },
+    );
 }
 
 /// Run `DiscoverSoftware` for an SSH host, returning the result as a
@@ -1018,6 +1049,8 @@ pub fn spawn_execute_batch_update_ssh(
     );
     let db = db.clone();
     let pool = pool.clone();
+    // Deliberately unguarded: updates have their own overlap protection via
+    // `update_history` (see AGENTS.md invariant 9).
     uptrakit_agent_core::spawn_background(bg_tx, async move {
         let msg = run_execute_batch_update_ssh(payload, &db, &pool).await;
         tracing::debug!(host_machine_id = %host_machine_id, "background ExecuteBatchUpdate task completed");
@@ -1252,6 +1285,8 @@ pub fn spawn_config_test_ssh(
     );
     let db = db.clone();
     let pool = pool.clone();
+    // Request/response with its own correlator and in-op deadline — outside
+    // the guard (2026-08-22 spec amendment).
     uptrakit_agent_core::spawn_background(bg_tx, async move {
         run_config_test_ssh(payload, &db, &pool).await
     });
