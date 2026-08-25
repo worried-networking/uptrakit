@@ -151,6 +151,7 @@ impl CimdFetcher {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(60))
+            .redirect(reqwest::redirect::Policy::none())
             .dns_resolver(Arc::new(resolver))
             .build()?;
         let rate_limiter = OAuthRateLimiter::new(RateLimitStore::new(db.clone()));
@@ -647,6 +648,45 @@ mod tests {
         assert_eq!(model.metadata_etag.as_deref(), Some("\"abc\""));
         assert!(model.metadata_parse_error.is_none());
         assert!(model.metadata_parse_error_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_and_upsert_does_not_follow_redirects() {
+        let db = setup_migrated_db().await;
+        let clock_cell = Arc::new(Mutex::new(OffsetDateTime::now_utc()));
+        let fetcher = make_fetcher(db, clock_cell);
+
+        let server = MockServer::start_async().await;
+        let base = server.base_url();
+        let target_url = format!("{base}/target-client");
+        let body = cimd_body(&target_url, "Redirect Target");
+        let body_str = body.to_string();
+
+        let mock_a = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/redirecting-client");
+                then.status(302).header("Location", &target_url);
+            })
+            .await;
+        let mock_b = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/target-client");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(&body_str);
+            })
+            .await;
+
+        let redirecting_url = format!("{base}/redirecting-client");
+        let result = fetcher.fetch_and_upsert(&redirecting_url, None).await;
+
+        assert!(result.is_err(), "302 response must not be followed");
+        mock_a.assert_async().await;
+        assert_eq!(
+            mock_b.calls_async().await,
+            0,
+            "redirect target must never be contacted"
+        );
     }
 
     #[tokio::test]
