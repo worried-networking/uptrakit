@@ -8045,6 +8045,7 @@ name = "uptrakit-plugin-discovery-proxmox-helper-scripts"
 version = "0.0.3"
 dependencies = [
  "async-trait",
+ "regex",
  "reqwest",
  "rootcause",
  "serde",
@@ -8055,6 +8056,7 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
