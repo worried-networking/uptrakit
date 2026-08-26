@@ -126,6 +126,14 @@ Some("owner/repo")` override.
    available for prompts that `PHS_SILENT=1` does not suppress (e.g. the low-storage warning
    `read -r prompt < /dev/tty`).
 
+Both the GitHub/Codeberg fetch target and the PHS Shell target may additionally carry a
+synthesized `config_override` from the tag-series inference (`tag_series::split_tag_version`
+against the raw installed version): the fetch target gets `tag_prefix` only when the inferred
+prefix is non-empty and differs from the profile's plain `v` (D7 — `tag_prefix` is a hard-error
+filter, so an unneeded override is never synthesized); the shell target gets
+`version_strip_prefix` for any non-empty prefix (strip-only, no filter risk). No match means
+verbatim behavior with no overrides on either target.
+
 **Codeberg-managed apps** (detected via `check_for_codeberg_release` or `CODEBERG_REPO=`) emit
 **two** `DiscoveryTarget` values:
 

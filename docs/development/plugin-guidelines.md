@@ -1773,6 +1773,20 @@ in a container and emit `DiscoveryTarget` values that tell the controller which 
 Full per-target config keys, role sets, and PTY rationale: [autodiscovery internals](autodiscovery-internals.md#phs-proxmox-helper-scripts).
 Cross-reference: [PHS end-user guide](../end-user/autodiscovery.md#proxmox-helper-scripts-discovery).
 
+PHS infers the tag-series prefix from the raw installed version
+(`tag_series::split_tag_version` — the version starts at the last
+boundary-anchored digit whose dotted-version shape runs to end of string; no
+match means verbatim behavior with no overrides). One
+inference per item feeds three things: `installed_version` is reported bare, the
+GitHub/Codeberg fetch target gets a `tag_prefix` `config_override` only when the
+prefix adds series information (non-empty and not the profile's plain `v`), and
+the shell target gets a `version_strip_prefix` override for any non-empty prefix.
+`asset_patterns` is never auto-populated — installer shell globs do not translate
+safely to the field's regex semantics. The synthesized `tag_prefix` filter is
+literal: if an upstream repo later changes its tag convention (say, drops the
+`v`), the filter silently matches no new releases until the override is cleared
+or corrected.
+
 ## Shared Update Helpers
 
 All package-manager plugins must use the shared helper functions from `uptrakit-plugin-infrastructure-core` instead of hand-rolling their own command

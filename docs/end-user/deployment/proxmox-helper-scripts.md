@@ -117,6 +117,11 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/worried-networking/uptra
 The service restarts automatically after the binary is replaced. Existing configuration,
 database, and master key are preserved.
 
+If a PHS discovery run on another controller tracks this CT (via the `worried-networking/uptrakit`
+source under `scripts/pvehs/`) and its release feed silently stops showing new versions, the
+release tagging convention likely changed — clear or correct that item's per-host `tag_prefix`
+override to recover.
+
 ## Related Documentation
 
 - [Secrets and encryption](../../security/secrets-and-encryption.md) — master key management and rotation
