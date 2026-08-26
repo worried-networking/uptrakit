@@ -2,6 +2,7 @@ mod database_helpers;
 
 mod database {
     mod access_lockout;
+    mod access_visibility;
     mod api_tokens;
     mod audit_logs;
     mod auth_flow;

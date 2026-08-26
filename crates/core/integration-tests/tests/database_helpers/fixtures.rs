@@ -128,7 +128,7 @@ pub(crate) async fn insert_host(db: &DatabaseConnection, tenant_id: uuid::Uuid) 
     host::ActiveModel {
         id: Set(id),
         tenant_id: Set(tenant_id),
-        machine_id: Set(format!("machine-{}", &id.to_string()[..8])),
+        machine_id: Set(format!("machine-{id}")),
         hostname: Set(format!("host-{}", &id.to_string()[..8])),
         friendly_name: Set(format!("Host {}", &id.to_string()[..8])),
         os_type: Set(Some("linux".to_string())),
