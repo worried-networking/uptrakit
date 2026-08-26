@@ -73,6 +73,11 @@ const PHS_DETECT_VERSION_CMD: &str =
 /// ```
 const PHS_INSTALL_CMD: &str = "sudo PHS_SILENT=1 TERM=xterm /usr/bin/update";
 
+/// The `tag_strip_prefix` baked into the shared PHS fetch profiles. The D7
+/// synthesis condition compares the inferred series prefix against this —
+/// keep the profile JSON and the comparison reading the same const.
+const PHS_TAG_STRIP_PREFIX: &str = "v";
+
 /// Cap for remote text fetches. Upstream JSON is ~100s of KiB; 1 MiB is
 /// generous headroom while bounding a hostile server.
 const MAX_FETCH_TEXT_BYTES: usize = 1024 * 1024;
@@ -248,18 +253,30 @@ impl ProxmoxHelperScriptsPlugin {
     /// The `owner/repo` pair is expressed as the `package_identifier` override
     /// so the controller routes release queries to the right repo while sharing
     /// a single plugin config instance across all tracked GitHub repos.
-    fn github_fetch_target(owner: &str, repo: &str) -> DiscoveryTarget {
+    ///
+    /// When `tag_prefix` carries a non-empty inferred series prefix other than
+    /// plain `v`, it is synthesized into a per-item `tag_prefix` config_override
+    /// (D7). The filter is literal — if upstream later changes its tag
+    /// convention it silently matches no new releases until the override is
+    /// cleared.
+    fn github_fetch_target(owner: &str, repo: &str, tag_prefix: Option<&str>) -> DiscoveryTarget {
+        // D7: tag_prefix is a filter with a hard-error failure mode, so it is
+        // synthesized only when the inferred prefix adds series information —
+        // non-empty and not the plain "v" the profile already strips.
+        let config_override = tag_prefix
+            .filter(|p| !p.is_empty() && *p != PHS_TAG_STRIP_PREFIX)
+            .map(|p| serde_json::json!({ "tag_prefix": p }));
         DiscoveryTarget {
             plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             plugin_config: serde_json::json!({
-                "tag_strip_prefix": "v",
+                "tag_strip_prefix": PHS_TAG_STRIP_PREFIX,
                 "include_prereleases": false,
                 "asset_patterns": [],
             }),
             plugin_config_name: "GitHub Releases".to_string(),
             roles: vec![PluginRole::FetchReleases],
             package_identifier: Some(format!("{owner}/{repo}")),
-            config_override: None,
+            config_override,
             execution_site: None,
         }
     }
@@ -274,19 +291,31 @@ impl ProxmoxHelperScriptsPlugin {
     /// The `owner/repo` pair is expressed as the `package_identifier` override
     /// so the controller routes release queries to the right repo while sharing
     /// a single plugin config instance across all tracked Codeberg repositories.
-    fn codeberg_fetch_target(owner: &str, repo: &str) -> DiscoveryTarget {
+    ///
+    /// When `tag_prefix` carries a non-empty inferred series prefix other than
+    /// plain `v`, it is synthesized into a per-item `tag_prefix` config_override
+    /// (D7). The filter is literal — if upstream later changes its tag
+    /// convention it silently matches no new releases until the override is
+    /// cleared.
+    fn codeberg_fetch_target(owner: &str, repo: &str, tag_prefix: Option<&str>) -> DiscoveryTarget {
+        // D7: tag_prefix is a filter with a hard-error failure mode, so it is
+        // synthesized only when the inferred prefix adds series information —
+        // non-empty and not the plain "v" the profile already strips.
+        let config_override = tag_prefix
+            .filter(|p| !p.is_empty() && *p != PHS_TAG_STRIP_PREFIX)
+            .map(|p| serde_json::json!({ "tag_prefix": p }));
         DiscoveryTarget {
             plugin_type: plugin_ids::RELEASES_FORGEJO.clone(),
             plugin_config: serde_json::json!({
                 "api_base_url": "https://codeberg.org",
-                "tag_strip_prefix": "v",
+                "tag_strip_prefix": PHS_TAG_STRIP_PREFIX,
                 "include_prereleases": false,
                 "asset_patterns": [],
             }),
             plugin_config_name: "Codeberg Releases".to_string(),
             roles: vec![PluginRole::FetchReleases],
             package_identifier: Some(format!("{owner}/{repo}")),
-            config_override: None,
+            config_override,
             execution_site: None,
         }
     }
@@ -310,7 +339,19 @@ impl ProxmoxHelperScriptsPlugin {
     /// When `None`, `{package_identifier}` resolves to the software item's own
     /// `package_identifier` (the container slug), which is correct for the
     /// common case where key == slug.
-    fn phs_shell_target(version_file_basename: Option<&str>) -> DiscoveryTarget {
+    ///
+    /// `version_strip_prefix` is a new per-item config override: any
+    /// non-empty inferred prefix is synthesized (D7 strip-only, no filter
+    /// risk); `None`/empty synthesizes nothing.
+    fn phs_shell_target(
+        version_file_basename: Option<&str>,
+        version_strip_prefix: Option<&str>,
+    ) -> DiscoveryTarget {
+        // D7: version_strip_prefix only normalizes (no filter risk), so any
+        // non-empty inferred prefix is synthesized — including a bare "v".
+        let config_override = version_strip_prefix
+            .filter(|p| !p.is_empty())
+            .map(|p| serde_json::json!({ "version_strip_prefix": p }));
         DiscoveryTarget {
             plugin_type: plugin_ids::GENERIC_SHELL.clone(),
             plugin_config: serde_json::json!({
@@ -321,7 +362,7 @@ impl ProxmoxHelperScriptsPlugin {
             plugin_config_name: "PHS Shell".to_string(),
             roles: vec![PluginRole::DetectVersion, PluginRole::ExecuteUpdate],
             package_identifier: version_file_basename.map(str::to_string),
-            config_override: None,
+            config_override,
             execution_site: None,
         }
     }
@@ -584,8 +625,8 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
                     name: display_name,
                     installed_version,
                     targets: vec![
-                        Self::github_fetch_target(owner, repo),
-                        Self::phs_shell_target(analysis.version_file_basename.as_deref()),
+                        Self::github_fetch_target(owner, repo, None),
+                        Self::phs_shell_target(analysis.version_file_basename.as_deref(), None),
                     ],
                     extra: None,
                     qualifier: None,
@@ -622,8 +663,8 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
                     name: display_name,
                     installed_version,
                     targets: vec![
-                        Self::codeberg_fetch_target(owner, repo),
-                        Self::phs_shell_target(analysis.version_file_basename.as_deref()),
+                        Self::codeberg_fetch_target(owner, repo, None),
+                        Self::phs_shell_target(analysis.version_file_basename.as_deref(), None),
                     ],
                     extra: None,
                     qualifier: None,
@@ -1006,7 +1047,7 @@ mod tests {
 
     #[test]
     fn github_fetch_target_structure() {
-        let target = ProxmoxHelperScriptsPlugin::github_fetch_target("BookLore", "BookLore");
+        let target = ProxmoxHelperScriptsPlugin::github_fetch_target("BookLore", "BookLore", None);
         assert_eq!(target.plugin_type, plugin_ids::RELEASES_GITHUB.clone());
         assert_eq!(target.plugin_config_name, "GitHub Releases");
         // FetchReleases only — no agent-side roles.
@@ -1024,7 +1065,7 @@ mod tests {
 
     #[test]
     fn codeberg_fetch_target_structure() {
-        let target = ProxmoxHelperScriptsPlugin::codeberg_fetch_target("readeck", "readeck");
+        let target = ProxmoxHelperScriptsPlugin::codeberg_fetch_target("readeck", "readeck", None);
         assert_eq!(target.plugin_type, plugin_ids::RELEASES_FORGEJO.clone());
         assert_eq!(target.plugin_config_name, "Codeberg Releases");
         // FetchReleases only — no agent-side roles.
@@ -1050,7 +1091,7 @@ mod tests {
 
     #[test]
     fn phs_shell_target_structure() {
-        let target = ProxmoxHelperScriptsPlugin::phs_shell_target(None);
+        let target = ProxmoxHelperScriptsPlugin::phs_shell_target(None, None);
         assert_eq!(target.plugin_type, plugin_ids::GENERIC_SHELL.clone());
         assert_eq!(target.plugin_config_name, "PHS Shell");
         assert_eq!(target.roles.len(), 2);
@@ -1114,7 +1155,7 @@ mod tests {
         // The target must carry a package_identifier override so the Shell
         // plugin calls `uptrakit-phs-version paperless` instead of
         // `uptrakit-phs-version paperless-ngx`.
-        let target = ProxmoxHelperScriptsPlugin::phs_shell_target(Some("paperless"));
+        let target = ProxmoxHelperScriptsPlugin::phs_shell_target(Some("paperless"), None);
         assert_eq!(target.plugin_type, plugin_ids::GENERIC_SHELL.clone());
         assert_eq!(
             target.plugin_config["version_command"],
@@ -1134,6 +1175,72 @@ mod tests {
             Some("paperless"),
             "package_identifier must be the version file basename override"
         );
+    }
+
+    #[test]
+    fn github_fetch_target_series_prefix_sets_override() {
+        let target = ProxmoxHelperScriptsPlugin::github_fetch_target(
+            "o",
+            "r",
+            Some("uptrakit-controller-standalone-v"),
+        );
+        assert_eq!(
+            target.config_override,
+            Some(serde_json::json!({"tag_prefix": "uptrakit-controller-standalone-v"}))
+        );
+        // Shared profile stays untouched — override only.
+        assert!(target.plugin_config.get("tag_prefix").is_none());
+    }
+
+    #[test]
+    fn github_fetch_target_bare_v_prefix_no_override() {
+        // D7 asymmetry: a prefix equal to the profile's tag_strip_prefix adds
+        // no series information but would install a filter with a hard-error
+        // failure mode — never synthesize it.
+        let target = ProxmoxHelperScriptsPlugin::github_fetch_target("o", "r", Some("v"));
+        assert!(target.config_override.is_none());
+    }
+
+    #[test]
+    fn github_fetch_target_no_prefix_no_override() {
+        let target = ProxmoxHelperScriptsPlugin::github_fetch_target("o", "r", None);
+        assert!(target.config_override.is_none());
+        let target = ProxmoxHelperScriptsPlugin::github_fetch_target("o", "r", Some(""));
+        assert!(target.config_override.is_none());
+    }
+
+    #[test]
+    fn codeberg_fetch_target_series_prefix_sets_override() {
+        let target = ProxmoxHelperScriptsPlugin::codeberg_fetch_target("o", "r", Some("readeck-v"));
+        assert_eq!(
+            target.config_override,
+            Some(serde_json::json!({"tag_prefix": "readeck-v"}))
+        );
+    }
+
+    #[test]
+    fn codeberg_fetch_target_bare_v_prefix_no_override() {
+        let target = ProxmoxHelperScriptsPlugin::codeberg_fetch_target("o", "r", Some("v"));
+        assert!(target.config_override.is_none());
+    }
+
+    #[test]
+    fn phs_shell_target_any_prefix_sets_strip_override() {
+        // Unlike tag_prefix, version_strip_prefix only normalizes — even a
+        // bare "v" is synthesized.
+        let target = ProxmoxHelperScriptsPlugin::phs_shell_target(None, Some("v"));
+        assert_eq!(
+            target.config_override,
+            Some(serde_json::json!({"version_strip_prefix": "v"}))
+        );
+    }
+
+    #[test]
+    fn phs_shell_target_no_prefix_no_override() {
+        let target = ProxmoxHelperScriptsPlugin::phs_shell_target(None, None);
+        assert!(target.config_override.is_none());
+        let target = ProxmoxHelperScriptsPlugin::phs_shell_target(None, Some(""));
+        assert!(target.config_override.is_none());
     }
 
     #[test]
@@ -1233,6 +1340,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
         let gh = ProxmoxHelperScriptsPlugin::github_fetch_target(
             analysis.github_owner.as_deref().expect("owner"),
             analysis.github_repo.as_deref().expect("repo"),
+            None,
         );
         assert_eq!(gh.plugin_type, plugin_ids::RELEASES_GITHUB.clone());
         assert_eq!(
@@ -1241,8 +1349,10 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
         );
         assert_eq!(gh.roles, vec![PluginRole::FetchReleases]);
 
-        let shell =
-            ProxmoxHelperScriptsPlugin::phs_shell_target(analysis.version_file_basename.as_deref());
+        let shell = ProxmoxHelperScriptsPlugin::phs_shell_target(
+            analysis.version_file_basename.as_deref(),
+            None,
+        );
         assert_eq!(shell.plugin_type, plugin_ids::GENERIC_SHELL.clone());
         assert_eq!(
             shell.package_identifier.as_deref(),
