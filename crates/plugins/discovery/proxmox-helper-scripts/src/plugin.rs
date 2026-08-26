@@ -142,6 +142,12 @@ enum FetchError {
     Body(rootcause::Report<BodyReadError>),
 }
 
+/// Which forge hosts the release-fetch target for a PHS item.
+enum ForgeHost {
+    GitHub,
+    Codeberg,
+}
+
 impl ProxmoxHelperScriptsPlugin {
     /// Create a new Proxmox Helper Scripts plugin.
     ///
@@ -245,6 +251,32 @@ impl ProxmoxHelperScriptsPlugin {
             .ok()?;
         let v = output.output.trim().to_string();
         if v.is_empty() { None } else { Some(v) }
+    }
+
+    /// Build the per-item outputs for a forge-managed PHS item from one
+    /// tag-series inference: the bare `installed_version`, the inferred
+    /// series prefix (for logging), and the fetch + shell targets whose
+    /// overrides both derive from that same prefix (spec D5/D7). No match
+    /// keeps everything verbatim with no overrides.
+    fn forge_item_outputs(
+        forge: ForgeHost,
+        owner: &str,
+        repo: &str,
+        version_file_basename: Option<&str>,
+        raw_version: String,
+    ) -> (Option<String>, String, Vec<DiscoveryTarget>) {
+        let (series_prefix, installed_version) =
+            crate::tag_series::normalize_installed_version(raw_version);
+        let prefix = series_prefix.as_deref();
+        let fetch_target = match forge {
+            ForgeHost::GitHub => Self::github_fetch_target(owner, repo, prefix),
+            ForgeHost::Codeberg => Self::codeberg_fetch_target(owner, repo, prefix),
+        };
+        let targets = vec![
+            fetch_target,
+            Self::phs_shell_target(version_file_basename, prefix),
+        ];
+        (series_prefix, installed_version, targets)
     }
 
     /// Build a `DiscoveryTarget` for the GitHub releases role.
@@ -610,11 +642,20 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
                     continue;
                 };
 
+                let (series_prefix, installed_version, targets) = Self::forge_item_outputs(
+                    ForgeHost::GitHub,
+                    owner,
+                    repo,
+                    analysis.version_file_basename.as_deref(),
+                    installed_version,
+                );
+
                 tracing::debug!(
                     slug = %script.slug,
                     display_name = %display_name,
                     version_file_basename = %vfb,
                     version = %installed_version,
+                    series_prefix = ?series_prefix,
                     owner = %owner,
                     repo = %repo,
                     "discovered GitHub-managed PHS software"
@@ -624,10 +665,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
                     package_identifier: script.slug.clone(),
                     name: display_name,
                     installed_version,
-                    targets: vec![
-                        Self::github_fetch_target(owner, repo, None),
-                        Self::phs_shell_target(analysis.version_file_basename.as_deref(), None),
-                    ],
+                    targets,
                     extra: None,
                     qualifier: None,
                     plugin_package_identifier: None,
@@ -648,11 +686,20 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
                     continue;
                 };
 
+                let (series_prefix, installed_version, targets) = Self::forge_item_outputs(
+                    ForgeHost::Codeberg,
+                    owner,
+                    repo,
+                    analysis.version_file_basename.as_deref(),
+                    installed_version,
+                );
+
                 tracing::debug!(
                     slug = %script.slug,
                     display_name = %display_name,
                     version_file_basename = %vfb,
                     version = %installed_version,
+                    series_prefix = ?series_prefix,
                     owner = %owner,
                     repo = %repo,
                     "discovered Codeberg-managed PHS software"
@@ -662,10 +709,7 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for ProxmoxHelperScriptsPlu
                     package_identifier: script.slug.clone(),
                     name: display_name,
                     installed_version,
-                    targets: vec![
-                        Self::codeberg_fetch_target(owner, repo, None),
-                        Self::phs_shell_target(analysis.version_file_basename.as_deref(), None),
-                    ],
+                    targets,
                     extra: None,
                     qualifier: None,
                     plugin_package_identifier: None,
@@ -1241,6 +1285,64 @@ mod tests {
         assert!(target.config_override.is_none());
         let target = ProxmoxHelperScriptsPlugin::phs_shell_target(None, Some(""));
         assert!(target.config_override.is_none());
+    }
+
+    #[test]
+    fn forge_item_outputs_same_prefix_on_both_overrides() {
+        let (prefix, version, targets) = ProxmoxHelperScriptsPlugin::forge_item_outputs(
+            ForgeHost::GitHub,
+            "o",
+            "r",
+            Some("app"),
+            "uptrakit-controller-standalone-v0.0.7".to_string(),
+        );
+        assert_eq!(prefix.as_deref(), Some("uptrakit-controller-standalone-v"));
+        assert_eq!(version, "0.0.7");
+        assert_eq!(targets[0].plugin_type, plugin_ids::RELEASES_GITHUB.clone());
+        assert_eq!(
+            targets[0].config_override,
+            Some(serde_json::json!({"tag_prefix": "uptrakit-controller-standalone-v"}))
+        );
+        assert_eq!(
+            targets[1].config_override,
+            Some(serde_json::json!({"version_strip_prefix": "uptrakit-controller-standalone-v"}))
+        );
+    }
+
+    #[test]
+    fn forge_item_outputs_bare_v_shell_override_only() {
+        // D7 asymmetry through the whole seam: fetch gets no filter for a
+        // plain "v", the shell target still normalizes.
+        let (prefix, version, targets) = ProxmoxHelperScriptsPlugin::forge_item_outputs(
+            ForgeHost::Codeberg,
+            "o",
+            "r",
+            None,
+            "v1.2.3".to_string(),
+        );
+        assert_eq!(prefix.as_deref(), Some("v"));
+        assert_eq!(version, "1.2.3");
+        assert_eq!(targets[0].plugin_type, plugin_ids::RELEASES_FORGEJO.clone());
+        assert!(targets[0].config_override.is_none());
+        assert_eq!(
+            targets[1].config_override,
+            Some(serde_json::json!({"version_strip_prefix": "v"}))
+        );
+    }
+
+    #[test]
+    fn forge_item_outputs_no_match_verbatim_no_overrides() {
+        let (prefix, version, targets) = ProxmoxHelperScriptsPlugin::forge_item_outputs(
+            ForgeHost::GitHub,
+            "o",
+            "r",
+            None,
+            "latest".to_string(),
+        );
+        assert!(prefix.is_none());
+        assert_eq!(version, "latest");
+        assert!(targets[0].config_override.is_none());
+        assert!(targets[1].config_override.is_none());
     }
 
     #[test]
