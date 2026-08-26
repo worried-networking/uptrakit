@@ -345,6 +345,18 @@ pub(crate) async fn wait_for_proxy_ready(client: &reqwest::Client, port: u16) {
     }
 }
 
+/// Bare `reqwest::Client::builder()` for reverse-proxy test clients that reach
+/// local container endpoints. The single sanctioned `Client::builder()` site
+/// for this test binary — call sites chain their own TLS/identity options onto
+/// the returned builder.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+)]
+pub(crate) fn test_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+}
+
 /// Decode a PEM-encoded block (any type) to raw DER bytes.
 fn pem_to_der(pem_str: &str) -> Vec<u8> {
     use base64::Engine;

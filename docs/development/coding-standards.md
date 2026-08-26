@@ -180,7 +180,19 @@ also carries the `begin*` bans — a fn-level expect would mask a stray `.begin(
 likewise swallows any future `disallowed-methods` entry: whoever adds a new ban entry must
 re-audit the fn-level-expected migration fns); never file-level. The taxonomy gate rejects both
 banned placements — an `up()`/`down()`-level attachment and the file-level `#![expect]` form. There is no test exemption:
-`disallowed-methods` has no `allow-*-in-tests` flag, so test code follows the same taxonomy.
+`disallowed-methods` has no `allow-*-in-tests` flag, so raw-SQL test sites follow the same taxonomy.
+
+**Shared lint name — the outbound-HTTP-client ban.** The one `clippy::disallowed_methods` lint
+also backs the outbound-HTTP-client ban (`reqwest::Client::builder`, `reqwest::Client::new`,
+`reqwest::ClientBuilder::new`; [ADR-0047](../adr/0047-typed-redirect-policy-for-outbound-http-clients.md)).
+That is a separate ban family with its own reason convention — the `#[expect]` reason names the
+redirect and DNS-resolver decisions (or, for test clients that talk to local mock endpoints, the
+absence of redirect/SSRF exposure), not a raw-SQL category. The taxonomy gate scopes the
+four-category prefix check to expects that suppress a raw-SQL / tx-opener call; an expect that
+suppresses a reqwest constructor is recognised as the HTTP-client family and exempted. The
+carve-out is fail-closed: detection is bounded to the expect's own statement, so only a genuine
+reqwest constructor exempts a site, and any third ban family added to this lint trips the gate
+until it is reconciled there.
 
 Each ban entry has a canary in `crates/shared/db-tx`'s `#[cfg(test)]` canary module: if an
 upgrade renames a banned path, the entry degrades to a config warning, but the canary's

@@ -1,4 +1,4 @@
-# 47. Typed redirect policy for outbound HTTP clients
+# 0047 — Typed redirect policy for outbound HTTP clients
 
 Date: 2026-08-25
 
@@ -32,10 +32,21 @@ Direct construction of a `reqwest::Client` is clippy-banned outside
 `reqwest::Client::new`, `reqwest::ClientBuilder::new`) so every plugin HTTP client goes
 through the typed `RedirectMode` and the SSRF resolver.
 
+A `#[cfg(test)]` canary in `http_client.rs` invokes `reqwest::ClientBuilder::new()` directly
+under `#[expect(clippy::disallowed_methods)]`. If any banned path stops resolving (a rename
+or a dependency bump), its expectation goes unfulfilled and
+`unfulfilled_lint_expectations = "deny"` fails the build — so the gate cannot silently go
+inert.
+
 ### Default-header rule (supersedes the blanket per-request rule)
 
 The previous rule — "auth headers are applied per-request, never as default headers" — is
-too broad now that clients declare an explicit redirect mode. The header-specific rule:
+too broad now that clients declare an explicit redirect mode. That blanket rule lived at
+`docs/development/plugin-guidelines.md:817` and `crates/plugins/AGENTS.md:130-131`; its
+rationale was dissolved into beads on 2026-08-16 as tasks
+`uptrakit-plan-2026-07-13-plugin-guidelines-realignment-t01..t02` under epic
+`uptrakit-spec-2026-07-12-plugin-guidelines-realignment-design`. This ADR supersedes it with
+the header-specific rule:
 
 A default header on a redirect-following client (`RedirectMode::Limited`) is acceptable only
 when the credential it carries is one of:
@@ -86,10 +97,11 @@ Two residual risks remain, both documented in
 [secure-development.md](../security/secure-development.md#ssrf-protection):
 
 1. reqwest itself retains `Authorization` across a same-scheme, same-host, same-port,
-   different-path redirect (reqwest `redirect.rs:241-243`) — this is not reachable on any
-   client mapped in this ADR today, since none pairs `Authorization` as a default header
-   with `Limited` redirects to the same host on a different path, but it is a reqwest
-   behavior this design does not override.
+   different-path redirect (reqwest `redirect.rs:241-243`) — this is not reachable on the
+   clients mapped today: GitHub's release-asset download client redirects only to a
+   validated https + public host, GitLab and Forgejo stay `RedirectMode::None`, Docker
+   registry auth is applied per-request, and the base client carries no default auth header.
+   It remains a reqwest behavior this design does not override.
 2. An initial-URL private-IP literal bypasses the `SsrfSafeResolver` DNS-resolution guard,
    because an IP literal never reaches the resolver. `check_hop`'s private-IP check covers
    redirect targets, not the first request. Hardening the initial URL is deferred.

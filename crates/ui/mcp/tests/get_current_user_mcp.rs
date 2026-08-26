@@ -343,7 +343,7 @@ async fn create_api_token(db: &DatabaseConnection, user_id: Uuid) -> String {
     reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
 )]
 fn test_http_client() -> Client {
-    Client::new()
+    reqwest::Client::new()
 }
 
 /// Parse the first non-empty data line from an SSE body.

@@ -22,6 +22,17 @@ use uptrakit_openapi_client::types::system_services::{
 };
 use uuid::Uuid;
 
+/// Bare `reqwest::Client::builder()` for test clients that reach local/mock
+/// endpoints. The single sanctioned `Client::builder()` site for this module —
+/// call sites chain their own TLS/timeout options onto the returned builder.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
+)]
+pub(crate) fn test_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+}
+
 /// A thin wrapper around [`UptrakitClient`] with polling helpers for
 /// system integration tests.
 pub(crate) struct ApiClient {
@@ -56,11 +67,7 @@ impl ApiClient {
     /// Connection errors after a 2xx response (exec drop) are ignored.
     /// Follow with `wait_for_generation` to confirm the new generation is up.
     pub(crate) async fn force_reexec(&self) {
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-        )]
-        let client = reqwest::Client::builder()
+        let client = test_client_builder()
             .danger_accept_invalid_certs(true)
             .connect_timeout(std::time::Duration::from_secs(5))
             .timeout(std::time::Duration::from_secs(5))
@@ -88,11 +95,7 @@ impl ApiClient {
     /// Panics if `timeout` elapses without seeing the expected generation.
     pub(crate) async fn wait_for_generation(&self, expected: u64, timeout: Duration) {
         let deadline = tokio::time::Instant::now() + timeout;
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-        )]
-        let client = reqwest::Client::builder()
+        let client = test_client_builder()
             .danger_accept_invalid_certs(true)
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(5))
@@ -143,11 +146,7 @@ impl ApiClient {
             .expect("pki_base_url not set — call with_pki_port first");
         let url = format!("{pki_base}/healthz");
         let deadline = tokio::time::Instant::now() + timeout;
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-        )]
-        let client = reqwest::Client::builder()
+        let client = test_client_builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(5))
             .build()
@@ -409,11 +408,7 @@ impl ApiClient {
             .api_token
             .as_deref()
             .expect("must call register_and_login_with_token first");
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-        )]
-        let client = reqwest::Client::builder()
+        let client = test_client_builder()
             .danger_accept_invalid_certs(true)
             .connect_timeout(std::time::Duration::from_secs(5))
             .timeout(std::time::Duration::from_secs(60))
@@ -513,11 +508,7 @@ impl ApiClient {
             .api_token
             .as_deref()
             .expect("must call register_and_login_with_token first");
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-        )]
-        let client = reqwest::Client::builder()
+        let client = test_client_builder()
             .danger_accept_invalid_certs(true)
             .connect_timeout(std::time::Duration::from_secs(5))
             .timeout(std::time::Duration::from_secs(60))

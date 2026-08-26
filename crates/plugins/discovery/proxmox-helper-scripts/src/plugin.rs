@@ -833,13 +833,20 @@ mod tests {
             .expect("create")
     }
 
-    /// Test-only HTTP client.
+    /// Test-only [`reqwest::ClientBuilder`] — the crate's single sanctioned
+    /// direct-builder site. Test clients hit local/mock endpoints, so they
+    /// carry no redirect or SSRF exposure.
     #[expect(
         clippy::disallowed_methods,
         reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
     )]
+    fn test_client_builder() -> reqwest::ClientBuilder {
+        reqwest::Client::builder()
+    }
+
+    /// Test-only HTTP client.
     fn test_http_client() -> reqwest::Client {
-        reqwest::Client::new()
+        test_client_builder().build().expect("client")
     }
 
     fn test_plugin_with(
@@ -1257,11 +1264,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
     async fn discovery_missing_update_script_returns_empty() {
         // sentinel exit 44 = update script absent → legitimate empty (non-PHS host)
         let executor = RoutedOutputExecutor::new([("sh", "", UPDATE_SCRIPT_ABSENT_EXIT)]);
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-        )]
-        let client = reqwest::Client::builder()
+        let client = test_client_builder()
             .resolve(
                 "raw.githubusercontent.com",
                 "127.0.0.1:1".parse().expect("addr"),
@@ -1278,11 +1281,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
         // non-sentinel non-zero exit = file exists but unreadable → must error,
         // not be misclassified as an empty (non-PHS) host.
         let executor = RoutedOutputExecutor::new([("sh", "", 1)]);
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-        )]
-        let client = reqwest::Client::builder()
+        let client = test_client_builder()
             .resolve(
                 "raw.githubusercontent.com",
                 "127.0.0.1:1".parse().expect("addr"),
@@ -1299,11 +1298,7 @@ check_for_gh_release "uptrakit-controller-standalone" "worried-networking/uptrak
         // fetch_text("raw.githubusercontent.com/...sonarr.sh") → connect refused → FetchOutcome::Err →
         // must now return Err (not Ok with partial snapshot)
         let executor = RoutedOutputExecutor::new([("sh", UPDATE_SCRIPT_WITH_ONE_CT, 0)]);
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-        )]
-        let client = reqwest::Client::builder()
+        let client = test_client_builder()
             .resolve(
                 "raw.githubusercontent.com",
                 "127.0.0.1:1".parse().expect("addr"),

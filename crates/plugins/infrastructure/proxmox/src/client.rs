@@ -62,7 +62,7 @@ impl ProxmoxClient {
             ssrf_mode: SsrfMode::Permissive,
             redirect: RedirectMode::Limited { hops: 10 },
             danger_accept_invalid_certs: !config.verify_tls,
-            ..PluginHttpClientConfig::default()
+            ..Default::default()
         })
         .map_err(|e| {
             report!(ProxmoxError::Request(format!(

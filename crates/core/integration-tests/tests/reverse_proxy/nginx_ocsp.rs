@@ -357,11 +357,7 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
     .await;
 
     // Verify HTTPS responder is reachable from test host.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-    )]
-    let healthz_client = reqwest::Client::builder()
+    let healthz_client = super::server::test_client_builder()
         .tls_certs_merge([
             reqwest::Certificate::from_pem(pki.ca_cert_pem.as_bytes()).expect("CA cert")
         ])
@@ -685,11 +681,7 @@ fn build_client(
     // tests: nginx only runs `ssl_ocsp` validation during a handshake, so a
     // reused connection would never re-consult the OCSP cache, and the test
     // would race against nginx's asynchronous cache write.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-    )]
-    let mut builder = reqwest::Client::builder()
+    let mut builder = super::server::test_client_builder()
         .tls_certs_merge([ca_cert])
         .resolve("localhost", resolved)
         .pool_max_idle_per_host(0);

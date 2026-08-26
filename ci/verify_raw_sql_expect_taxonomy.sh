@@ -15,7 +15,17 @@
 #   (a) every disallowed_methods/disallowed_macros `#[expect]` reason string
 #       starts with an allowed prefix (path-scoped: the four taxonomy
 #       categories everywhere, plus the pre-existing db-tx-specific reasons
-#       only inside crates/shared/db-tx/src/lib.rs).
+#       only inside crates/shared/db-tx/src/lib.rs). Exempt: an expect that
+#       suppresses an outbound-HTTP-client constructor
+#       (reqwest::Client::builder / Client::new / ClientBuilder::new — the
+#       separate ban family from ADR-0047, which shares the one
+#       clippy::disallowed_methods lint name). That family carries its own
+#       reason convention (naming the redirect + DNS-resolver decisions), not
+#       the raw-SQL taxonomy. The carve-out is fail-closed: only a recognized
+#       reqwest constructor in the suppressed item exempts the site, so a
+#       stray raw-SQL `.begin()` can never borrow an HTTP-client reason as a
+#       taxonomy bypass, and any future third ban family trips this gate until
+#       it is reconciled here explicitly.
 #   (b) no file-level `#![expect(clippy::disallowed_methods|disallowed_macros
 #       …)]` anywhere in crates/ or xtask/.
 #   (c) every "frozen merged migration" reason lives in a migration path (a
@@ -91,6 +101,24 @@ PINNED_FROZEN_MERGED_MIGRATION_COUNT = 87
 # rule does not depend on which desugaring is in play.
 UNATTACHABLE_FN_NAMES = ("up", "down")
 
+# Outbound-HTTP-client constructor paths (ADR-0047). The clippy.toml
+# `disallowed-methods` ban shares its ONE lint name (clippy::disallowed_methods)
+# across two unrelated families: the raw-SQL / tx-opener ban this gate polices,
+# and this reqwest-constructor ban. An `#[expect]` that suppresses one of these
+# paths belongs to the HTTP-client family, which carries its own reason
+# convention (naming the redirect + DNS-resolver decisions), not the raw-SQL
+# taxonomy — so it is exempt from the prefix check below. Detection is by the
+# suppressed item head, fully-qualified only: every ban site spells the
+# constructor `reqwest::…` (checked at gate-authoring time), and no raw-SQL
+# `.begin()` site ever names a reqwest constructor, so the carve-out is
+# fail-closed and cannot become a taxonomy bypass.
+REQWEST_CTOR_TOKENS = (
+    "reqwest::Client::builder",
+    "reqwest::Client::new",
+    "reqwest::ClientBuilder::new",
+    "reqwest::ClientBuilder",
+)
+
 SCAN_DIRS = ("crates", "xtask")
 DOC_POINTER = "docs/development/coding-standards.md § Raw-SQL ban"
 
@@ -103,6 +131,36 @@ def find_rs_files(dirs):
             for name in filenames:
                 if name.endswith(".rs"):
                     yield os.path.join(root, name)
+
+
+def suppresses_reqwest_ctor(head):
+    """True if the item this expect attaches to is a reqwest client
+    constructor (the ADR-0047 ban family), False otherwise.
+
+    Comments and string literals are stripped before matching, so a reqwest
+    token that appears only inside a `//` comment, a `/* */` block, or a
+    string (e.g. a `reqwest::Client::new` mention in a doc string or a URL)
+    can never exempt an expect from the taxonomy check. Order matters:
+    strings are blanked before line comments so a `//` sequence inside a URL
+    literal (`https://…`) does not truncate the statement early.
+
+    Detection is then bounded to the SINGLE suppressed item: the search
+    window stops at the first ';' or '}' in the cleaned head. Without this
+    bound a raw-SQL `.begin()` expect whose 200-char head spills into an
+    adjacent reqwest statement would be wrongly exempted — a taxonomy bypass.
+    Bounding keeps the carve-out fail-closed: only a reqwest constructor in
+    live code inside the expect's own statement / one-line builder fn counts.
+    """
+    cleaned = re.sub(r"/\*.*?\*/", "", head, flags=re.S)
+    cleaned = re.sub(r'"(?:\\.|[^"\\])*"', '""', cleaned)
+    cleaned = re.sub(r"//[^\n]*", "", cleaned)
+    cut = len(cleaned)
+    for term in (";", "}"):
+        idx = cleaned.find(term)
+        if idx != -1:
+            cut = min(cut, idx + 1)
+    window = cleaned[:cut]
+    return any(tok in window for tok in REQWEST_CTOR_TOKENS)
 
 
 def is_migration_path(path):
@@ -136,7 +194,7 @@ def attached_item_head(text, pos):
             # stacked attribute: skip to its bracket-balanced end
             j = text.find("[", i)
             if j == -1:
-                return text[i : i + 120]
+                return text[i : i + 200]
             depth = 0
             while j < n:
                 if text[j] == "[":
@@ -149,7 +207,7 @@ def attached_item_head(text, pos):
             i = j + 1
         else:
             break
-    return text[i : i + 120]
+    return text[i : i + 200]
 
 
 ITEM_FN_RE = re.compile(
@@ -223,6 +281,7 @@ def scan_expect_attrs(text):
                 "reason": reason,
                 "reason_line": reason_line,
                 "attached_fn": fn_match.group(1) if fn_match else None,
+                "attached_head": head,
             }
         )
     return results
@@ -256,15 +315,25 @@ def main():
                 )
                 continue
 
-            allowed_prefixes = TAXONOMY_PREFIXES
-            if path == DB_TX_PATH:
-                allowed_prefixes = TAXONOMY_PREFIXES + DB_TX_PREFIXES
+            head = attr["attached_head"] or ""
+            is_reqwest_ban = suppresses_reqwest_ctor(head)
 
-            if not any(reason.startswith(p) for p in allowed_prefixes):
-                violations.append(
-                    f'{path}:{line}: reason "{reason}" does not start with '
-                    f"an allowed prefix ({DOC_POINTER})"
-                )
+            # The raw-SQL taxonomy applies only to the raw-SQL / tx-opener ban
+            # family. An expect suppressing a reqwest constructor is the
+            # separate ADR-0047 HTTP-client family sharing this lint name — it
+            # keeps its own reason convention and is exempt from the prefix
+            # check (still subject to the universal reason-present, file-level,
+            # and up()/down() checks around this block).
+            if not is_reqwest_ban:
+                allowed_prefixes = TAXONOMY_PREFIXES
+                if path == DB_TX_PATH:
+                    allowed_prefixes = TAXONOMY_PREFIXES + DB_TX_PREFIXES
+
+                if not any(reason.startswith(p) for p in allowed_prefixes):
+                    violations.append(
+                        f'{path}:{line}: reason "{reason}" does not start with '
+                        f"an allowed prefix ({DOC_POINTER})"
+                    )
 
             if attr["attached_fn"] in UNATTACHABLE_FN_NAMES:
                 violations.append(

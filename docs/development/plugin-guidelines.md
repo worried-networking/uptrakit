@@ -832,6 +832,11 @@ if let Some(token) = &self.config.auth_token {
 let response = request.send().await?;
 ```
 
+A client default header is also allowed when the credential is stripped cross-origin: the
+GitHub release plugin (`crates/plugins/releases/github/src/plugin.rs`) sets `Authorization`
+as a client default header via `build_plugin_http_client`, valid under carve-out (c) because
+reqwest drops `Authorization` on a cross-origin redirect.
+
 See [ADR-0047](../adr/0047-typed-redirect-policy-for-outbound-http-clients.md) for the full rule and the GitLab counterexample.
 
 Do **not** call `reqwest::Client::builder()` directly in plugin code — this is clippy-enforced (`clippy.toml` `disallowed-methods`). Using the

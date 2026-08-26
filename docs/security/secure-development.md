@@ -225,6 +225,12 @@ let client = reqwest::Client::builder()
     .build()?;
 ```
 
+`reqwest::Client::builder()` is clippy-banned outside the audited sites named in
+[ADR-0047](../adr/0047-typed-redirect-policy-for-outbound-http-clients.md). Plugin
+clients build through `build_plugin_http_client`, which wires the resolver together
+with a typed `RedirectMode`; the operator-context crates keep a direct builder behind
+a scoped `#[expect(clippy::disallowed_methods, …)]`.
+
 ### Where it is applied
 
 All plugin HTTP clients and the webhook notification channel use `SsrfSafeResolver`:

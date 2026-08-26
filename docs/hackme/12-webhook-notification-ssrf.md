@@ -68,8 +68,9 @@
 - ~~No URL validation beyond scheme.~~ **Fixed.** `validate_config()` now validates
   the URL host against `is_private_host()` (unless `--allow-private-notification-urls`
   is set). Encoded IP addresses (e.g. `http://0x7f000001`) are not yet covered.
-- ~~No redirect validation.~~ **Fixed.** The webhook HTTP client uses
-  `redirect(Policy::none())` to disable redirect following, and `SsrfSafeResolver`
+- ~~No redirect validation.~~ **Fixed.** The webhook HTTP client is built via
+  `build_plugin_http_client` with the default `RedirectMode::None`, so redirects are
+  never followed; `deliver()` also rejects any 3xx response explicitly. `SsrfSafeResolver`
   provides defence-in-depth by blocking private-IP resolution at connection time.
 - ~~Arbitrary custom headers.~~ **Fixed.** A header name blocklist rejects
   `Authorization`, `Cookie`, `Host`, `Proxy-Authorization`, `X-Forwarded-For`,
@@ -86,7 +87,8 @@
   via `--allow-private-notification-urls` for self-hosted deployments.
 - ~~Add a header name blocklist~~ — **Done.** Always enforced regardless of URL flag.
 - ~~Disable HTTP redirect following in the webhook client~~ — **Done.** The webhook
-  client uses `redirect(Policy::none())` and explicitly rejects 3xx responses.
+  client sets `RedirectMode::None` through `build_plugin_http_client` and explicitly
+  rejects 3xx responses.
 - ~~Implement DNS resolution validation at connection time~~ — **Done.** The webhook
   channel uses `SsrfSafeResolver` (`uptrakit_shared_types::ssrf`).
 - Add a "test delivery" dry-run that shows the resolved IP address and response

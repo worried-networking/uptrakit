@@ -155,11 +155,7 @@ fn build_client(
 ) -> reqwest::Client {
     let ca_cert = reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-    )]
-    let mut builder = reqwest::Client::builder().tls_certs_merge([ca_cert]);
+    let mut builder = super::server::test_client_builder().tls_certs_merge([ca_cert]);
 
     if let (Some(cert), Some(key)) = (cert_pem, key_pem) {
         let mut id_pem = cert.as_bytes().to_vec();

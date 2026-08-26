@@ -446,13 +446,20 @@ impl RepositoryTreeDto {
 mod tests {
     use super::*;
 
-    /// Test-only HTTP client.
+    /// Test-only [`reqwest::ClientBuilder`] — the crate's single sanctioned
+    /// direct-builder site. Test clients hit local/mock endpoints, so they
+    /// carry no redirect or SSRF exposure.
     #[expect(
         clippy::disallowed_methods,
         reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
     )]
+    fn test_client_builder() -> reqwest::ClientBuilder {
+        reqwest::Client::builder()
+    }
+
+    /// Test-only HTTP client.
     fn test_http_client() -> reqwest::Client {
-        reqwest::Client::new()
+        test_client_builder().build().expect("client")
     }
 
     #[test]
@@ -710,12 +717,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_repository_tree_wraps_transport_failures_as_retryable_outcomes() {
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "test client to local/mock endpoint — no redirect or SSRF exposure"
-        )]
         let client = GitHubClient::new(GitHubClientConfig::new(
-            reqwest::Client::builder()
+            test_client_builder()
                 .timeout(std::time::Duration::from_millis(25))
                 .build()
                 .unwrap(),
