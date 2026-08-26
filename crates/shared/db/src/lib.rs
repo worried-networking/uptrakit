@@ -9,7 +9,9 @@ pub mod migration;
 pub mod provider_settings;
 pub mod raw_settings;
 pub mod users;
+pub mod visibility;
 pub use uptrakit_db_tx::begin_immediate;
 pub use uptrakit_tenant_db::{HostScoped, TenantDb, TenantScoped};
 
 pub use db_error::is_unique_constraint_violation;
+pub use visibility::TenantDbVisibleExt;
