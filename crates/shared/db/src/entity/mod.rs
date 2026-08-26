@@ -64,6 +64,8 @@ pub mod user_recovery_code;
 pub mod user_role;
 pub mod user_totp;
 
+pub mod host_scoped;
 pub mod prelude;
 pub mod tenant_scoped;
+pub use uptrakit_tenant_db::HostScoped;
 pub use uptrakit_tenant_db::TenantScoped;
