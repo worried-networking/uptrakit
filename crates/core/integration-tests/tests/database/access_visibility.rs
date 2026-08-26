@@ -5,14 +5,16 @@
 
 use std::collections::BTreeSet;
 
-use sea_orm::{ActiveModelTrait, DatabaseConnection, RelationTrait, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, RelationTrait, Set,
+};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, host_tag, host_tag_assignment,
-    software_item, update_history,
+    software_item, tenant, update_history,
 };
 use uptrakit_shared_db::{TenantDb, TenantDbVisibleExt};
-use uptrakit_shared_types::access::Visibility;
+use uptrakit_shared_types::access::{Selector, TargetRef, Visibility};
 use uuid::Uuid;
 
 use crate::database_helpers::fixtures::insert_host;
@@ -64,6 +66,13 @@ async fn assign_tag(db: &DatabaseConnection, tag_id: Uuid, host_id: Uuid) {
     .insert(db)
     .await
     .expect("insert tag assignment");
+}
+
+async fn remove_tag(db: &DatabaseConnection, tag_id: Uuid, host_id: Uuid) {
+    host_tag_assignment::Entity::delete_by_id((tag_id, host_id))
+        .exec(db)
+        .await
+        .expect("delete tag assignment");
 }
 
 async fn seed_software_item(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
@@ -418,4 +427,291 @@ async fn test_no_contributing_axis_yields_none(harness: &TestHarness) {
 db_test!(
     no_contributing_axis_yields_none,
     test_no_contributing_axis_yields_none
+);
+
+async fn test_deactivated_tag_confers_nothing(harness: &TestHarness) {
+    let tagged = insert_host(&harness.db, harness.tenant_id).await.id;
+    let tag = seed_tag(&harness.db, harness.tenant_id, true).await;
+    assign_tag(&harness.db, tag, tagged).await;
+    let vis = filter(&[tag], &[], &[], &[]);
+
+    let got = visible_host_ids(harness, &vis)
+        .await
+        .expect("tags axis contributes");
+    assert!(got.is_empty(), "deactivated tag must confer nothing");
+
+    // Reactivation restores visibility immediately.
+    host_tag::Entity::update_many()
+        .col_expr(
+            host_tag::Column::DeactivatedAt,
+            sea_orm::sea_query::Expr::value(None::<OffsetDateTime>),
+        )
+        .filter(host_tag::Column::Id.eq(tag))
+        .exec(&harness.db)
+        .await
+        .expect("reactivate tag");
+    let got = visible_host_ids(harness, &vis)
+        .await
+        .expect("tags axis contributes");
+    assert_eq!(got, ids(&[tagged]));
+}
+
+db_test!(
+    deactivated_tag_confers_nothing,
+    test_deactivated_tag_confers_nothing
+);
+
+async fn test_retag_reflected_immediately(harness: &TestHarness) {
+    let h1 = insert_host(&harness.db, harness.tenant_id).await.id;
+    let h2 = insert_host(&harness.db, harness.tenant_id).await.id;
+    let tag = seed_tag(&harness.db, harness.tenant_id, false).await;
+    assign_tag(&harness.db, tag, h1).await;
+    let vis = filter(&[tag], &[], &[], &[]);
+
+    let got = visible_host_ids(harness, &vis)
+        .await
+        .expect("tags axis contributes");
+    assert_eq!(got, ids(&[h1]));
+
+    remove_tag(&harness.db, tag, h1).await;
+    assign_tag(&harness.db, tag, h2).await;
+
+    let got = visible_host_ids(harness, &vis)
+        .await
+        .expect("tags axis contributes");
+    assert_eq!(got, ids(&[h2]));
+}
+
+db_test!(
+    retag_reflected_immediately,
+    test_retag_reflected_immediately
+);
+
+async fn seed_foreign_tenant(db: &DatabaseConnection) -> Uuid {
+    let id = Uuid::now_v7();
+    let now = OffsetDateTime::now_utc();
+    tenant::ActiveModel {
+        id: Set(id),
+        name: Set(format!("foreign-{id}")),
+        slug: Set(id.to_string()),
+        is_default: Set(false),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    }
+    .insert(db)
+    .await
+    .expect("insert foreign tenant");
+    id
+}
+
+async fn test_foreign_tenant_ids_yield_nothing(harness: &TestHarness) {
+    let foreign_tenant = seed_foreign_tenant(&harness.db).await;
+    let foreign_host = insert_host(&harness.db, foreign_tenant).await.id;
+    let foreign_tag = seed_tag(&harness.db, foreign_tenant, false).await;
+    assign_tag(&harness.db, foreign_tag, foreign_host).await;
+    let foreign_sw = seed_software_item(&harness.db, foreign_tenant).await;
+    let foreign_hsi = seed_hsi(&harness.db, foreign_host, foreign_sw).await;
+    let own = insert_host(&harness.db, harness.tenant_id).await.id;
+    // Cross-tenant tag trust pin: a foreign-tenant tag assigned to an IN-tenant
+    // host (FK-legal — host_tag_assignments has no tenant column) must confer
+    // nothing. Without tagged_host_subquery's host_tags.tenant_id predicate,
+    // `own` would leak; the outer tenant filter cannot catch it (own is in-tenant).
+    assign_tag(&harness.db, foreign_tag, own).await;
+
+    let got = visible_host_ids(harness, &filter(&[foreign_tag], &[foreign_host], &[], &[]))
+        .await
+        .expect("axes contribute");
+    assert!(
+        got.is_empty(),
+        "foreign host/tag ids must yield nothing — a non-empty set means the \
+         tag subquery trusted a foreign tenant's tag id"
+    );
+
+    let got = visible_hsi_ids(harness, &filter(&[], &[], &[foreign_sw], &[foreign_hsi]))
+        .await
+        .expect("axes contribute");
+    assert!(got.is_empty(), "foreign item ids must yield nothing");
+
+    let got = visible_host_ids(harness, &filter(&[], &[own], &[], &[]))
+        .await
+        .expect("host axis contributes");
+    assert_eq!(got, BTreeSet::from([own]));
+}
+
+db_test!(
+    foreign_tenant_ids_yield_nothing,
+    test_foreign_tenant_ids_yield_nothing
+);
+
+async fn test_undeclared_axes_fail_closed(harness: &TestHarness) {
+    let h = insert_host(&harness.db, harness.tenant_id).await.id;
+    let sw = seed_software_item(&harness.db, harness.tenant_id).await;
+    let hsi = seed_hsi(&harness.db, h, sw).await;
+    let _uh = seed_update_history(&harness.db, harness.tenant_id, h, sw, Some(hsi)).await;
+    let _plugin = seed_hsi_plugin(&harness.db, h, sw, hsi).await;
+    let vis = filter(&[], &[], &[sw], &[]);
+    let tdb = tenant_db(harness);
+
+    assert!(
+        tdb.find_visible::<update_history::Entity>(&vis).is_none(),
+        "update_history must not honor the software axis"
+    );
+    assert!(
+        tdb.find_visible_via_tenant_join::<host_software_item_plugin::Entity, host::Entity>(
+            host_software_item_plugin::Relation::Host.def(),
+            &vis,
+        )
+        .is_none(),
+        "host_software_item_plugin must not honor the software axis"
+    );
+}
+
+db_test!(
+    undeclared_axes_fail_closed,
+    test_undeclared_axes_fail_closed
+);
+
+/// Resolve a host's active tag ids the way decision-time `load_host_tags`
+/// does: assignments joined to same-tenant, non-deactivated tags.
+async fn active_host_tags(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    host_id: Uuid,
+) -> BTreeSet<Uuid> {
+    use sea_orm::{JoinType, QuerySelect, RelationTrait};
+    host_tag_assignment::Entity::find()
+        .join(
+            JoinType::InnerJoin,
+            host_tag_assignment::Relation::HostTag.def(),
+        )
+        .filter(host_tag::Column::TenantId.eq(tenant_id))
+        .filter(host_tag::Column::DeactivatedAt.is_null())
+        .filter(host_tag_assignment::Column::HostId.eq(host_id))
+        .all(db)
+        .await
+        .expect("load host tags")
+        .into_iter()
+        .map(|a| a.host_tag_id)
+        .collect()
+}
+
+async fn test_parity_with_covers(harness: &TestHarness) {
+    let h_tagged = insert_host(&harness.db, harness.tenant_id).await.id;
+    let h_direct = insert_host(&harness.db, harness.tenant_id).await.id;
+    let h_bystander = insert_host(&harness.db, harness.tenant_id).await.id;
+    let tag = seed_tag(&harness.db, harness.tenant_id, false).await;
+    assign_tag(&harness.db, tag, h_tagged).await;
+    let sw_a = seed_software_item(&harness.db, harness.tenant_id).await;
+    let sw_b = seed_software_item(&harness.db, harness.tenant_id).await;
+    let hsi_a = seed_hsi(&harness.db, h_bystander, sw_a).await;
+    let hsi_b = seed_hsi(&harness.db, h_bystander, sw_b).await;
+    let sw_c = seed_software_item(&harness.db, harness.tenant_id).await;
+    let hsi_c = seed_hsi(&harness.db, h_bystander, sw_c).await;
+    let uh_1 = seed_update_history(&harness.db, harness.tenant_id, h_tagged, sw_a, None).await;
+    let uh_2 = seed_update_history(&harness.db, harness.tenant_id, h_bystander, sw_a, None).await;
+
+    let selectors = [
+        Selector::Hosts {
+            ids: vec![h_direct],
+        },
+        Selector::Tags { ids: vec![tag] },
+        Selector::Software { ids: vec![sw_a] },
+        Selector::Items { ids: vec![hsi_b] },
+    ];
+    let vis = Visibility::from_selectors(selectors.iter());
+    let covered = |target: &TargetRef, tags: &BTreeSet<Uuid>| {
+        selectors.iter().any(|s| s.covers(target, tags))
+    };
+
+    let visible = visible_host_ids(harness, &vis)
+        .await
+        .expect("filter contributes");
+    for host_id in [h_tagged, h_direct, h_bystander] {
+        let tags = active_host_tags(&harness.db, harness.tenant_id, host_id).await;
+        assert_eq!(
+            visible.contains(&host_id),
+            covered(&TargetRef::Host(host_id), &tags),
+            "host {host_id} parity"
+        );
+    }
+
+    let visible = visible_hsi_ids(harness, &vis)
+        .await
+        .expect("filter contributes");
+    for (id, host_id, software_item_id) in [
+        (hsi_a, h_bystander, sw_a),
+        (hsi_b, h_bystander, sw_b),
+        (hsi_c, h_bystander, sw_c),
+    ] {
+        let tags = active_host_tags(&harness.db, harness.tenant_id, host_id).await;
+        let target = TargetRef::HostSoftwareItem {
+            id,
+            host_id,
+            software_item_id,
+        };
+        assert_eq!(
+            visible.contains(&id),
+            covered(&target, &tags),
+            "host_software_item {id} parity"
+        );
+    }
+
+    let tdb = tenant_db(harness);
+    let visible: BTreeSet<Uuid> = tdb
+        .find_visible::<update_history::Entity>(&vis)
+        .expect("filter contributes")
+        .all(tdb.db())
+        .await
+        .expect("query update history")
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    for (id, host_id) in [(uh_1, h_tagged), (uh_2, h_bystander)] {
+        let tags = active_host_tags(&harness.db, harness.tenant_id, host_id).await;
+        assert_eq!(
+            visible.contains(&id),
+            covered(&TargetRef::Host(host_id), &tags),
+            "update_history {id} parity"
+        );
+    }
+}
+
+db_test!(parity_with_covers, test_parity_with_covers);
+
+async fn test_find_visible_by_id_outcomes(harness: &TestHarness) {
+    let inside = insert_host(&harness.db, harness.tenant_id).await.id;
+    let outside = insert_host(&harness.db, harness.tenant_id).await.id;
+    let tdb = tenant_db(harness);
+
+    assert!(
+        tdb.find_visible_by_id::<host::Entity, _>(outside, &Visibility::None)
+            .is_none()
+    );
+    assert!(
+        tdb.find_visible_by_id::<host::Entity, _>(outside, &filter(&[], &[], &[outside], &[]))
+            .is_none(),
+        "undeclared-axis-only filter must be None, not an open select"
+    );
+
+    let vis = filter(&[], &[inside], &[], &[]);
+    let miss = tdb
+        .find_visible_by_id::<host::Entity, _>(outside, &vis)
+        .expect("hosts axis contributes")
+        .one(tdb.db())
+        .await
+        .expect("query host");
+    assert!(miss.is_none());
+    let hit = tdb
+        .find_visible_by_id::<host::Entity, _>(inside, &vis)
+        .expect("hosts axis contributes")
+        .one(tdb.db())
+        .await
+        .expect("query host");
+    assert!(hit.is_some());
+}
+
+db_test!(
+    find_visible_by_id_outcomes,
+    test_find_visible_by_id_outcomes
 );
