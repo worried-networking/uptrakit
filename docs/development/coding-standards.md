@@ -1547,14 +1547,29 @@ let hosts: HashMap<Uuid, host::Model> = tenant_db
 let Some(h) = hosts.get(&link.host_id) else { continue; };
 ```
 
+**Rule 5 — Use the `find_visible` family when a call site must apply grant visibility.**
+
+`TenantDbVisibleExt` (re-exported from `uptrakit-shared-db`) adds `find_visible::<E>(&visibility)`,
+`find_visible_by_id::<E, _>(id, &visibility)`, and
+`find_visible_via_tenant_join::<Target, Scoped>(relation, &visibility)` — visibility-narrowed variants of the
+`TenantDb` methods above. `E` must implement `HostScoped` (`uptrakit-tenant-db`), the visibility sibling of
+`TenantScoped`: it declares which columns carry the host/software/item axes; an undeclared axis contributes
+nothing (fail-closed). All three return `Option<Select<_>>` — `None` means _nothing is visible_ — return an empty
+list or 404 without querying. `Some` is not proof of visibility — a filtered select can still return zero rows;
+treat an empty result identically to `None`. Handle the `Option` with `let-else`; never
+`unwrap_or`/`unwrap_or_else`/`map_or` into an unfiltered select — that silently defeats visibility (see the
+anti-pattern table). Visibility conditions are appended to the tenant filter, never a replacement for it.
+
 ### Anti-pattern table
 
-| Wrong                                                 | Right                                                                          | Reason                   |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------ |
-| `Host::find().all(tenant_db.db())`                    | `tenant_db.find::<host::Entity>().all(tenant_db.db())`                         | No tenant filter applied |
-| `ServiceHost::find().all(tenant_db.db())`             | `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(rel)` | Cross-tenant leak        |
-| Per-item `Host::find_by_id(id).one(db)` inside a loop | Batch `find().filter(id.is_in(ids))` then in-memory lookup                     | N+1 queries              |
-| `Entity::update_many().col_expr(...)` loop            | `Entity::update_many().filter(id.is_in(ids)).col_expr(...).exec(db)`           | N+1 updates              |
+| Wrong                                                                                             | Right                                                                          | Reason                                     |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| `Host::find().all(tenant_db.db())`                                                                | `tenant_db.find::<host::Entity>().all(tenant_db.db())`                         | No tenant filter applied                   |
+| `ServiceHost::find().all(tenant_db.db())`                                                         | `tenant_db.find_via_tenant_join::<service_host::Entity, service::Entity>(rel)` | Cross-tenant leak                          |
+| Per-item `Host::find_by_id(id).one(db)` inside a loop                                             | Batch `find().filter(id.is_in(ids))` then in-memory lookup                     | N+1 queries                                |
+| `Entity::update_many().col_expr(...)` loop                                                        | `Entity::update_many().filter(id.is_in(ids)).col_expr(...).exec(db)`           | N+1 updates                                |
+| Plain `tenant_db.find::<E>()` where the endpoint applies grant visibility                         | `tenant_db.find_visible::<E>(&visibility)` + `let-else` on the `Option`        | Cross-visibility leak                      |
+| `find_visible…(…).unwrap_or(tenant_db.find::<E>())` (any `unwrap_or*` / `map_or` on the `Option`) | `let Some(query) = … else { return empty/404 }`                                | Bypasses the nothing-visible short-circuit |
 
 See also: [Architecture — Multi-Tenancy](../architecture/multi-tenancy.md) and [Security — Secure Development](../security/secure-development.md).
 

@@ -429,6 +429,8 @@ crates/core/integration-tests/tests/
     health.rs                      -- healthz endpoint
     batch_actions.rs               -- batch deactivation
     error_cases.rs                 -- 401/404/expired JWT
+    access_lockout.rs              -- login failure lockout thresholds
+    access_visibility.rs           -- visibility-aware query axis matrix + covers() parity
 ```
 
 ### The `db_test!` macro

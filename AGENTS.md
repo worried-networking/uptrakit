@@ -121,8 +121,9 @@ uptrakit/
 │   │   ├── agent-core/                 # uptrakit-agent-core       (lib) — shared agent logic: version check, update, batch
 │   │   ├── command/                    # uptrakit-command          (lib) — CommandExecutor, sudo-aware execution, StdioTunnel, RemoteExecutor
 │   │   ├── crypto/                     # uptrakit-crypto           (lib) — AES-256-GCM at-rest encryption, envelope encryption, EncryptedString
-│   │   ├── db/                         # uptrakit-shared-db        (lib) — SeaORM entities, TenantDb, migrations (feature `migration`)
+│   │   ├── db/                         # uptrakit-shared-db        (lib) — SeaORM entities, visibility-aware queries, migrations (feature `migration`)
 │   │   ├── db-tx/                      # uptrakit-db-tx            (lib) — begin_immediate(), sole transaction opener (clippy-enforced)
+│   │   ├── tenant-db/                  # uptrakit-tenant-db        (lib) — TenantDb, TenantScoped, HostScoped
 │   │   ├── directories/               # uptrakit-directories      (lib) — cross-platform directory management
 │   │   ├── surfaces/                   # uptrakit-surfaces         (lib) — shared UI surface contract types
 │   │   ├── macros/                     # uptrakit-shared-macros    (lib) — impl_report_conversion!
@@ -281,9 +282,10 @@ These are non-negotiable design constraints. Do not violate them.
 1. **New API endpoint tests must use the shared `TestApp` harness.** `crates/ui/web-api/src/test_harness/` provides `TestApp`, `TestClient`, and
    fixture helpers; never duplicate `test_state()`/`build_test_state()` inline. See [REST API Integration
    Tests](docs/development/testing.md#rest-api-integration-tests).
-1. **Use `TenantDb` helpers for all tenant-scoped queries.** `TenantDb` (`crates/shared/db/src/tenant_db.rs`) enforces the tenant filter — never
+1. **Use `TenantDb` helpers for all tenant-scoped queries.** `TenantDb` (`crates/shared/tenant-db/src/tenant_db.rs`) enforces the tenant filter — never
    call `Entity::find().all(tenant_db.db())` on a `TenantScoped` entity. Use `.find::<E>()` etc.; for join tables without `tenant_id`, use
    `find_via_tenant_join::<Target, Scoped>(relation)`. See [Coding Standards](docs/development/coding-standards.md) (Tenant-Safe Database Queries).
+   Sites applying grant visibility use the `find_visible` variants (`HostScoped` + `TenantDbVisibleExt`) — see the same doc's Rule 5.
 1. **Batch queries instead of per-item loops.** Never SELECT/UPDATE per item in a loop (N+1). Load with `.is_in(ids)` then join in memory; for bulk
    updates use a single `update_many().filter(Column::Id.is_in(ids))`. See [Coding Standards](docs/development/coding-standards.md).
 1. **`begin_immediate()` is the sole SQLite transaction opener.** All eleven raw sea-orm transaction-opener paths (`.begin()`,
