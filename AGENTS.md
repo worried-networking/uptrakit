@@ -35,6 +35,7 @@ Canonical source for Rust command definitions: [docs/development/quality-gates.m
 ```sh
 cargo fmt --all                                                      # Format
 cargo check --no-default-features --features db-sqlite               # Lint with minimal feature-set
+cargo check -p uptrakit-controller-runtime --no-default-features --features db-sqlite # Package-isolated; workspace check above unifies features (e.g. oidc) and misses it
 cargo check --all-features                                           # Lint
 cargo clippy --all-targets --no-default-features --features db-sqlite # Clippy over minimal feature-set
 cargo clippy --all-targets --all-features                            # Clippy

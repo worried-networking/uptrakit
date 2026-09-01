@@ -19,16 +19,17 @@ Quality gates are automatically enforced locally via git hooks managed by
 
 **`pre-push`** (thorough) — always runs on every push:
 
-| Command                                                                       | Notes                                                                                                                                         |
-| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cargo check --no-default-features --features db-sqlite`                      |                                                                                                                                               |
-| `cargo clippy --all-targets --no-default-features --features db-sqlite`       |                                                                                                                                               |
-| `cargo deny check`                                                            | Fast (~3 s)                                                                                                                                   |
-| `zola check` (cwd: `website/`)                                                | Full check incl. external links (~12 s); identical to the `Validate site` step in `website.yml`. Skipped with a warning when `zola` is absent |
-| `python3 ci/check_plugin_semantic_boundary.py`                                | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt                                                  |
-| `cargo test --no-default-features --features db-sqlite`                       |                                                                                                                                               |
-| `cargo test --workspace --all-features --doc --exclude uptrakit-mqtt-runtime` | Doctests at CI parity; `cargo test` (not nextest — nextest skips doctests)                                                                    |
-| `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`)         | Guarded by `node_modules`                                                                                                                     |
+| Command                                                                                 | Notes                                                                                                                                                                                                           |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cargo check --no-default-features --features db-sqlite`                                |                                                                                                                                                                                                                 |
+| `cargo check -p uptrakit-controller-runtime --no-default-features --features db-sqlite` | Package-isolated; the workspace check above unifies features across members and never compiles the bare-feature world alone — see [Embedded-service zero-embedded check](#embedded-service-zero-embedded-check) |
+| `cargo clippy --all-targets --no-default-features --features db-sqlite`                 |                                                                                                                                                                                                                 |
+| `cargo deny check`                                                                      | Fast (~3 s)                                                                                                                                                                                                     |
+| `zola check` (cwd: `website/`)                                                          | Full check incl. external links (~12 s); identical to the `Validate site` step in `website.yml`. Skipped with a warning when `zola` is absent                                                                   |
+| `python3 ci/check_plugin_semantic_boundary.py`                                          | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt                                                                                                                    |
+| `cargo test --no-default-features --features db-sqlite`                                 |                                                                                                                                                                                                                 |
+| `cargo test --workspace --all-features --doc --exclude uptrakit-mqtt-runtime`           | Doctests at CI parity; `cargo test` (not nextest — nextest skips doctests)                                                                                                                                      |
+| `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`)                   | Guarded by `node_modules`                                                                                                                                                                                       |
 
 ### Bypass methods
 
@@ -117,13 +118,18 @@ verify the gating: Cargo unifies features across workspace members, which enable
 features on controller-runtime, so every field is present and read. The release image build
 (`cargo build -p uptrakit-controller`, no embedded readers) instead compiles controller-runtime in
 **package isolation** with **zero** embedded features — the only state where a mis-gated field becomes
-dead code. This CI-enforced (`backend-lint`) check reproduces that isolation:
+dead code. This check, enforced in CI (`backend-lint`) and in the `pre-push` hook, reproduces that isolation:
 
 ```sh
 cargo check -p uptrakit-controller-runtime --no-default-features --features db-sqlite
 ```
 
-The `-p` package flag is load-bearing: without it, feature unification masks the zero-embedded path.
+The `-p` package flag is load-bearing: without it, feature unification masks the zero-embedded path. It
+also masks OIDC-feature unification: `crates/core/integration-tests` carries `uptrakit-web-api/oidc` as
+a dev-dependency, so the workspace-wide `--no-default-features --features db-sqlite` check above always
+compiles with `oidc` enabled and cannot catch an `oidc`-gated symbol leaking into ungated production code
+(this is how the `settings_oauth.rs` / `oidc_state` incident reached `main`). This package-isolated check
+is the only one that compiles `uptrakit-controller-runtime` with `oidc` genuinely off.
 
 ### Reverse proxy-sensitive changes (mandatory)
 

@@ -62,6 +62,15 @@ fi
 echo "[pre-push] Running cargo check (db-sqlite)..."
 cargo check --no-default-features --features db-sqlite
 
+# Package-isolated controller-runtime check, mirroring backend-lint in CI. The
+# workspace-wide check above unifies features across members: the
+# uptrakit-integration-tests dev-dependency forces uptrakit-web-api/oidc on for
+# the whole workspace, so the check above never compiles the bare-feature
+# world a `-p` build (e.g. the release image) actually exercises. This
+# reproduces that isolation.
+echo "[pre-push] Running cargo check (package-isolated, db-sqlite)..."
+cargo check -p uptrakit-controller-runtime --no-default-features --features db-sqlite
+
 echo "[pre-push] Running cargo clippy (db-sqlite)..."
 cargo clippy --all-targets --no-default-features --features db-sqlite
 
