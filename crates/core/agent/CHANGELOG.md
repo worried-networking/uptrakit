@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-v0.0.6...uptrakit-agent-v0.0.7) - 2026-09-01
+
+### Added
+
+- *(agent)* item-set-aware dedup guard and abort backstop for background operations
+- ban direct reqwest client construction via clippy disallowed-methods
+- *(agent-core)* 300s deadline on lifecycle hook execution
+- *(agent-core)* operation deadlines for version check, discovery, and config tests
+- *(command)* default 600s command timeout with in-executor deadline and update-budget forwarding
+
+### Fixed
+
+- *(shared)* explicit redirect policies and agent-core SSRF resolver
+
+### Other
+
+- update Cargo.lock dependencies
+- *(hooks)* require lifecycle hooks route via CommandExecutor
+
 ## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-v0.0.5...uptrakit-agent-v0.0.6) - 2026-08-18
 
 ### Added
