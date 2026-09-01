@@ -24,6 +24,7 @@ Quality gates are automatically enforced locally via git hooks managed by
 | `cargo check --no-default-features --features db-sqlite`                                |                                                                                                                                                                                                                 |
 | `cargo check -p uptrakit-controller-runtime --no-default-features --features db-sqlite` | Package-isolated; the workspace check above unifies features across members and never compiles the bare-feature world alone — see [Embedded-service zero-embedded check](#embedded-service-zero-embedded-check) |
 | `cargo clippy --all-targets --no-default-features --features db-sqlite`                 |                                                                                                                                                                                                                 |
+| `bash ci/bare_crate_sweep.sh --scoped <base> <head>`                                    | Diff-scoped plugin-crate clippy sweep, package-isolated per crate — see [Bare-crate plugin clippy sweep](#bare-crate-plugin-clippy-sweep)                                                                       |
 | `cargo deny check`                                                                      | Fast (~3 s)                                                                                                                                                                                                     |
 | `zola check` (cwd: `website/`)                                                          | Full check incl. external links (~12 s); identical to the `Validate site` step in `website.yml`. Skipped with a warning when `zola` is absent                                                                   |
 | `python3 ci/check_plugin_semantic_boundary.py`                                          | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt                                                                                                                    |
@@ -67,6 +68,7 @@ python3 ci/verify_action_security_declarations.py                    # Operation
 bash ci/verify_raw_sql_expect_taxonomy.sh                             # Raw-SQL #[expect] reasons match the four-category taxonomy (see coding-standards.md § Raw-SQL ban)
 bash ci/verify_access_enforcement_sites.sh                            # Coarse authorize() site inventory + M2.3 series invariant (see access_grants.rs SelectorPhaseGate)
 cargo xtask contribution-monotonicity-check                          # Plugin contributions survive feature unification (ADR-0032)
+bash ci/bare_crate_sweep.sh --full                                    # Bare per-plugin-crate clippy sweep, package-isolated — see Bare-crate plugin clippy sweep below
 ```
 
 Workspace lints (`[workspace.lints]` in root `Cargo.toml`) enforce `warnings = "deny"` and
@@ -130,6 +132,42 @@ a dev-dependency, so the workspace-wide `--no-default-features --features db-sql
 compiles with `oidc` enabled and cannot catch an `oidc`-gated symbol leaking into ungated production code
 (this is how the `settings_oauth.rs` / `oidc_state` incident reached `main`). This package-isolated check
 is the only one that compiles `uptrakit-controller-runtime` with `oidc` genuinely off.
+
+### Bare-crate plugin clippy sweep
+
+A workspace-level gate unifies features across all members, including dev-dependency feature
+unification. It never compiles a plugin crate's own bare feature world. This gap is a
+5×-recurring defect class here: the latest instance is `uptrakit-plugin-infrastructure-proxmox`
+importing http-client-gated items from `uptrakit-plugin-infrastructure-core` without enabling the
+feature — an `E0432` error visible only in an isolated `-p` build. An earlier instance is the
+2026-07-20 proxmox `E0308` dev-dependency desync, documented in
+[docs/superpowers/specs/2026-07-20-proxmox-bare-crate-gates-design.md](../superpowers/specs/2026-07-20-proxmox-bare-crate-gates-design.md).
+
+CI (`backend-lint`) runs the full sweep: every crate under `crates/plugins/*/*/`, each compiled
+and linted in package isolation.
+
+```sh
+bash ci/bare_crate_sweep.sh --full
+```
+
+The `pre-push` hook runs a diff-scoped variant instead, to keep local pushes fast:
+
+```sh
+bash ci/bare_crate_sweep.sh --scoped <base> <head>
+```
+
+`ci/bare_crate_select.py <base> <head>` selects the scoped crate set:
+
+- A changed plugin crate is selected.
+- A plugin crate is also selected when a transitive workspace path-dependency changed — a
+  normal, dev, or build dependency.
+- A change to the root `Cargo.toml` or `Cargo.lock` escalates the run to the full sweep.
+- An empty selection exits immediately. No `cargo` invocation runs.
+
+`ci/test_bare_crate_select.py` unit-tests the selection logic and runs in CI (`backend-lint`).
+
+Both sweep modes derive the crate list from the `crates/plugins/*/*/Cargo.toml` glob. Do not
+hand-maintain a crate list in the script or in docs.
 
 ### Reverse proxy-sensitive changes (mandatory)
 

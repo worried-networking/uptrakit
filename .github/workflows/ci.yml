@@ -124,6 +124,7 @@ jobs:
         with:
           shared-key: "rust-all-features"
       - run: python3 -m unittest ci/test_verify_no_orphan_modules.py
+      - run: python3 -m unittest ci/test_bare_crate_select.py
       - run: python3 ci/verify_no_orphan_modules.py
       - run: cargo check --no-default-features --features db-sqlite
       - run: cargo check --all-features
@@ -142,16 +143,13 @@ jobs:
       # unification), so they never compile a plugin crate's own bare feature
       # world; a desync between a crate's cfg(not(feature)) fallbacks and a
       # dependency's feature-switched types is visible ONLY in isolated -p
-      # builds (proxmox E0308 incident, 2026-07-20 spec). Crate list is derived
-      # from the two-level plugin layout glob — never hand-maintained.
+      # builds (proxmox E0308 incident, 2026-07-20 spec; proxmox E0432
+      # http-client incident, 2026-09-01). The loop lives in
+      # ci/bare_crate_sweep.sh (shared with the diff-scoped pre-push variant);
+      # crate list derives from the two-level plugin layout glob — never
+      # hand-maintained.
       - name: Bare-crate clippy sweep (plugin crates)
-        run: |
-          for manifest in crates/plugins/*/*/Cargo.toml; do
-            crate=$(grep -m1 '^name' "$manifest" | sed 's/.*"\(.*\)"/\1/')
-            echo "::group::${crate}"
-            cargo clippy --all-targets -p "$crate" -- -D warnings
-            echo "::endgroup::"
-          done
+        run: bash ci/bare_crate_sweep.sh --full
       - name: Check legacy error-match patterns
         run: ./scripts/check_legacy_error_matches.sh
       - name: Audit coverage check

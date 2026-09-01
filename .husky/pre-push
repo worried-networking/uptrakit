@@ -88,6 +88,47 @@ else
 fi
 bash scripts/check_deny.sh ${DENY_BASE:+"$DENY_BASE"}
 
+# Diff-scoped bare-crate plugin sweep, sharing ci/bare_crate_sweep.sh with the
+# CI backend-lint full sweep. Workspace gates unify features across members and
+# never compile a plugin crate's own bare feature world; only isolated -p
+# builds catch feature-unification masking (proxmox E0432 http-client
+# incident, 2026-09-01). Scoped mode limits the sweep to plugin crates whose
+# sources or transitive workspace deps changed in the pushed range; root
+# Cargo.toml / Cargo.lock changes escalate to the full sweep inside the
+# selector.
+echo "[pre-push] Running bare-crate plugin sweep (scoped)..."
+run_scoped_sweep() {
+  local base="$1" head="$2"
+  if [[ -z "$base" ]]; then
+    echo "[pre-push] Cannot determine sweep base — running full plugin sweep."
+    bash ci/bare_crate_sweep.sh --full
+  else
+    bash ci/bare_crate_sweep.sh --scoped "$base" "$head"
+  fi
+}
+if [[ -n "${1:-}" && -n "$PUSH_STDIN" ]]; then
+  while read -r lref lsha _ rsha; do
+    [[ -z "${lsha:-}" || "$lsha" == "$ZERO_SHA" ]] && continue
+    [[ "$lref" == refs/tags/* ]] && continue
+    SWEEP_BASE="$rsha"
+    if [[ "$SWEEP_BASE" == "$ZERO_SHA" ]] || ! git cat-file -e "${SWEEP_BASE}^{commit}" 2>/dev/null; then
+      # New branch or unfetched remote tip: scope against the default branch.
+      SWEEP_BASE=""
+      if [[ -n "$DENY_BASE" ]]; then
+        SWEEP_BASE=$(git merge-base "$DENY_BASE" "$lsha" 2>/dev/null || true)
+      fi
+    fi
+    run_scoped_sweep "$SWEEP_BASE" "$lsha"
+  done <<<"$PUSH_STDIN"
+else
+  # Manual invocation (no ref list on stdin): scope against the default branch.
+  SWEEP_BASE=""
+  if [[ -n "${DENY_BASE:-}" ]]; then
+    SWEEP_BASE=$(git merge-base "$DENY_BASE" HEAD 2>/dev/null || true)
+  fi
+  run_scoped_sweep "$SWEEP_BASE" HEAD
+fi
+
 echo "[pre-push] Running semantic boundary check..."
 python3 ci/check_plugin_semantic_boundary.py
 

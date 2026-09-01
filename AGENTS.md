@@ -53,6 +53,7 @@ bash ci/verify_no_new_cfg_not_feature.sh                             # Additive-
 python3 ci/verify_action_security_declarations.py                    # Operation oauth2 scope lists match handler action extractors
 bash ci/verify_raw_sql_expect_taxonomy.sh                             # Raw-SQL #[expect] reasons match the four-category taxonomy
 bash ci/verify_access_enforcement_sites.sh                           # Coarse authorize() site inventory + M2.3 series invariant
+bash ci/bare_crate_sweep.sh --full                                   # Bare per-plugin-crate clippy sweep (catches feature-unification masking)
 bash ci/verify_adr_numbers.sh                                        # No duplicate ADR numbers
 bash scripts/regen-adr-toc.sh --check                                # docs/adr/README.md staleness + links
 ```
