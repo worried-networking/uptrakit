@@ -3360,12 +3360,6 @@ dependencies = [
 
 [[package]]
 name = "mail-builder"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "900998f307338c4013a28ab14d760b784067324b164448c6d98a89e44810473b"
-
-[[package]]
-name = "mail-builder"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c942e8a4b83f9351236c1e531ea9fa0237913d63c7fc36818430e0128a1ddf3"
@@ -3381,7 +3375,7 @@ checksum = "8355326d14f08c9de5e9badfe606d9ba8fea2febb60fe4318ecbac33cfb7b41e"
 dependencies = [
  "base64 0.23.1",
  "gethostname",
- "mail-builder 0.5.0",
+ "mail-builder",
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
@@ -7943,7 +7937,7 @@ name = "uptrakit-notification-plugin-email"
 version = "0.0.3"
 dependencies = [
  "async-trait",
- "mail-builder 0.4.4",
+ "mail-builder",
  "mail-send",
  "rootcause",
  "sea-orm",

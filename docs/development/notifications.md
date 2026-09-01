@@ -687,7 +687,7 @@ Telegram plugin verifies the `X-Telegram-Bot-Api-Secret-Token` header against th
 
 `crates/plugins/notifications/email/src/plugin.rs`
 
-The email plugin sends notifications via SMTP using the [mail-send](https://crates.io/crates/mail-send) 0.5 library with
+The email plugin sends notifications via SMTP using the [mail-send](https://crates.io/crates/mail-send) 0.6 library with
 async Tokio support and [mail-builder](https://crates.io/crates/mail-builder) for message construction.
 It is gated on the `email` feature flag.
 

@@ -196,7 +196,7 @@ notify-debouncer-full = "0.7"
 listenfd = "1"
 sd-notify = "0.5"
 rust-embed = { version = "8", default-features = false }
-mail-builder = { version = "0.4", default-features = false }
+mail-builder = { version = "0.5", default-features = false }
 mail-send = { version = "0.6", default-features = false }
 hmac = "0.13"
 argon2 = { version = "0.5", default-features = false }
