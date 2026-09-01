@@ -14,7 +14,7 @@ use russh::keys::agent::client::AgentClient;
 use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::keys::ssh_key::Algorithm;
 use russh::keys::ssh_key::HashAlg;
-use russh::keys::{self};
+use russh::keys::{self, PublicKeyOrCertificate};
 use russh::{ChannelMsg, Disconnect, MethodKind};
 use tokio::sync::{Mutex, mpsc};
 use uptrakit_command::{DEFAULT_COMMAND_TIMEOUT, UpdateOutputLine};
@@ -154,9 +154,26 @@ impl client::Handler for BootstrapHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh::keys::ssh_key::PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> std::result::Result<bool, Self::Error> {
-        let fingerprint = compute_fingerprint(server_public_key);
+        // Bootstrap trust is fingerprint-only (TOFU or a pinned expected
+        // fingerprint); it has no notion of certificate-authority trust,
+        // validity windows, or principals. A certificate is therefore always
+        // rejected rather than silently degraded to "fingerprint of the
+        // embedded key", which would accept a certificate this fingerprint
+        // model cannot actually validate. A server only presents one when the
+        // client advertises a `*-cert-v01@openssh.com` host-key algorithm, and
+        // `Preferred::host_key_certificates` is left at its empty default, so
+        // this arm guards a case negotiation does not currently produce.
+        let PublicKeyOrCertificate::PublicKey { key, .. } = server_public_key else {
+            tracing::warn!(
+                hostname = %self.hostname,
+                "rejecting SSH host certificate: fingerprint-based verification does not support certificate trust",
+            );
+            return Ok(false);
+        };
+
+        let fingerprint = compute_fingerprint(key);
 
         if let Some(ref expected) = self.expected_fingerprint {
             let matches = fingerprint == *expected;
@@ -1481,9 +1498,9 @@ mod tests {
 
         let (pem, _) = crate::ssh_key::generate_ed25519_keypair().expect("keygen");
         let private_key = keys::decode_secret_key(&pem, None).expect("decode");
-        let public_key = private_key.public_key();
+        let public_key = PublicKeyOrCertificate::from(private_key.public_key().clone());
 
-        let result = handler.check_server_key(public_key).await.expect("check");
+        let result = handler.check_server_key(&public_key).await.expect("check");
         assert!(result, "TOFU handler should accept any key");
 
         let fp = observed.lock().await;
@@ -1531,9 +1548,9 @@ mod tests {
 
         let (pem, _) = crate::ssh_key::generate_ed25519_keypair().expect("keygen");
         let private_key = keys::decode_secret_key(&pem, None).expect("decode");
-        let public_key = private_key.public_key();
+        let public_key = PublicKeyOrCertificate::from(private_key.public_key().clone());
 
-        let result = handler.check_server_key(public_key).await.expect("check");
+        let result = handler.check_server_key(&public_key).await.expect("check");
         assert!(!result, "pinned handler should reject mismatched key");
 
         let fp = observed.lock().await;
@@ -1549,8 +1566,8 @@ mod tests {
 
         let (pem, _) = crate::ssh_key::generate_ed25519_keypair().expect("keygen");
         let private_key = keys::decode_secret_key(&pem, None).expect("decode");
-        let public_key = private_key.public_key();
-        let expected_fp = compute_fingerprint(public_key);
+        let expected_fp = compute_fingerprint(private_key.public_key());
+        let public_key = PublicKeyOrCertificate::from(private_key.public_key().clone());
 
         let mut handler = BootstrapHandler {
             expected_fingerprint: Some(expected_fp.clone()),
@@ -1558,11 +1575,44 @@ mod tests {
             hostname: "test-host".to_string(),
         };
 
-        let result = handler.check_server_key(public_key).await.expect("check");
+        let result = handler.check_server_key(&public_key).await.expect("check");
         assert!(result, "pinned handler should accept matching key");
 
         let fp = observed.lock().await;
         assert_eq!(fp.as_deref(), Some(expected_fp.as_str()));
+    }
+
+    /// russh 0.63 distinguishes a server-presented certificate from a raw
+    /// public key. `BootstrapHandler` implements fingerprint-only trust (TOFU
+    /// or a pinned expected fingerprint) with no certificate-authority
+    /// semantics, so a certificate must be rejected outright — even under
+    /// TOFU, which otherwise accepts any raw key unconditionally.
+    #[tokio::test]
+    async fn handler_rejects_certificate_even_under_tofu() {
+        // Fixture from the upstream `ssh-key` crate's own test corpus
+        // (`tests/examples/id_ed25519-cert.pub`): a syntactically valid,
+        // signed ed25519 host certificate. Its CA is not trusted by anything
+        // in this codebase — the point of the test is that certificates are
+        // rejected structurally, before any signature or CA check would run.
+        const CERT_PUB: &str = "ssh-ed25519-cert-v01@openssh.com AAAAIHNzaC1lZDI1NTE5LWNlcnQtdjAxQG9wZW5zc2guY29tAAAAIAYkJPGaYen7NK8MwZwWmNAyRaFNsc86AU9NObU2cM2uAAAAILM+rvN+ot98qgEN796jTiQfZfG1KaT0PtFDJ/XFSqtiAAAAAAAAAAAAAAACAAAAB2VkMjU1MTkAAAAUAAAAEGhvc3QuZXhhbXBsZS5jb20AAAAAYkx3NwAAAAB8DuY3AAAAAAAAAAAAAAAAAAAAMwAAAAtzc2gtZWQyNTUxOQAAACCzPq7zfqLffKoBDe/eo04kH2XxtSmk9D7RQyf1xUqrYgAAAFMAAAALc3NoLWVkMjU1MTkAAABApVXBNiYPlPoa1BYH5G4NP9XtjTMZlm7HO5GdbLSvvAw5Vdob7Ka+23hB7isJKHYtzFGGSKXAqxp/Zi8REbCaAw== user@example.com";
+        let cert = russh::keys::ssh_key::Certificate::from_openssh(CERT_PUB).expect("parse cert");
+
+        let observed = Arc::new(Mutex::new(None));
+        let mut handler = BootstrapHandler {
+            expected_fingerprint: None,
+            observed_fingerprint: Arc::clone(&observed),
+            hostname: "test-host".to_string(),
+        };
+
+        let server_key = PublicKeyOrCertificate::Certificate(cert);
+        let result = handler.check_server_key(&server_key).await.expect("check");
+        assert!(!result, "certificates must be rejected, even under TOFU");
+
+        let fp = observed.lock().await;
+        assert!(
+            fp.is_none(),
+            "no fingerprint should be recorded for a rejected certificate"
+        );
     }
 
     // ── LineBuffer tests ─────────────────────────────────────────────

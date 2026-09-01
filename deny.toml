@@ -327,14 +327,14 @@ skip = [
 
 
 # crypto stack duplicates: older 0.10.x/0.1.x series pulled by the openidconnect crypto crates;
-    # newer 0.11.x/0.2.x series pulled by russh 0.62 crypto stack. Will resolve when upstream converges.
+    # newer 0.11.x/0.2.x series pulled by russh 0.63 crypto stack. Will resolve when upstream converges.
     { crate = "block-buffer@0.10.4", reason = "pulled by digest 0.10 (openidconnect crypto); newer 0.12 used by digest 0.11" },
     { crate = "crypto-common@0.1.6", reason = "pulled by digest 0.10; newer 0.2 used by digest 0.11" },
     { crate = "digest@0.10.7", reason = "pulled by ecdsa, ed25519-dalek (openidconnect); newer 0.11 used by sha2, hmac, argon2 0.6" },
-    { crate = "generic-array@0.14.9", reason = "pulled by crypto-common 0.1 (digest 0.10 chain); newer 1.x used by russh 0.62" },
+    { crate = "generic-array@0.14.9", reason = "pulled by crypto-common 0.1 (digest 0.10 chain); newer 1.x used by russh 0.63" },
     { crate = "const-oid@0.9.6", reason = "pulled by spki/pkcs8 0.7 (openidconnect ecdsa/rsa chain); newer 0.10 used by spki/pkcs8 0.8" },
-    { crate = "sha1@0.10.7", reason = "pulled by openidconnect (oauth2); newer 0.11 used by russh 0.62" },
-    { crate = "signature@2.2.0", reason = "pulled by ecdsa/ed25519 (openidconnect); newer 3.x-rc used by russh 0.62 crypto" },
+    { crate = "sha1@0.10.7", reason = "pulled by openidconnect (oauth2); newer 0.11 used by russh 0.63" },
+    { crate = "signature@2.2.0", reason = "pulled by ecdsa/ed25519 (openidconnect); newer 3.x-rc used by russh 0.63 crypto" },
 
     # getrandom: 0.3 via jobserver/cc (build dep), 0.4 via rand 0.9
     { crate = "getrandom@0.3.4", reason = "pulled by jobserver (cc build dep); newer 0.4 used by rand 0.9" },
@@ -345,44 +345,44 @@ skip = [
     # rand_core: 0.9 via rand 0.9 (bollard/tungstenite), 0.10 via the workspace rand 0.10 pin
     { crate = "rand_core@0.9.5", reason = "pulled by rand 0.9 (bollard, tungstenite); the workspace rand 0.10 pin uses rand_core 0.10" },
 
-    # russh chain: ssh-key 0.7.0-rc.11 (via russh 0.62.6) coexists with the workspace direct ssh-key 0.6.x dep
-    { crate = "ssh-key@0.6.7", reason = "workspace direct dep (ssh-key = '0.6'); newer 0.7.0-rc.10 pulled by russh 0.62.6" },
-    { crate = "ssh-cipher@0.2.0", reason = "pulled by ssh-key 0.6.7 (workspace direct); newer 0.3.0-rc.9 used by ssh-key 0.7 via russh 0.62" },
-    { crate = "ssh-encoding@0.2.0", reason = "pulled by ssh-key 0.6.7 (workspace direct); newer 0.3.0-rc.9 used by russh 0.62 / ssh-key 0.7" },
+    # russh chain: ssh-key 0.7.0-rc.11 (via russh 0.63.1) coexists with the workspace direct ssh-key 0.6.x dep
+    { crate = "ssh-key@0.6.7", reason = "workspace direct dep (ssh-key = '0.6'); newer 0.7.0-rc.11 pulled by russh 0.63.1" },
+    { crate = "ssh-cipher@0.2.0", reason = "pulled by ssh-key 0.6.7 (workspace direct); newer 0.3.0 used by ssh-key 0.7 via russh 0.63" },
+    { crate = "ssh-encoding@0.2.0", reason = "pulled by ssh-key 0.6.7 (workspace direct); newer 0.3.0 used by russh 0.63 / ssh-key 0.7" },
 
     # RustCrypto stack duplicates: older stable versions pulled by openidconnect/ecdsa/elliptic-curve;
-    # newer stable/RC versions pulled by russh 0.62 crypto stack. Will resolve when upstream crates converge.
-    { crate = "base16ct@0.2.0", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 1.0 used by russh 0.62 crypto" },
-    { crate = "cipher@0.4.4", reason = "pulled by chacha20 0.9 (openidconnect); newer 0.5 used by russh 0.62" },
-    { crate = "cpufeatures@0.2.17", reason = "pulled by aes 0.8 (openidconnect crypto); newer 0.3 used by aes 0.9 (russh 0.62)" },
-    { crate = "curve25519-dalek@4.1.3", reason = "pulled by ed25519-dalek 2.x (openidconnect); newer 5.0-pre used by russh 0.62" },
-    { crate = "crypto-bigint@0.5.5", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.7 used by russh 0.62 crypto" },
-    { crate = "der@0.7.10", reason = "pulled by spki/pkcs8 0.7/0.10 (openidconnect ecdsa/rsa chain); newer 0.8 used by russh 0.62 crypto" },
-    { crate = "ecdsa@0.16.9", reason = "pulled by elliptic-curve 0.13 / p256 0.13 (openidconnect); newer 0.17-rc used by russh 0.62" },
-    { crate = "ed25519@2.2.3", reason = "pulled by ed25519-dalek 2.x (openidconnect); newer 3.0-rc used by russh 0.62" },
-    { crate = "ed25519-dalek@2.2.0", reason = "pulled by openidconnect JWT signing; newer 3.0-pre used by russh 0.62" },
-    { crate = "elliptic-curve@0.13.8", reason = "pulled by p256/p384/ecdsa (openidconnect); newer 0.14-rc used by russh 0.62" },
-    { crate = "ff@0.13.1", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14 used by elliptic-curve 0.14-rc (russh 0.62)" },
-    { crate = "fiat-crypto@0.2.9", reason = "pulled by p256/p384 0.13 (openidconnect); newer 0.3 used by russh 0.62 crypto" },
-    { crate = "group@0.13.0", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14 used by elliptic-curve 0.14-rc (russh 0.62)" },
-    { crate = "hkdf@0.12.4", reason = "pulled by openidconnect crypto chain; newer 0.13 used by russh 0.62" },
+    # newer stable/RC versions pulled by russh 0.63 crypto stack. Will resolve when upstream crates converge.
+    { crate = "base16ct@0.2.0", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 1.0 used by russh 0.63 crypto" },
+    { crate = "cipher@0.4.4", reason = "pulled by chacha20 0.9 (openidconnect); newer 0.5 used by russh 0.63" },
+    { crate = "cpufeatures@0.2.17", reason = "pulled by aes 0.8 (openidconnect crypto); newer 0.3 used by aes 0.9 (russh 0.63)" },
+    { crate = "curve25519-dalek@4.1.3", reason = "pulled by ed25519-dalek 2.x (openidconnect); newer 5.0-pre used by russh 0.63" },
+    { crate = "crypto-bigint@0.5.5", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.7 used by russh 0.63 crypto" },
+    { crate = "der@0.7.10", reason = "pulled by spki/pkcs8 0.7/0.10 (openidconnect ecdsa/rsa chain); newer 0.8 used by russh 0.63 crypto" },
+    { crate = "ecdsa@0.16.9", reason = "pulled by elliptic-curve 0.13 / p256 0.13 (openidconnect); newer 0.17-rc used by russh 0.63" },
+    { crate = "ed25519@2.2.3", reason = "pulled by ed25519-dalek 2.x (openidconnect); newer 3.0-rc used by russh 0.63" },
+    { crate = "ed25519-dalek@2.2.0", reason = "pulled by openidconnect JWT signing; newer 3.0-pre used by russh 0.63" },
+    { crate = "elliptic-curve@0.13.8", reason = "pulled by p256/p384/ecdsa (openidconnect); newer 0.14-rc used by russh 0.63" },
+    { crate = "ff@0.13.1", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14 used by elliptic-curve 0.14-rc (russh 0.63)" },
+    { crate = "fiat-crypto@0.2.9", reason = "pulled by p256/p384 0.13 (openidconnect); newer 0.3 used by russh 0.63 crypto" },
+    { crate = "group@0.13.0", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14 used by elliptic-curve 0.14-rc (russh 0.63)" },
+    { crate = "hkdf@0.12.4", reason = "pulled by openidconnect crypto chain; newer 0.13 used by russh 0.63" },
     { crate = "hmac@0.12.1", reason = "pulled by openidconnect; newer 0.13 is the workspace pin (hmac = \"0.13\") and is also used by totp-rs 6, sqlx-postgres, russh" },
-    { crate = "inout@0.1.4", reason = "pulled by cipher 0.4 (openidconnect crypto chain); newer 0.2 used by russh 0.62" },
-{ crate = "p256@0.13.2", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14-rc used by russh 0.62" },
-    { crate = "p384@0.13.1", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14-rc used by russh 0.62" },
-    { crate = "pem-rfc7468@0.7.0", reason = "pulled by pkcs8 0.10 (openidconnect); newer 1.0 used by russh 0.62 crypto" },
-    { crate = "pkcs1@0.7.5", reason = "pulled by rsa 0.9 (openidconnect); newer 0.8-rc used by russh 0.62 crypto" },
-    { crate = "pkcs8@0.10.2", reason = "pulled by rsa 0.9 / ecdsa (openidconnect); newer 0.11-rc used by russh 0.62 crypto" },
-    { crate = "primeorder@0.13.6", reason = "pulled by p256/p384 0.13 (openidconnect); newer 0.14-rc used by russh 0.62" },
-    { crate = "rfc6979@0.4.0", reason = "pulled by ecdsa 0.16 (openidconnect); newer 0.5-rc used by russh 0.62" },
-    { crate = "rsa@0.9.10", reason = "pulled by openidconnect; newer 0.10-rc used by russh 0.62 crypto" },
+    { crate = "inout@0.1.4", reason = "pulled by cipher 0.4 (openidconnect crypto chain); newer 0.2 used by russh 0.63" },
+{ crate = "p256@0.13.2", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14-rc used by russh 0.63" },
+    { crate = "p384@0.13.1", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14-rc used by russh 0.63" },
+    { crate = "pem-rfc7468@0.7.0", reason = "pulled by pkcs8 0.10 (openidconnect); newer 1.0 used by russh 0.63 crypto" },
+    { crate = "pkcs1@0.7.5", reason = "pulled by rsa 0.9 (openidconnect); newer 0.8-rc used by russh 0.63 crypto" },
+    { crate = "pkcs8@0.10.2", reason = "pulled by rsa 0.9 / ecdsa (openidconnect); newer 0.11-rc used by russh 0.63 crypto" },
+    { crate = "primeorder@0.13.6", reason = "pulled by p256/p384 0.13 (openidconnect); newer 0.14-rc used by russh 0.63" },
+    { crate = "rfc6979@0.4.0", reason = "pulled by ecdsa 0.16 (openidconnect); newer 0.5-rc used by russh 0.63" },
+    { crate = "rsa@0.9.10", reason = "pulled by openidconnect; newer 0.10-rc used by russh 0.63 crypto" },
 { crate = "rustls-webpki@0.102.8", reason = "pulled by rumqttc 0.25.1 TLS stack; newer 0.103.x used by rustls 0.23" },
-    { crate = "sec1@0.7.3", reason = "pulled by elliptic-curve 0.13 / pkcs8 0.10 (openidconnect); newer 0.8 used by russh 0.62" },
+    { crate = "sec1@0.7.3", reason = "pulled by elliptic-curve 0.13 / pkcs8 0.10 (openidconnect); newer 0.8 used by russh 0.63" },
     { crate = "sha2@0.10.9", reason = "pulled by the digest 0.10 chain (openidconnect); newer 0.11 is the workspace pin (sha2 = \"0.11\") and is also used by russh" },
-    { crate = "spki@0.7.3", reason = "pulled by pkcs8 0.10 / ecdsa (openidconnect ecdsa/rsa chain); newer 0.8 used by russh 0.62 crypto" },
+    { crate = "spki@0.7.3", reason = "pulled by pkcs8 0.10 / ecdsa (openidconnect ecdsa/rsa chain); newer 0.8 used by russh 0.63 crypto" },
 
-    # sha3: 0.11 via ml-kem (russh 0.62.4 post-quantum KEM), 0.12 via russh 0.62.4 direct
-    { crate = "sha3@0.11.0", reason = "pulled by ml-kem (russh 0.62.4 post-quantum KEM); russh itself uses sha3 0.12 directly — internal russh split, resolves when ml-kem bumps sha3" },
+    # sha3: 0.11 via ml-kem (russh 0.63.1 post-quantum KEM), 0.12 via russh 0.63.1 direct
+    { crate = "sha3@0.11.0", reason = "pulled by ml-kem (russh 0.63.1 post-quantum KEM); russh itself uses sha3 0.12 directly — internal russh split, resolves when ml-kem bumps sha3" },
 
     # syn: 2.x used across the ecosystem, 3.x pulled by async-trait 0.1.91 (build-time proc-macro)
     { crate = "syn@3.0.4", reason = "pulled by async-trait 0.1.91 proc-macro (build-time only); syn 2.x used across the ecosystem — no runtime binary impact" },
