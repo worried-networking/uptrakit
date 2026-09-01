@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.4...uptrakit-service-sdk-v0.0.5) - 2026-09-01
+
+### Added
+
+- ban direct reqwest client construction via clippy disallowed-methods
+- *(clients)* SSE read-timeout via dedicated stream client; missed-pong disconnect
+- *(wire)* add optional instance_host to ServiceSettingsPayload
+- *(plugins)* permissive SSRF mode and validation for custom npm registries
+- *(agent)* item-set-aware dedup guard and abort backstop for background operations
+- *(types)* [**breaking**] make MaskedEmail construction canonical-only
+- *(types)* canonicalizing MaskedEmail parse with typed errors
+- *(agent-core)* 300s deadline on lifecycle hook execution
+- *(agent-core)* operation deadlines for version check, discovery, and config tests
+- *(access)* authorize_target with decision-time host-tag resolution
+- *(access)* rule-5b min-1 bound and selector canonicalization
+- *(access)* rule-3 selector-capability validation (SelectorAxis, validate_selector_level)
+- *(access)* Visibility::from_selectors axis union
+- *(access)* TargetRef::HostSoftwareItem and pure Selector::covers matcher
+- *(shared-types)* add version_prefix validation module
+- *(plugins/uv)* implement discovery and version detection
+
+### Fixed
+
+- *(shared)* explicit redirect policies and agent-core SSRF resolver
+- *(plugins/uv)* use dotted-kebab type id and fail loud on parse drift
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-service-sdk-v0.0.3...uptrakit-service-sdk-v0.0.4) - 2026-08-18
 
 ### Other

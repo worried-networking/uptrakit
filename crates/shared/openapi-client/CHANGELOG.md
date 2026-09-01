@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5](https://github.com/worried-networking/uptrakit/compare/uptrakit-openapi-client-v0.0.4...uptrakit-openapi-client-v0.0.5) - 2026-09-01
+
+### Added
+
+- ban direct reqwest client construction via clippy disallowed-methods
+- *(clients)* SSE read-timeout via dedicated stream client; missed-pong disconnect
+- *(web-api-types)* carry MaskedEmail in login, register, and email-change requests
+- *(settings)* validate oauth.canonical_host as a bare host
+- *(plugins)* permissive SSRF mode and validation for custom npm registries
+- *(agent)* item-set-aware dedup guard and abort backstop for background operations
+- *(types)* [**breaking**] make MaskedEmail construction canonical-only
+- *(types)* canonicalizing MaskedEmail parse with typed errors
+- *(agent-core)* 300s deadline on lifecycle hook execution
+- *(agent-core)* operation deadlines for version check, discovery, and config tests
+- *(access)* authorize_target with decision-time host-tag resolution
+- *(access)* rule-5b min-1 bound and selector canonicalization
+- *(access)* rule-3 selector-capability validation (SelectorAxis, validate_selector_level)
+- *(access)* Visibility::from_selectors axis union
+- *(access)* TargetRef::HostSoftwareItem and pure Selector::covers matcher
+- *(shared-types)* add version_prefix validation module
+- *(plugins/uv)* implement discovery and version detection
+
+### Fixed
+
+- *(shared)* explicit redirect policies and agent-core SSRF resolver
+- *(oauth)* reject backslash in canonical_host shape gate
+- *(plugins/uv)* use dotted-kebab type id and fail loud on parse drift
+
+### Other
+
+- *(web-api-types)* assert parse rejection without matching Display strings
+- *(web-api-types)* pin email-change deserialization canonicalization
+- *(access)* selector validation state, split API, glossary entries
+
 ## [0.0.4](https://github.com/worried-networking/uptrakit/compare/uptrakit-openapi-client-v0.0.3...uptrakit-openapi-client-v0.0.4) - 2026-08-18
 
 ### Fixed

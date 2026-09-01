@@ -7,6 +7,121 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-standalone-v0.0.7...uptrakit-controller-standalone-v0.0.8) - 2026-09-01
+
+### Added
+
+- *(plugins)* typed RedirectMode with per-hop security guards
+- *(types)* [**breaking**] make MaskedEmail construction canonical-only
+- *(db)* snapshot redirect_uri and return origin on pending OIDC flows
+- *(controller)* send instance host in service settings
+- *(updates)* per-row timeout_seconds budget on update_history, honored by the reaper
+- *(access)* visibility() selector-union Filter implementation
+- *(access)* authorize_target with decision-time host-tag resolution
+- ban direct reqwest client construction via clippy disallowed-methods
+- *(frontend)* move canonical host to a Global Settings card
+- *(agent)* item-set-aware dedup guard and abort backstop for background operations
+- *(ssh)* in-loop command deadline, Eof/ExitSignal handling; retire outer timeout wraps
+- *(command)* default 600s command timeout with in-executor deadline and update-budget forwarding
+- *(agent-ssh)* plumb controller instance host to infra plugin context
+- *(agent-core)* 300s deadline on lifecycle hook execution
+- *(agent-core)* operation deadlines for version check, discovery, and config tests
+- *(web-api)* validate initiate_email_change bodies via Validated extractor
+- *(web-api)* canonicalize OIDC email claims at extraction
+- *(db)* route user email comparisons through find_by_canonical_email
+- *(web-api-types)* carry MaskedEmail in login, register, and email-change requests
+- *(api)* HTTP mappings for M2.1 selector validation errors
+- *(oidc)* purge pending flows on provider mutation and canonical-host change
+- *(oidc)* pin redirect_uri to canonical host and replay flow snapshots at callback
+- *(auth)* pending-flow snapshot fields and tx-scoped purge helpers
+- *(web-api)* reap never-started Pending updates with connection-absent evidence
+- *(oauth)* [**breaking**] require explicit oauth.mcp_enabled opt-in (drop canonical-host auto-enable)
+- *(web-api-queries)* list and CAS-reap stalled Pending update rows
+- *(pvehs)* infer tag-series prefix in discovery loop
+- *(pvehs)* synthesize tag-series config_override in target builders
+- *(pvehs)* add tag-series prefix/version inference
+- *(plugin-shell)* configurable timeout_seconds for shell commands
+- *(plugins)* add version_strip_prefix to the generic shell plugin
+- *(plugins)* add capped HTTP body-read helpers
+- *(plugins/proxmox)* stamp instance and tenant into PVE token comments
+- *(plugins)* permissive SSRF mode and validation for custom npm registries
+- *(plugins)* Forgejo series filter, asset gating, filtered-to-zero error
+- *(plugins)* add tag_prefix series filter field to ForgejoConfig
+- *(plugins)* GitHub series filter, asset gating, filtered-to-zero error
+- *(plugins)* add tag_prefix series filter field to GitHubConfig
+
+### Fixed
+
+- *(plugins)* verify-pass fixes for Plan 3 redirect enforcement
+- *(frontend)* trim email inputs and surface the oidc_invalid_email error
+- *(frontend)* confirm canonical-host changes on the initial set
+- *(clippy)* correct the remaining false builder-limitation rationales
+- *(clippy)* replace false builder-limitation rationales with the frozen-migration category
+- *(shared)* explicit redirect policies and agent-core SSRF resolver
+- *(web-api)* move pending-flow purge out of the oidc-gated module
+- *(web-api)* stop CIMD fetcher from following redirects
+- *(oidc)* cover authorize redirect pinning and fail closed on non-string canonical host
+- *(plugins)* cap PHS remote text fetches at 1 MiB
+- *(hook-shell)* route hook commands through injected CommandExecutor
+- *(plugins)* expose npm registry_url in form + use redirect Result alias
+- *(plugins)* rebase pagination links onto the request origin
+- *(plugins)* enable infra-core http-client feature for proxmox bare builds
+- *(clippy)* express pragma reads with sea_query builders
+- *(pve)* correct ADR-0044 self-repair condition and ack-marker history, pin upsert invariants
+- *(proxmox)* pin regenerate host wiring, escape rejected host in logs
+- *(plugins/proxmox)* correct fold doc comment, add fold-behaviour test
+- *(plugins)* cap npm packument reads at 8 MiB
+- *(plugins)* cap forge release pagination
+- *(plugins)* cap forge release-page reads at 8 MiB
+- *(plugins)* bound github asset downloads by declared size and read cap
+
+### Other
+
+- update Cargo.lock dependencies
+- *(tests)* rewrite raw-SQL test probes with sea_query builders
+- *(health)* probe DB liveness via builder SELECT 1 instead of raw SQL
+- *(settings)* read oauth.canonical_host via the typed settings API
+- *(controller)* cover embedded instance host filter and document the parameter
+- *(access)* split coarse authorize() from decide() core, migrate call sites
+- *(frontend)* mock oauth settings and stabilise ui-parity captures
+- *(api)* regenerate OpenAPI artifacts for canonical email ingress
+- *(access)* selector validation state, split API, glossary entries
+- *(frontend)* refresh the AGENTS.md technology-stack versions
+- *(deps)* upgrade Skeleton UI 4.15.2 -> 5.0.0
+- *(deps)* override js-yaml ^4.3.1 and patch brace-expansion
+- *(deps)* bump frontend majors jsdom 30, jest-dom 7, markdown-it 15
+- *(deps)* bump 19 in-range frontend npm packages
+- *(deps)* bump russh from 0.62 to 0.63
+- *(timeouts)* clarify default-deadline semantics in ssh wrapper and wire docs
+- *(clippy)* enforce raw-SQL ban via disallowed-methods/macros
+- *(agent-ssh)* document instance host origin and trust level
+- *(pve)* fix stale migration wording and dead test arm after cleanup
+- *(plugins/proxmox)* collapse ack-marker/operative config-id duality
+- *(agent-ssh-runtime)* delete proxmox_host_state via sea_query builder
+- *(hooks)* require lifecycle hooks route via CommandExecutor
+- *(web-api)* build cimd and oidc clients via build_plugin_http_client
+- *(web-api)* pin canonical email ingress across login, register, and email change
+- *(oidc)* exercise the accepted-audience alias branch end-to-end
+- *(oidc)* assert provider flow purge is scoped to the mutated provider
+- *(web-api)* drop intermediate Vec in reaper side-effect pass
+- *(web-api)* shared builder-based drop_table test helper
+- *(deps)* bump argon2 from 0.5 to 0.6
+- *(auth)* express the rate-limit upsert with sea_query builders
+- *(web-api-queries)* pin string-compare semantics and prefixed-tag round-trip
+- update Cargo.toml dependencies
+- *(plugins)* share the filtered-to-zero diagnostic across release plugins
+- *(hook-shell)* state invariants in test comments, split transport cases
+- *(hook-shell)* drop spec rationale from run_shell_command doc
+- *(plugins)* migrate proxmox client onto build_plugin_http_client
+- *(plugins)* client-level RedirectMode wiring tests
+- *(plugins)* align capped-read tests to async httpmock idiom
+- *(infra-core)* add spec-recording CommandExecutor double
+- *(deps)* drop unused paste dependency from plugin-infrastructure-core
+- *(proxmox)* builder-based rewrites in controller_migration tests
+- *(plugins/proxmox)* drop migration bookkeeping columns from proxmox_host_state
+- *(plugins/proxmox)* drop legacy-user probe and delete_pve_user from pve_setup
+- *(plugins/proxmox)* remove legacy-user migration branches from credential flow
+
 ## [0.0.7](https://github.com/worried-networking/uptrakit/compare/uptrakit-controller-standalone-v0.0.6...uptrakit-controller-standalone-v0.0.7) - 2026-08-18
 
 ### Added
