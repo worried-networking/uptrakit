@@ -16,6 +16,7 @@ use axum::{
 };
 use uptrakit_audit_log::{AbsentView, AuditEntry, AuditOutcome, Event, Stateful};
 use uptrakit_web_api_queries::queries::global_settings::GlobalSettingView;
+use uptrakit_web_api_queries::queries::oidc_providers::purge_all_pending_flows_in_tx;
 
 pub use uptrakit_web_api_types::settings_oauth::{
     OAuthSettingsResponse, UpdateOAuthSettingsRequest,
@@ -365,7 +366,7 @@ pub async fn update_oauth_settings(
         // so a presence-keyed purge would nuke live logins on every
         // unrelated save.
         let purged_flows = if before_host_norm != new_host.as_deref() {
-            match crate::auth::oidc_state::OidcFlowStore::purge_all_in_tx(&tx).await {
+            match purge_all_pending_flows_in_tx(&tx).await {
                 Ok(n) => Some(n),
                 Err(e) => {
                     drop(tx);

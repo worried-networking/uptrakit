@@ -18,6 +18,7 @@ mod oauth_mcp_roundtrip;
 mod oidc_callback;
 #[cfg(feature = "oidc")]
 mod oidc_purge;
+mod oidc_purge_canonical_host;
 mod openapi_spec;
 mod plugin_configs;
 mod plugin_type_settings;

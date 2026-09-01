@@ -4,11 +4,12 @@
 //! `BEGIN IMMEDIATE` by the caller so that the audit row can be written in the
 //! same transaction (`emit_stateful`).
 
-use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use std::collections::HashMap;
 use time::OffsetDateTime;
 use uptrakit_crypto::EncryptedString;
 use uptrakit_shared_db::entity::oidc_provider::{self, RoleMapping};
+use uptrakit_shared_db::entity::pending_oidc_flow;
 use uuid::Uuid;
 
 // ── Audit snapshot ────────────────────────────────────────────────────────────
@@ -215,4 +216,89 @@ pub async fn set_provider_active_in_tx(
     model.is_active = Set(is_active);
     model.updated_at = Set(now);
     model.update(tx).await
+}
+
+// ── Pending flow purge ──────────────────────────────────────────────────────
+
+/// Purges every pending OIDC flow, across all providers, inside a
+/// caller-managed `BEGIN IMMEDIATE` transaction.
+///
+/// Used by the MCP-OAuth settings route when the canonical host changes: a
+/// host change invalidates every in-flight OIDC login, not only the flows
+/// tied to one provider.
+///
+/// # Errors
+///
+/// Returns `sea_orm::DbErr` if the delete query fails.
+pub async fn purge_all_pending_flows_in_tx(
+    tx: &sea_orm::DatabaseTransaction,
+) -> Result<u64, sea_orm::DbErr> {
+    pending_oidc_flow::Entity::delete_many()
+        .exec(tx)
+        .await
+        .map(|r| r.rows_affected)
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "test helpers: panics on setup failure are acceptable"
+    )]
+
+    use super::*;
+    use sea_orm::{ConnectOptions, Database, DatabaseConnection, PaginatorTrait};
+
+    async fn setup_test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.expect("test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
+        db
+    }
+
+    async fn insert_pending_flow(db: &DatabaseConnection, csrf_state: &str) {
+        let now = OffsetDateTime::now_utc();
+        pending_oidc_flow::ActiveModel {
+            csrf_state: Set(csrf_state.to_string()),
+            provider_id: Set(Uuid::now_v7()),
+            pkce_verifier: Set(EncryptedString::plaintext_for_test(
+                "test-verifier".to_string(),
+            )),
+            nonce: Set("test-nonce".to_string()),
+            redirect_uri: Set("https://test.example.com/api/v1/auth/oidc/callback".to_string()),
+            return_origin: Set(String::new()),
+            created_at: Set(now),
+            expires_at: Set(now + time::Duration::seconds(600)),
+        }
+        .insert(db)
+        .await
+        .expect("insert pending oidc flow");
+    }
+
+    #[tokio::test]
+    async fn test_purge_all_pending_flows_in_tx_deletes_every_flow() {
+        let db = setup_test_db().await;
+
+        insert_pending_flow(&db, "state-a").await;
+        insert_pending_flow(&db, "state-b").await;
+
+        let tx = uptrakit_shared_db::begin_immediate(&db)
+            .await
+            .expect("begin immediate");
+        let rows_affected = purge_all_pending_flows_in_tx(&tx)
+            .await
+            .expect("purge all pending flows");
+        tx.commit().await.expect("commit");
+
+        assert_eq!(rows_affected, 2);
+        assert_eq!(
+            pending_oidc_flow::Entity::find()
+                .count(&db)
+                .await
+                .expect("count remaining pending flows"),
+            0
+        );
+    }
 }

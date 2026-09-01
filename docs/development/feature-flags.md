@@ -149,7 +149,10 @@ in the request body. Broadcasts `ResetData` to connected services after clearing
 OpenID Connect authentication. Propagates to `uptrakit-web-api-auth/oidc`. Gates the
 `openidconnect` dependency and all OIDC-specific modules (`oidc_auth`, `oidc_providers`,
 `oidc_state`), routes, OpenAPI schemas, rate limit entries, and `AppState` stores. Non-OIDC types
-(`AuthMethod::Oidc`, `require_token_for_oidc`, OIDC DB entities) remain unconditional.
+(`AuthMethod::Oidc`, `require_token_for_oidc`, OIDC DB entities) remain unconditional. Bulk pending-flow
+purge (`uptrakit-web-api-queries::queries::oidc_providers::purge_all_pending_flows_in_tx`) is also
+unconditional: the ungated MCP-OAuth settings route (`routes/settings_oauth.rs`) calls it on a
+canonical-host change, regardless of whether `oidc` is enabled.
 
 ### `swagger-ui` (web-api)
 

@@ -1,14 +1,15 @@
-//! Integration tests for pending-OIDC-flow purges on provider mutation and
-//! canonical-host change (Task B4).
+//! Integration tests for pending-OIDC-flow purges on provider mutation
+//! (Task B4).
 //!
-//! Covers:
-//! - `update_provider` / `activate_provider` purge the pending flows tied to
-//!   the mutated provider (and, for `activate_provider`, the flows tied to
-//!   any sibling provider it deactivates via the exclusivity loop).
-//! - `update_oauth_settings`'s canonical-host arm purges *all* pending flows
-//!   only when the normalized canonical host actually changes — never on a
-//!   resend of the same value (the frontend resends `canonical_host` on
-//!   every OAuth-settings PUT).
+//! Covers `update_provider` / `activate_provider` purging the pending flows
+//! tied to the mutated provider (and, for `activate_provider`, the flows
+//! tied to any sibling provider it deactivates via the exclusivity loop).
+//!
+//! The canonical-host purge case lives in the ungated sibling module
+//! `oidc_purge_canonical_host.rs` instead: that purge path is unconditional
+//! (the MCP-OAuth settings route it lives in is not feature-gated), so its
+//! coverage must compile and run in the zero-feature build, which this
+//! `#![cfg(feature = "oidc")]` module does not.
 
 #![cfg(feature = "oidc")]
 #![expect(
@@ -53,14 +54,6 @@ async fn flow_count_for_provider(app: &TestApp, provider_id: uuid::Uuid) -> u64 
         .count(&app.db)
         .await
         .expect("count pending flows for provider")
-}
-
-/// Count every pending flow row in the table.
-async fn total_flow_count(app: &TestApp) -> u64 {
-    pending_oidc_flow::Entity::find()
-        .count(&app.db)
-        .await
-        .expect("count all pending flows")
 }
 
 /// Create an OIDC provider via the HTTP API and return its id.
@@ -167,96 +160,5 @@ async fn provider_activate_purges_deactivated_siblings_flows() {
         flow_count_for_provider(&app, provider_a).await,
         0,
         "activating a sibling must purge the deactivated provider's pending flows"
-    );
-}
-
-// ── canonical-host change purges every pending flow ─────────────────────────
-
-#[tokio::test]
-async fn canonical_host_change_purges_all_flows() {
-    let app = TestApp::new().await;
-    let client = app.client();
-    let token = fixtures::register_and_get_token(&client).await;
-
-    let provider_id = create_provider(&app, &token, "canonical-change-target").await;
-    seed_flow(&app, "canonical-change-state-1", provider_id).await;
-    seed_flow(&app, "canonical-change-state-2", provider_id).await;
-    assert_eq!(total_flow_count(&app).await, 2);
-
-    let put_status = client
-        .put_json(
-            "/api/v1/global-settings/oauth",
-            &serde_json::json!({ "canonical_host": "sso.example.com" }),
-        )
-        .bearer(&token)
-        .header("if-match", "W/\"global-settings-v0\"")
-        .send_status()
-        .await;
-    assert_eq!(put_status, http::StatusCode::OK);
-
-    assert_eq!(
-        total_flow_count(&app).await,
-        0,
-        "a canonical-host change must purge every pending OIDC flow"
-    );
-}
-
-// ── canonical-host resend of the same value keeps flows intact ─────────────
-
-#[tokio::test]
-async fn canonical_host_resend_same_value_keeps_flows() {
-    let app = TestApp::new().await;
-    let client = app.client();
-    let token = fixtures::register_and_get_token(&client).await;
-
-    // First PUT establishes the canonical host (this itself purges — expected,
-    // it is a real change from unset to set).
-    let first_status = client
-        .put_json(
-            "/api/v1/global-settings/oauth",
-            &serde_json::json!({ "canonical_host": "sso.example.com" }),
-        )
-        .bearer(&token)
-        .header("if-match", "W/\"global-settings-v0\"")
-        .send_status()
-        .await;
-    assert_eq!(first_status, http::StatusCode::OK);
-
-    // Capture the fresh ETag for the second PUT.
-    let get_resp = client
-        .get("/api/v1/global-settings/oauth")
-        .bearer(&token)
-        .send()
-        .await;
-    assert_eq!(get_resp.status(), http::StatusCode::OK);
-    let etag = get_resp
-        .headers()
-        .get("etag")
-        .expect("ETag header present")
-        .to_str()
-        .expect("ETag is ASCII")
-        .to_string();
-
-    let provider_id = create_provider(&app, &token, "canonical-resend-target").await;
-    seed_flow(&app, "canonical-resend-state", provider_id).await;
-    assert_eq!(total_flow_count(&app).await, 1);
-
-    // Second PUT resends the exact same canonical_host value (this is what
-    // the frontend does on every OAuth-settings save).
-    let second_status = client
-        .put_json(
-            "/api/v1/global-settings/oauth",
-            &serde_json::json!({ "canonical_host": "sso.example.com" }),
-        )
-        .bearer(&token)
-        .header("if-match", &etag)
-        .send_status()
-        .await;
-    assert_eq!(second_status, http::StatusCode::OK);
-
-    assert_eq!(
-        total_flow_count(&app).await,
-        1,
-        "resending the same canonical_host value must not purge pending flows"
     );
 }

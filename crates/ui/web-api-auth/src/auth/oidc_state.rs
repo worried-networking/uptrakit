@@ -163,22 +163,6 @@ impl OidcFlowStore {
             .map(|r| r.rows_affected)
             .context_to()
     }
-
-    /// Purges all pending OIDC flows across every provider.
-    ///
-    /// Runs in the caller's `BEGIN IMMEDIATE` transaction so the purge
-    /// commits atomically with the mutation that invalidated the flows.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`OidcStoreError::Database`] if the delete query fails.
-    pub async fn purge_all_in_tx(tx: &sea_orm::DatabaseTransaction) -> Result<u64> {
-        PendingOidcFlow::delete_many()
-            .exec(tx)
-            .await
-            .map(|r| r.rows_affected)
-            .context_to()
-    }
 }
 
 /// Parameters for inserting a pending account link.
@@ -821,50 +805,6 @@ mod tests {
         assert!(store.take("state-target-1").await.unwrap().is_none());
         assert!(store.take("state-target-2").await.unwrap().is_none());
         assert!(store.take("state-other").await.unwrap().is_some());
-    }
-
-    #[tokio::test]
-    async fn test_oidc_flow_purge_all_in_tx_deletes_every_flow() {
-        let db = test_db().await;
-        let store = OidcFlowStore::new(db.clone());
-
-        let pkce = PkceCodeVerifier::new("verifier".to_string());
-        let nonce = Nonce::new("nonce".to_string());
-        let snapshot = || FlowSnapshot {
-            redirect_uri: "https://test.example.com/api/v1/auth/oidc/callback".into(),
-            return_origin: Some("https://test.example.com".into()),
-        };
-
-        store
-            .insert(
-                "state-a".to_string(),
-                uuid::Uuid::now_v7(),
-                &pkce,
-                &nonce,
-                snapshot(),
-            )
-            .await
-            .unwrap();
-        store
-            .insert(
-                "state-b".to_string(),
-                uuid::Uuid::now_v7(),
-                &pkce,
-                &nonce,
-                snapshot(),
-            )
-            .await
-            .unwrap();
-
-        let tx = uptrakit_shared_db::begin_immediate(&db)
-            .await
-            .expect("begin immediate");
-        let rows_affected = OidcFlowStore::purge_all_in_tx(&tx).await.unwrap();
-        tx.commit().await.expect("commit");
-
-        assert_eq!(rows_affected, 2);
-        assert!(store.take("state-a").await.unwrap().is_none());
-        assert!(store.take("state-b").await.unwrap().is_none());
     }
 
     #[tokio::test]

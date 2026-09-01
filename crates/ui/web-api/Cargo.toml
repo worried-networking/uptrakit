@@ -109,6 +109,7 @@ uptrakit-controller-core = { workspace = true, features = ["testing"] }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["test-support", "migrations"] }
 uptrakit-plugin-infrastructure-proxmox = { workspace = true, features = ["testing", "migrations", "db-sqlite"] }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["testing"] }
+uptrakit-crypto = { workspace = true, features = ["testing"] }
 tokio-tungstenite = { workspace = true }
 
 [lints]
