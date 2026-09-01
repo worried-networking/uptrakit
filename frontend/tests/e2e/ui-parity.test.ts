@@ -464,6 +464,15 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<M
 				pki_addr: 'http://controller.local:8080'
 			});
 		}
+		if (method === 'GET' && path === '/api/v1/global-settings/oauth') {
+			return json({
+				mcp_enabled: false,
+				dcr_enabled: false,
+				cimd_enabled: false,
+				canonical_host: 'controller.local',
+				restart_required: false
+			});
+		}
 		if (method === 'GET' && path === '/api/v1/system-enrollment-tokens') {
 			return json({
 				items: [],
@@ -893,6 +902,17 @@ test('shared primitive ui parity: action badge idle and hover states', async ({ 
 	const fixture = page.getByTestId('parity-clickable-badge');
 	const actionBadge = fixture.locator('[data-ui="action-badge"]');
 	await expect(actionBadge).toBeVisible();
+
+	// The fixture's inline styles reference var(--color-info), var(--bg-surface), etc.,
+	// which only resolve once the app stylesheet (injected during SvelteKit hydration) has
+	// loaded. page.goto()'s `load` event does not wait for that: hydration's dynamic route
+	// chunk import can still be in flight, so the fixture can paint unstyled for a window
+	// wide enough to occasionally outlast toHaveScreenshot's own stability retry, flaking
+	// the badge dimensions (88x50 -> 81x43). Poll a stylesheet-only custom property instead
+	// of a fixed sleep.
+	await page.waitForFunction(() => {
+		return getComputedStyle(document.documentElement).getPropertyValue('--bg-surface').trim() !== '';
+	});
 	await page.mouse.move(12, 12);
 
 	await captureParityScreenshot(page, fixture, 'ui-parity-clickable-badge.png');
