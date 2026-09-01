@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.6...uptrakit-mqtt-v0.0.7) - 2026-09-01
+
+### Other
+
+- update Cargo.lock dependencies
+
 ## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-mqtt-v0.0.5...uptrakit-mqtt-v0.0.6) - 2026-08-18
 
 ### Fixed

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.6...uptrakit-cli-v0.0.7) - 2026-09-01
+
+### Added
+
+- ban direct reqwest client construction via clippy disallowed-methods
+
+### Fixed
+
+- *(shared)* explicit redirect policies and agent-core SSRF resolver
+
 ## [0.0.6](https://github.com/worried-networking/uptrakit/compare/uptrakit-cli-v0.0.5...uptrakit-cli-v0.0.6) - 2026-08-18
 
 ### Fixed

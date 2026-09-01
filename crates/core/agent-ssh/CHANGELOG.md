@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.7...uptrakit-agent-ssh-v0.0.8) - 2026-09-01
+
+### Added
+
+- *(ssh)* in-loop command deadline, Eof/ExitSignal handling; retire outer timeout wraps
+- *(agent)* item-set-aware dedup guard and abort backstop for background operations
+- *(command)* default 600s command timeout with in-executor deadline and update-budget forwarding
+- *(agent-ssh)* plumb controller instance host to infra plugin context
+- ban direct reqwest client construction via clippy disallowed-methods
+- *(agent-core)* 300s deadline on lifecycle hook execution
+- *(agent-core)* operation deadlines for version check, discovery, and config tests
+
+### Fixed
+
+- *(clippy)* correct the remaining false builder-limitation rationales
+- *(clippy)* replace false builder-limitation rationales with the frozen-migration category
+- *(shared)* explicit redirect policies and agent-core SSRF resolver
+
+### Other
+
+- update Cargo.lock dependencies
+- *(deps)* bump russh from 0.62 to 0.63
+- *(timeouts)* clarify default-deadline semantics in ssh wrapper and wire docs
+- *(clippy)* enforce raw-SQL ban via disallowed-methods/macros
+- *(tests)* rewrite raw-SQL test probes with sea_query builders
+- *(agent-ssh)* document instance host origin and trust level
+- *(pve)* fix stale migration wording and dead test arm after cleanup
+- *(plugins/proxmox)* collapse ack-marker/operative config-id duality
+- *(agent-ssh-runtime)* delete proxmox_host_state via sea_query builder
+- *(hooks)* require lifecycle hooks route via CommandExecutor
+
 ## [0.0.7](https://github.com/worried-networking/uptrakit/compare/uptrakit-agent-ssh-v0.0.6...uptrakit-agent-ssh-v0.0.7) - 2026-08-18
 
 ### Added
