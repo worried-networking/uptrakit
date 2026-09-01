@@ -316,7 +316,7 @@ skip = [
     { crate = "ordered-float@4.6.0", reason = "pulled by sea-query older pin; newer 5.x used by sea-query current" },
 
     # rand: 0.8.x via openidconnect/rsa, 0.9.x via bollard/tungstenite, 0.10.x is the workspace pin
-    { crate = "rand@0.8.7", reason = "pulled by openidconnect/rsa; newer 0.9.x used by tungstenite, uptrakit" },
+    { crate = "rand@0.8.8", reason = "pulled by openidconnect/rsa; newer 0.9.x used by tungstenite, uptrakit" },
     { crate = "rand@0.9.5", reason = "pulled by bollard 0.20.2, tungstenite 0.29 and metrics-util (dev); the workspace itself pins rand 0.10. bollard 0.21 uses rand 0.10 but testcontainers-modules 0.15 requires testcontainers ^0.27, which pins bollard ^0.20" },
     { crate = "rand_chacha@0.3.1", reason = "pulled by rand 0.8; newer 0.9.x used by rand 0.9" },
     { crate = "rand_core@0.6.4", reason = "pulled by crypto crates (openidconnect); newer 0.9.x used by rand 0.9" },
@@ -387,7 +387,7 @@ skip = [
     { crate = "sha3@0.11.0", reason = "pulled by ml-kem (russh 0.62.4 post-quantum KEM); russh itself uses sha3 0.12 directly — internal russh split, resolves when ml-kem bumps sha3" },
 
     # syn: 2.x used across the ecosystem, 3.x pulled by async-trait 0.1.91 (build-time proc-macro)
-    { crate = "syn@3.0.3", reason = "pulled by async-trait 0.1.91 proc-macro (build-time only); syn 2.x used across the ecosystem — no runtime binary impact" },
+    { crate = "syn@3.0.4", reason = "pulled by async-trait 0.1.91 proc-macro (build-time only); syn 2.x used across the ecosystem — no runtime binary impact" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive

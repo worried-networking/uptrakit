@@ -42,7 +42,7 @@ rustls-native-certs = "0.8"
 rcgen = { version = "0.14", default-features = false, features = ["pem", "x509-parser", "aws_lc_rs"] }
 x509-parser = { version = "0.18", default-features = false, features = ["verify-aws"] }
 parking_lot = "0.12"
-rmcp = { version = "3.1", features = ["transport-streamable-http-server"] }
+rmcp = { version = "3.2", features = ["transport-streamable-http-server"] }
 schemars = { version = "1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
