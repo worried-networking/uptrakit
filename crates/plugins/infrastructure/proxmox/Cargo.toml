@@ -20,7 +20,7 @@ plugin-ops = ["uptrakit-plugin-infrastructure-core/plugin-ops"]
 testing = []
 
 [dependencies]
-uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops", "http-client"] }
 uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 # Retained for proxmox_host_mapping entity: that entity cannot move to this crate
 # because controller-runtime/db_migrate/tables.rs (a core crate) uses the SeaORM
