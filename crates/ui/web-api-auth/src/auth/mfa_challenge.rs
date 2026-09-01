@@ -6,10 +6,7 @@
 //! [`super::AuthError`]. Database operations propagate [`sea_orm::DbErr`] via
 //! `context_to`. Argon2 hashing errors surface as [`super::AuthError::PasswordHash`].
 
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
-};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use rand::RngExt as _;
 use rootcause::prelude::*;
 use sea_orm::{
@@ -165,12 +162,11 @@ pub fn generate_email_otp() -> String {
 ///
 /// Returns [`AuthError::PasswordHash`] if Argon2id hashing fails.
 pub fn hash_email_otp(code: &str) -> Result<String> {
-    let salt = SaltString::generate(&mut OsRng);
-    let hash = Argon2::default()
-        .hash_password(code.as_bytes(), &salt)
-        .map_err(|e| report!(AuthError::PasswordHash(e)))?
-        .to_string();
-    Ok(hash)
+    // `hash_password` draws a fresh 16-byte salt from the system RNG per call.
+    let hash: PasswordHash = Argon2::default()
+        .hash_password(code.as_bytes())
+        .map_err(|e| report!(AuthError::PasswordHash(e)))?;
+    Ok(hash.to_string())
 }
 
 /// Verify an email OTP against its stored Argon2id hash.
@@ -182,10 +178,13 @@ pub fn hash_email_otp(code: &str) -> Result<String> {
 ///
 /// Returns [`AuthError::PasswordHash`] if the hash string is malformed.
 pub fn verify_email_otp(code: &str, hash: &str) -> Result<bool> {
-    let parsed = PasswordHash::new(hash).map_err(|e| report!(AuthError::PasswordHash(e)))?;
-    Ok(Argon2::default()
-        .verify_password(code.as_bytes(), &parsed)
-        .is_ok())
+    // The `&str` verifier parses the PHC string itself, so a malformed stored
+    // hash still surfaces as an error rather than as a plain mismatch.
+    match Argon2::default().verify_password(code.as_bytes(), hash) {
+        Ok(()) => Ok(true),
+        Err(argon2::password_hash::Error::PasswordInvalid) => Ok(false),
+        Err(e) => Err(report!(AuthError::PasswordHash(e))),
+    }
 }
 
 /// Persist the email OTP hash in the challenge row.
@@ -252,11 +251,8 @@ pub fn find_matching_recovery_code(
     plaintext: &str,
 ) -> Option<uuid::Uuid> {
     for code in codes.iter().filter(|c| c.used_at.is_none()) {
-        let Ok(hash) = PasswordHash::new(&code.code_hash) else {
-            continue;
-        };
         if Argon2::default()
-            .verify_password(plaintext.as_bytes(), &hash)
+            .verify_password(plaintext.as_bytes(), code.code_hash.as_str())
             .is_ok()
         {
             return Some(code.id);

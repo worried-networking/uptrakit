@@ -12,7 +12,7 @@ default = []
 oidc = ["dep:openidconnect"]
 
 [dependencies]
-argon2 = { workspace = true, features = ["std"] }
+argon2 = { workspace = true, features = ["alloc", "getrandom", "password-hash"] }
 async-trait = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }

@@ -1,8 +1,5 @@
 use super::Result;
-use argon2::{
-    Argon2, Params,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
-};
+use argon2::{Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier};
 use rootcause::prelude::*;
 use uptrakit_shared_types::SecretString;
 
@@ -39,22 +36,19 @@ pub fn hash_password(password: &str) -> Result<SecretString> {
 
     let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
 
-    let salt = SaltString::generate(&mut OsRng);
-
-    let password_hash = argon2
-        .hash_password(password.as_bytes(), &salt)
-        .context_to()?;
+    // `hash_password` draws a fresh 16-byte salt from the system RNG per call.
+    let password_hash: PasswordHash = argon2.hash_password(password.as_bytes()).context_to()?;
 
     Ok(SecretString::new(password_hash.to_string()))
 }
 
 /// Verify a password against an Argon2id hash using constant-time comparison
 pub fn verify_password(password: &str, hash: &str) -> Result<bool> {
-    let parsed_hash = PasswordHash::new(hash).context_to()?;
-
-    match Argon2::default().verify_password(password.as_bytes(), &parsed_hash) {
+    // The `&str` verifier parses the PHC string itself and reports a malformed
+    // hash as an error, keeping the parse failure distinct from a wrong password.
+    match Argon2::default().verify_password(password.as_bytes(), hash) {
         Ok(()) => Ok(true),
-        Err(argon2::password_hash::Error::Password) => Ok(false),
+        Err(argon2::password_hash::Error::PasswordInvalid) => Ok(false),
         Err(e) => Err(e).context_to(),
     }
 }
@@ -106,6 +100,45 @@ mod tests {
     fn test_verify_invalid_hash_format() {
         let result = verify_password("password", "not-a-valid-hash");
         assert!(result.is_err(), "Should error on invalid hash format");
+    }
+
+    /// PHC strings written by argon2 0.5 must still verify after the 0.6 bump.
+    ///
+    /// These two hashes were produced by argon2 0.5.3 with the same OWASP
+    /// parameters `hash_password` uses. Stored `users.password_hash` values
+    /// predate the bump, so a verification break here is a silent credential
+    /// break for every existing account.
+    #[test]
+    fn verify_password_accepts_hashes_written_by_argon2_0_5() {
+        const LEGACY: [(&str, &str); 2] = [
+            (
+                "correct horse battery staple",
+                "$argon2id$v=19$m=19456,t=2,p=1$MuOxdk6hLDGGrvAbv9jfPg$ltt0Ho0sZt2kac3bIGgyFCUqcMTL3nfCHWTXO2bIgT4",
+            ),
+            (
+                "hunter2",
+                "$argon2id$v=19$m=19456,t=2,p=1$rG5S/QEFzI2BWW338jv0oQ$PcuedpVOqtlZEj4lOHfKrzFUa7UbGazmnqID1ssiKNI",
+            ),
+        ];
+
+        for (password, hash) in LEGACY {
+            assert!(
+                verify_password(password, hash).unwrap(),
+                "argon2 0.5 hash for {password:?} must verify under argon2 0.6"
+            );
+            assert!(
+                !verify_password("some other password", hash).unwrap(),
+                "argon2 0.5 hash for {password:?} must reject a wrong password"
+            );
+        }
+    }
+
+    /// The change-password routes call `verify_password` with a fixed dummy
+    /// string to equalise timing for unknown users. That string is not a
+    /// complete PHC hash, so it must produce an error, never a panic.
+    #[test]
+    fn verify_password_errors_on_the_timing_dummy_hash() {
+        verify_password("dummy", "$argon2id$dummy").unwrap_err();
     }
 
     #[test]
