@@ -103,7 +103,7 @@ cargo_metadata = "0.23.1"
 # tokio-tungstenite stays at 0.29 (latest: 0.30.0) — axum 0.8.9 (latest) requires ^0.29.0;
 # bumping would fork the graph into two incompatible tungstenite stacks. The type is also viral:
 # service-sdk's public EnrollmentError wraps tungstenite::Error, so a bump recompiles 11 crates.
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 zeroize = { version = "1", features = ["derive"] }
 async-nats = { version = "0.50", default-features = false, features = ["server_2_10", "server_2_11", "server_2_12", "aws-lc-rs", "jetstream"] }
 # base64 0.23 gains a default `simd-unsafe` feature; keep it off — first-party use is config-sized
