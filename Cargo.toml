@@ -189,7 +189,7 @@ russh-sftp = { version = "2" }
 ssh-key = { version = "0.6", default-features = false }
 # tower-http stays at 0.6 (latest: 0.7.0) — reqwest 0.13.4 (latest) requires tower-http ^0.6.8;
 # bumping would fork the graph into two tower-http versions for no gain
-tower-http = { version = "0.6", default-features = false }
+tower-http = { version = "0.7", default-features = false }
 nix = { version = "0.31", default-features = false }
 notify-debouncer-full = "0.7"
 # Plan 3 (reexec) consumers; declared here for license review
