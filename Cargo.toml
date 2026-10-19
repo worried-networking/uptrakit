@@ -70,7 +70,7 @@ arc-swap = "1.9.2"
 metrics = "0.24"
 metrics-util = "0.20"
 moka = "0.12"
-utoipa = { version = "5.5", features = ["uuid"] }
+utoipa = { version = "6.0", features = ["uuid"] }
 x509-ocsp = "0.2"
 # der/spki/const-oid/x509-cert move as one RustCrypto unit and stay at 0.7/0.7/0.9/0.2
 # (latest: 0.8/0.8/0.10/0.3). Two independent gates, both already at their newest release:
@@ -205,8 +205,8 @@ openidconnect = { version = "4", default-features = false }
 client-ip = { version = "0.2", default-features = false }
 pep440_rs = "0.7.3"
 percent-encoding = "2"
-utoipa-axum = "0.2"
-utoipa-swagger-ui = { version = "9.0", default-features = false }
+utoipa-axum = "0.3"
+utoipa-swagger-ui = { version = "10.0", default-features = false }
 http-body-util = "0.1"
 sqlx = { version = "0.9", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
 directories = "6"
