@@ -184,7 +184,7 @@ uptrakit-plugin-enhancement-dashboard-icons = { path = "crates/plugins/enhanceme
 uptrakit-plugin-discovery-proxmox-helper-scripts = { path = "crates/plugins/discovery/proxmox-helper-scripts", version = "0.0.3" }
 uptrakit-plugin-discovery-uptrakit-self-update = { path = "crates/plugins/discovery/uptrakit-self-update", version = "0.0.3" }
 # External deps used by a single crate — declared here so all versions are pinned in one place
-russh = { version = "0.63" }
+russh = { version = "0.64" }
 russh-sftp = { version = "2" }
 ssh-key = { version = "0.6", default-features = false }
 # tower-http stays at 0.6 (latest: 0.7.0) — reqwest 0.13.4 (latest) requires tower-http ^0.6.8;
