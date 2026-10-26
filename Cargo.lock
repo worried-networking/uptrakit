@@ -527,9 +527,9 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.18.0"
+version = "1.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce2b2dcc879c3bae0d371e77c99f2238400ef24ec001394befa67b6e543add9e"
+checksum = "faac5829c2b74c28f830747e7818ccfb684261b5f48a1118b1e2a13d36dfab13"
 dependencies = [
  "aws-lc-sys",
  "untrusted 0.7.1",
@@ -538,9 +538,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.44.0"
+version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f09fae7be8bb3174e05c6afdb34199e6dc0c7c04ba9fa237b1967adfbde27483"
+checksum = "f1622d8446a2d4b2ce0c7eefc73dd43a99779028d5ee5c2dd8073a658ba8a2bc"
 dependencies = [
  "cc",
  "cmake",
@@ -1568,7 +1568,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
 dependencies = [
  "const-oid 0.9.6",
- "der_derive",
+ "der_derive 0.7.3",
  "flagset",
  "pem-rfc7468 0.7.0",
  "zeroize",
@@ -1581,6 +1581,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a69dedd701da44b0536442edf09c81a64b0ab97a7a4a5e3d1971f00027cbc63d"
 dependencies = [
  "const-oid 0.10.2",
+ "der_derive 0.8.0",
+ "flagset",
  "pem-rfc7468 1.0.0",
  "zeroize",
 ]
@@ -1604,6 +1606,17 @@ name = "der_derive"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8034092389675178f570469e6c3b0465d3d30b4505c294a6550db47f3c17ad18"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "der_derive"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59600e2c2d636fde9b65e99cc6445ac770c63d3628195ff39932b8d6d7409903"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4105,18 +4118,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pep440_rs"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31095ca1f396e3de32745f42b20deef7bc09077f918b085307e8eab6ddd8fb9c"
-dependencies = [
- "once_cell",
- "serde",
- "unicode-width",
- "unscanny",
-]
-
-[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4740,11 +4741,11 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.13.4"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
+checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "futures-core",
  "http",
@@ -5182,9 +5183,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.43"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -5197,9 +5198,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d"
+checksum = "4a073f5dc7469f984c52ad2752b63b0807745133b6de880b7b64c1ac4c48aec4"
 dependencies = [
  "openssl-probe",
  "rustls-pki-types",
@@ -6119,7 +6120,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
- "webpki-roots 1.0.9",
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]
@@ -6562,7 +6563,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -6759,9 +6760,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
-version = "0.26.4"
+version = "0.26.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
+checksum = "c9cc2678c2cdd569ef8215e2afd7954ada2ae20b4fdd2c5fe6139a3b02d105db"
 dependencies = [
  "rustls",
  "tokio",
@@ -7224,12 +7225,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
-name = "unscanny"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9df2af067a7953e9c3831320f35c1cc0600c30d44d9f7a12b01db1cd88d6b47"
-
-[[package]]
 name = "untrusted"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7556,8 +7551,8 @@ dependencies = [
  "axum",
  "axum-server",
  "clap",
- "const-oid 0.9.6",
- "der 0.7.10",
+ "const-oid 0.10.2",
+ "der 0.8.1",
  "hostname",
  "ipnet",
  "listenfd",
@@ -7614,7 +7609,7 @@ dependencies = [
  "uptrakit-zeroconf",
  "url",
  "uuid",
- "x509-cert",
+ "x509-cert 0.3.0",
  "zeroize",
 ]
 
@@ -7735,8 +7730,8 @@ dependencies = [
  "axum",
  "axum-server",
  "base64 0.23.1",
- "const-oid 0.9.6",
- "der 0.7.10",
+ "const-oid 0.10.2",
+ "der 0.8.1",
  "http",
  "http-body-util",
  "ipnet",
@@ -7752,7 +7747,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "spki 0.7.3",
+ "spki 0.8.0",
  "tempfile",
  "testcontainers",
  "testcontainers-modules",
@@ -8423,28 +8418,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uptrakit-plugin-package-manager-uv"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "futures-util",
- "httpmock",
- "pep440_rs",
- "reqwest",
- "rootcause",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
- "uptrakit-command",
- "uptrakit-plugin-infrastructure-core",
- "uptrakit-shared-macros",
- "uptrakit-shared-types",
- "url",
-]
-
-[[package]]
 name = "uptrakit-plugin-releases-docker"
 version = "0.0.3"
 dependencies = [
@@ -8570,8 +8543,8 @@ name = "uptrakit-scheduler-runtime"
 version = "0.0.5"
 dependencies = [
  "async-trait",
- "const-oid 0.9.6",
- "der 0.7.10",
+ "const-oid 0.10.2",
+ "der 0.8.1",
  "parking_lot",
  "rand 0.10.2",
  "rootcause",
@@ -8595,7 +8568,7 @@ dependencies = [
  "uptrakit-shared-types",
  "uptrakit-wire",
  "uuid",
- "x509-cert",
+ "x509-cert 0.3.0",
  "zeroize",
 ]
 
@@ -8638,8 +8611,8 @@ dependencies = [
  "base64 0.23.1",
  "cargo_metadata",
  "clap",
- "const-oid 0.9.6",
- "der 0.7.10",
+ "const-oid 0.10.2",
+ "der 0.8.1",
  "directories",
  "futures-util",
  "hex",
@@ -8673,8 +8646,8 @@ dependencies = [
  "uptrakit-zeroconf",
  "url",
  "uuid",
- "webpki-roots 1.0.9",
- "x509-cert",
+ "webpki-roots 1.0.11",
+ "x509-cert 0.3.0",
  "zeroize",
 ]
 
@@ -8728,7 +8701,7 @@ dependencies = [
  "url",
  "utoipa",
  "uuid",
- "webpki-roots 1.0.9",
+ "webpki-roots 1.0.11",
  "zeroize",
 ]
 
@@ -8810,8 +8783,8 @@ dependencies = [
  "backon",
  "base64 0.23.1",
  "client-ip",
- "const-oid 0.9.6",
- "der 0.7.10",
+ "const-oid 0.10.2",
+ "der 0.8.1",
  "futures-util",
  "hex",
  "hostname",
@@ -8834,7 +8807,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "spki 0.7.3",
+ "spki 0.8.0",
  "strum",
  "subtle",
  "thiserror 2.0.20",
@@ -8874,7 +8847,7 @@ dependencies = [
  "utoipa-axum",
  "utoipa-swagger-ui",
  "uuid",
- "x509-cert",
+ "x509-cert 0.3.0",
  "x509-ocsp",
  "zeroize",
 ]
@@ -9288,14 +9261,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.9",
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.9"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -9656,6 +9629,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "x509-cert"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "105ef4642d9cb137ef83d623d0e4bf08b8adf69e9918ca904a174adb6d3d038b"
+dependencies = [
+ "const-oid 0.10.2",
+ "der 0.8.1",
+ "spki 0.8.0",
+]
+
+[[package]]
 name = "x509-ocsp"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9664,7 +9648,7 @@ dependencies = [
  "const-oid 0.9.6",
  "der 0.7.10",
  "spki 0.7.3",
- "x509-cert",
+ "x509-cert 0.2.5",
 ]
 
 [[package]]
@@ -9791,9 +9775,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.9.0"
+version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
 dependencies = [
  "zeroize_derive",
 ]
